@@ -43,7 +43,7 @@ use uuid::Uuid;
 /// 这里刻意重写一遍而不是从生产代码导出常量：用例要能独立发现「那把锁换了名字」。
 const GATE_LOCK_NAME: &str = "linggan_media_processing_claim_gate";
 
-/// 造 `count` 段视频。每张经既有媒体链产生一条 `video_frame_ocr` 与一条 `thumbnail` 作业。
+/// 造 `count` 段视频。每张经既有媒体链产生 `thumbnail`、`audio_extract`、`asr` 作业；用例以上限为 1 的 `asr` 为对象。
 async fn seed_videos(database: &Database, count: usize) {
     for index in 0..count {
         let content_id = format!("note-concurrency-{index}");
@@ -86,8 +86,8 @@ async fn seed_runnable_videos(database: &Database, count: usize) {
         .expect("every job becomes runnable work");
 }
 
-fn video_frame_ocr() -> Vec<String> {
-    vec!["video_frame_ocr".to_owned()]
+fn asr_only() -> Vec<String> {
+    vec!["asr".to_owned()]
 }
 
 async fn leased_count(database: &Database, processor_kind: &str) -> i64 {
@@ -127,7 +127,7 @@ async fn claiming_waits_on_the_shared_gate_lock() {
 
     let claimer = tokio::spawn({
         let database = database.clone();
-        async move { claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr()).await }
+        async move { claim_media_processing_work(&database, Uuid::new_v4(), &asr_only()).await }
     });
 
     // 等「有人正等在这把锁上」出现。等的是条件，不是固定时长：认领不走锁时它永远不出现，
@@ -170,37 +170,37 @@ async fn a_full_processor_kind_issues_no_second_lease() {
     let database = proof_database("media_concurrency_ceiling").await;
     seed_runnable_videos(&database, 8).await;
 
-    let first = claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr())
+    let first = claim_media_processing_work(&database, Uuid::new_v4(), &asr_only())
         .await
         .expect("a claim attempt answers");
     assert!(
         matches!(first, MediaProcessingClaimOutcome::Claimed(_)),
         "空的时候应当领得到：{first:?}"
     );
-    assert_eq!(leased_count(&database, "video_frame_ocr").await, 1);
+    assert_eq!(leased_count(&database, "asr").await, 1);
 
     // 名额被别人占着时，后来者拿不到——不是排队，是这一次就没有。
-    let second = claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr())
+    let second = claim_media_processing_work(&database, Uuid::new_v4(), &asr_only())
         .await
         .expect("a claim attempt answers");
     assert!(
         matches!(second, MediaProcessingClaimOutcome::Idle),
-        "上限已满时不该发出第二条 video_frame_ocr 租约：{second:?}"
+        "上限已满时不该发出第二条 asr 租约：{second:?}"
     );
     assert_eq!(
-        leased_count(&database, "video_frame_ocr").await,
+        leased_count(&database, "asr").await,
         1,
-        "库里实际处于 leased 的 video_frame_ocr 只能有一条"
+        "库里实际处于 leased 的 asr 只能有一条"
     );
 
-    // 别的 processor_kind 名额独立，不受 video_frame_ocr 占满的影响。
+    // 别的 processor_kind 名额独立，不受 asr 占满的影响。
     let thumbnail =
         claim_media_processing_work(&database, Uuid::new_v4(), &["thumbnail".to_owned()])
             .await
             .expect("a claim attempt answers");
     assert!(
         matches!(thumbnail, MediaProcessingClaimOutcome::Claimed(_)),
-        "thumbnail 自己的名额是空的，不该被 video_frame_ocr 挡住：{thumbnail:?}"
+        "thumbnail 自己的名额是空的，不该被 asr 挡住：{thumbnail:?}"
     );
 }
 
@@ -217,7 +217,7 @@ async fn the_claim_gate_reports_what_it_cannot_claim() {
 
     // 登记齐了就不吭声。
     assert_eq!(
-        read_claim_gate_readiness(&database, &video_frame_ocr())
+        read_claim_gate_readiness(&database, &asr_only())
             .await
             .expect("the readiness is readable"),
         ClaimGateReadiness::Ready
@@ -226,12 +226,9 @@ async fn the_claim_gate_reports_what_it_cannot_claim() {
     // 启用了却没登记——「新增一种处理器、两边都忘了改」当场的样子。要点名报出来，
     // 而不是笼统地说「有问题」。
     assert_eq!(
-        read_claim_gate_readiness(
-            &database,
-            &["video_frame_ocr".to_owned(), "future_kind".to_owned()]
-        )
-        .await
-        .expect("the readiness is readable"),
+        read_claim_gate_readiness(&database, &["asr".to_owned(), "future_kind".to_owned()])
+            .await
+            .expect("the readiness is readable"),
         ClaimGateReadiness::Unregistered(vec!["future_kind".to_owned()])
     );
 
@@ -242,7 +239,7 @@ async fn the_claim_gate_reports_what_it_cannot_claim() {
         .await
         .expect("the policy table can be withdrawn in this isolated schema");
     assert_eq!(
-        read_claim_gate_readiness(&database, &video_frame_ocr())
+        read_claim_gate_readiness(&database, &asr_only())
             .await
             .expect("the readiness is readable"),
         ClaimGateReadiness::NotMigrated
@@ -261,7 +258,7 @@ async fn an_unregistered_processor_kind_is_never_claimable() {
     seed_runnable_videos(&database, 3).await;
 
     // 前提：登记着的时候领得到。否则下面那条断言会因为别的原因变绿。
-    let before = claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr())
+    let before = claim_media_processing_work(&database, Uuid::new_v4(), &asr_only())
         .await
         .expect("a claim attempt answers");
     assert!(
@@ -269,12 +266,10 @@ async fn an_unregistered_processor_kind_is_never_claimable() {
         "登记着的时候应当领得到：{before:?}"
     );
 
-    sqlx::query(
-        "DELETE FROM linggan_media_processing_concurrency WHERE processor_kind='video_frame_ocr'",
-    )
-    .execute(database.pool())
-    .await
-    .expect("the policy row can be withdrawn");
+    sqlx::query("DELETE FROM linggan_media_processing_concurrency WHERE processor_kind='asr'")
+        .execute(database.pool())
+        .await
+        .expect("the policy row can be withdrawn");
     // 把刚领走的那条还回去，否则「领不到」可能只是因为它已经在别人手里。
     sqlx::query(
         "UPDATE linggan_media_processing_work SET state='pending',worker_instance_ref=NULL, \
@@ -284,7 +279,7 @@ async fn an_unregistered_processor_kind_is_never_claimable() {
     .await
     .expect("the lease is returned");
 
-    let after = claim_media_processing_work(&database, Uuid::new_v4(), &video_frame_ocr())
+    let after = claim_media_processing_work(&database, Uuid::new_v4(), &asr_only())
         .await
         .expect("a claim attempt answers");
     assert!(
@@ -318,7 +313,7 @@ async fn every_processor_kind_the_schema_allows_is_registered_for_concurrency() 
         .map(str::to_owned)
         .collect::<Vec<_>>();
     assert!(
-        allowed.contains(&"video_frame_ocr".to_owned()),
+        allowed.contains(&"asr".to_owned()),
         "约束解析失败，取不到已知取值：{definition}"
     );
 
@@ -348,7 +343,7 @@ async fn every_processor_kind_the_schema_allows_is_registered_for_concurrency() 
 async fn bounded_batch_does_not_claim_or_recover_other_jobs() {
     let db = proof_database("media_bounded_batch").await;
     seed_runnable_videos(&db, 3).await;
-    let jobs: Vec<Uuid> = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE processor_kind='video_frame_ocr' ORDER BY created_at,job_ref")
+    let jobs: Vec<Uuid> = sqlx::query_scalar("SELECT job_ref FROM linggan_media_processing_job WHERE processor_kind='asr' ORDER BY created_at,job_ref")
         .fetch_all(db.pool()).await.unwrap();
     // An unrelated expired lease must remain untouched, even when the batch recovers its own.
     sqlx::query("UPDATE linggan_media_processing_work SET state='leased',attempt_count=1,claim_generation=1,worker_instance_ref=$2,lease_expires_at=scope_001_now()-interval '1 minute' WHERE job_ref=$1")
@@ -362,14 +357,9 @@ async fn bounded_batch_does_not_claim_or_recover_other_jobs() {
     .unwrap();
     // The concurrency gate still applies; no unrelated lease is expired to make room.
     assert!(matches!(
-        linggan_evidence::claim_media_processing_jobs(
-            &db,
-            Uuid::new_v4(),
-            &video_frame_ocr(),
-            &[jobs[2]]
-        )
-        .await
-        .unwrap(),
+        linggan_evidence::claim_media_processing_jobs(&db, Uuid::new_v4(), &asr_only(), &[jobs[2]])
+            .await
+            .unwrap(),
         MediaProcessingClaimOutcome::Idle
     ));
     let after: String = sqlx::query_scalar(
@@ -383,20 +373,15 @@ async fn bounded_batch_does_not_claim_or_recover_other_jobs() {
     sqlx::query("UPDATE linggan_media_processing_work SET state='pending',worker_instance_ref=NULL,lease_expires_at=NULL WHERE job_ref=$1")
         .bind(jobs[0]).execute(db.pool()).await.unwrap();
     let MediaProcessingClaimOutcome::Claimed(claim) =
-        linggan_evidence::claim_media_processing_jobs(
-            &db,
-            Uuid::new_v4(),
-            &video_frame_ocr(),
-            &[jobs[2]],
-        )
-        .await
-        .unwrap()
+        linggan_evidence::claim_media_processing_jobs(&db, Uuid::new_v4(), &asr_only(), &[jobs[2]])
+            .await
+            .unwrap()
     else {
         panic!("named job should be claimable")
     };
     assert_eq!(claim.job_ref, jobs[2]);
     assert!(matches!(
-        linggan_evidence::claim_media_processing_jobs(&db, Uuid::new_v4(), &video_frame_ocr(), &[])
+        linggan_evidence::claim_media_processing_jobs(&db, Uuid::new_v4(), &asr_only(), &[])
             .await
             .unwrap(),
         MediaProcessingClaimOutcome::Idle

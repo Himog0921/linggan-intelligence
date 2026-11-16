@@ -39,7 +39,7 @@ export interface MediaObject extends ViewerObject {
   mime: string;
 }
 
-const TEXT_KINDS = new Set(['ocr_text', 'frame_ocr_text', 'asr_text']);
+const TEXT_KINDS = new Set(['ocr_text', 'asr_text']);
 
 interface DerivedFacts {
   state: string | null;

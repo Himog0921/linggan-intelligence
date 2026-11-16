@@ -43,6 +43,7 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_model_entry",
     "linggan_model_invocation",
     "linggan_opportunity_card_change",
+    "linggan_opportunity_card_period_index",
     "linggan_opportunity_card_source_guard",
     "linggan_opportunity_card_voice_ref",
     "linggan_opportunity_comment_mention",
@@ -63,11 +64,33 @@ const SOURCE_TABLES: &[&str] = &[
     "observation_domain_target",
 ];
 
+/// Evidence reads never inspect model invocations; keep their writers out of the lock set.
+pub(super) fn evidence_read_tables() -> Vec<&'static str> {
+    SOURCE_TABLES
+        .iter()
+        .copied()
+        .filter(|table| {
+            !matches!(
+                *table,
+                "linggan_model_invocation" | "linggan_opportunity_card_period_index"
+            )
+        })
+        .collect()
+}
+
 /// Capture the wall clock while all known card sources are locked. Rolling
 /// back only this savepoint releases the locks but preserves the outer RR
 /// snapshot, so the subsequent card calculation uses that same view.
 pub(super) async fn capture(
     tx: &mut Transaction<'_, Postgres>,
+) -> Result<(String, bool), CardError> {
+    capture_for(tx, SOURCE_TABLES).await
+}
+
+/// Apply the same snapshot signing rule to a narrower, explicitly audited reader.
+pub(super) async fn capture_for(
+    tx: &mut Transaction<'_, Postgres>,
+    tables: &[&str],
 ) -> Result<(String, bool), CardError> {
     sqlx::query("SAVEPOINT opportunity_card_capture")
         .execute(&mut **tx)
@@ -79,10 +102,7 @@ pub(super) async fn capture(
     ] {
         sqlx::query(setting).execute(&mut **tx).await?;
     }
-    let statement = format!(
-        "LOCK TABLE {} IN SHARE MODE NOWAIT",
-        SOURCE_TABLES.join(",")
-    );
+    let statement = format!("LOCK TABLE {} IN SHARE MODE NOWAIT", tables.join(","));
     if let Err(error) = sqlx::query(AssertSqlSafe(statement))
         .execute(&mut **tx)
         .await
@@ -130,6 +150,13 @@ pub(super) async fn require_visible_restrictions(
 /// Verify relations actually used by the completed calculation before commit.
 /// Current card code does not retain results from rolled-back subtransactions.
 pub(super) async fn verify(tx: &mut Transaction<'_, Postgres>) -> Result<(), CardError> {
+    verify_for(tx, SOURCE_TABLES).await
+}
+
+pub(super) async fn verify_for(
+    tx: &mut Transaction<'_, Postgres>,
+    tables: &[&str],
+) -> Result<(), CardError> {
     sqlx::query("SET CONSTRAINTS ALL IMMEDIATE")
         .execute(&mut **tx)
         .await?;
@@ -143,7 +170,7 @@ pub(super) async fn verify(tx: &mut Transaction<'_, Postgres>) -> Result<(), Car
            AND (namespace.nspname<>current_schema() OR NOT relation.relname::text=ANY($1::text[])) \
          ORDER BY 1",
     )
-    .bind(SOURCE_TABLES)
+    .bind(tables)
     .fetch_all(&mut **tx).await?;
     if missing.is_empty() {
         Ok(())

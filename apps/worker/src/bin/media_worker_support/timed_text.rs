@@ -1,5 +1,4 @@
-//! Preserve producer-reported times. Sampling is a coverage limitation, not an
-//! invented frame interval, and a model transcript without timings is rejected.
+//! Preserve producer-reported times; a model transcript without timings is rejected.
 use serde_json::{Value, json};
 
 pub fn asr_blocks(raw: &str) -> Result<Vec<Value>, String> {
@@ -32,30 +31,6 @@ pub fn asr_blocks(raw: &str) -> Result<Vec<Value>, String> {
     Ok(blocks)
 }
 
-pub fn sampled_pts(stderr: &[u8]) -> Result<Vec<u64>, String> {
-    let mut times = vec![];
-    for line in String::from_utf8_lossy(stderr)
-        .lines()
-        .filter(|l| l.contains("showinfo") && l.contains("pts_time:"))
-    {
-        let seconds = line
-            .split("pts_time:")
-            .nth(1)
-            .and_then(|v| v.split_whitespace().next())
-            .and_then(|v| v.parse::<f64>().ok())
-            .filter(|v| v.is_finite() && *v >= 0.)
-            .ok_or("frame_pts_invalid")?;
-        if seconds * 1000. > u64::MAX as f64 {
-            return Err("frame_pts_invalid".into());
-        }
-        times.push((seconds * 1000.).round() as u64);
-    }
-    if times.windows(2).any(|w| w[1] < w[0]) {
-        return Err("frame_pts_out_of_order".into());
-    }
-    Ok(times)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,21 +41,5 @@ mod tests {
         assert_eq!(blocks[0]["time"], json!({"startMs":1250,"endMs":3820}));
         assert_eq!(blocks[1]["text"], "仍需检查。");
         assert!(asr_blocks(r#"{"text":"无时序正文","segments":[]}"#).is_err());
-    }
-    #[test]
-    fn reads_actual_pts_without_first_twelve_cutoff() {
-        let raw = (0..31)
-            .map(|i| {
-                format!(
-                    "[Parsed_showinfo] n:{i} pts:{} pts_time:{} pos:1",
-                    i * 1200,
-                    i as f64 * 11.6
-                )
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
-        let points = sampled_pts(raw.as_bytes()).unwrap();
-        assert_eq!(points.len(), 31);
-        assert_eq!(points[30], 348000);
     }
 }

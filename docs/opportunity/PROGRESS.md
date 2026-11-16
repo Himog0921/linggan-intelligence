@@ -430,3 +430,34 @@
 - 从与运行版本同树的发布源运行 `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo build -p linggan-worker --bin linggan-opportunity --locked`，输出 `Finished dev profile`，有 6 条编译警告。在本机库执行 `sync-comment-mentions` 两次，均返回 `sourceMemberships=0`、`inserted=0`、`updated=0`；对已有 ADHD 领域执行 `rebuild-cards --domain 00000000-0000-4000-8000-000000000001 --full`，输出 `cardsBuilt=0`、`changesDeferred=0`。`check-invariants` 输出 `totalViolations=0`、`incomplete=true`；I4、I5、I10 不可用。
 - 实际浏览器打开 ADHD 评论研究：用户评论列表显示 18724 条，评论详情及所属作品区域可打开；用户问题页显示 `尚无通过归并核验且来源可读的问题`。同领域 `platform-time-report --tz Asia/Shanghai --periods 12` 对实际来源返回 6189 条合格评论、6188 条有平台时间，`timingViolations=0`；统计窗口和资格不同，不与页面总数直接对比。
 - 本机当前研究问题定义、评论归属及机会卡均为 0。T1.5 接口和 T1.6／T1.7 页面尚未实现，故无法验收有内容的机会卡及完整页面业务链；不得把空重建和现有评论页称为机会卡业务验收。复核模型调用记录总数为 192，运行中及排队 AI 项为 0；未主动发起真实采集或模型外发，生产环境未迁移。
+
+## 2026-11-15 T1.5 只读接口工作包
+
+- 负责人确认合并 PR #591，并授权继续实施 T1.5；先一次完成接口代码和必要开发自检，独立 review 与测试审查留待后续。执行者 Codex，基线 `d0f2fbc90ad184470ac60880198e1a8b632f10a3`，分支 `codex/opportunity-t15-read-api`，worktree `.worktrees/opportunity-t15-read-api`。
+- 范围为状态、机会列表、卡片和依据只读接口及其现有资格、血缘、开关和分页接线；不新增第二套问题身份、采集或模型逻辑。真实采集、模型外发、生产写入、本机运行库及生产环境迁移和部署均不在本次授权内。
+- 实现：状态、机会列表、卡片和评论／作品／作者依据四个只读入口；开关关闭时状态接口仍返回 200，其余入口返回 `opportunity_card_disabled`。列表支持 `period=YYYY-MM-DD`、等级和供给状态筛选；依据保留协议分组信息，作品依据标为 `comment_mention`，不将其解释成已判断的供给。旧问题合并 ID 返回当前 ID 与 `redirectedFrom`。显式历史 `asOf` 返回 `opportunity_as_of_not_supported`，符合阶段 4 前约定。
+- 来源与分页：复用卡片现有评论资格、当前来源限制、读取快照和问题血缘；读取卡片前按 §6.7 结构严格解码，拒绝多余字段。分页游标绑定查询和结果版本，结果变化时返回 `opportunity_page_changed`；游标签名只在进程内有效，服务重启后需从第一页重新读取。作品与评论依据读取目前先计算完整合格集合再分页，大数据量延迟和资源成本尚未实测，后续测试审查应覆盖。
+- 定向验证（隔离合成数据；未接本机运行库）：
+  - `bash /private/tmp/opportunity-t15-smoke.sh` → HTTP 快照／分页用例 `1 passed`，卡片来源／三类依据／筛选／跳转／撤回用例 `1 passed`，`T1.5 isolated HTTP and card proof passed`；专用容器和卷已删除。脚本实际执行的用例为 `cargo test -p linggan-api --locked -- --ignored --exact local_web::opportunity_api::tests::enabled_routes_return_cards_and_guard_changed_pages --test-threads=1` 和 `cargo test -p linggan-intelligence --test opportunity_metrics_postgres --locked -- --ignored --exact card::read_endpoints_share_card_sources_and_fail_closed_after_change --test-threads=1`。HTTP 用例已接入 `scripts/test-opportunity-postgres.sh`。
+  - `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-api --locked opportunity_api::tests -- --test-threads=1` → `3 passed; 0 failed; 1 ignored`；忽略的 PostgreSQL 用例已在上一条单独运行。
+  - `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-intelligence --lib --locked opportunity::card::read_model::tests -- --test-threads=1` → `1 passed; 0 failed`，覆盖 P1 快照往返与额外身份字段拒绝。
+  - `bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`，`Preflight passed; required module proofs and independent review remain separate.`
+  - `rustfmt --edition 2024 --config skip_children=true --check apps/api/src/local_web.rs apps/api/src/local_web/opportunity_api.rs crates/intelligence/src/comment_study_catalog/cursor.rs crates/intelligence/src/opportunity.rs crates/intelligence/src/opportunity/card.rs crates/intelligence/src/opportunity/card/snapshot.rs crates/intelligence/src/opportunity/card/voices.rs crates/intelligence/src/opportunity/card/read.rs crates/intelligence/src/opportunity/card/read_model.rs crates/intelligence/tests/opportunity_metrics_postgres/card.rs` → exit 0；`bash -n scripts/test-opportunity-postgres.sh` → exit 0。
+- 状态：代码实现和必要开发自检完成；独立 review、完整测试审查、远端 CI、合并、部署及真实页面／业务验收待后续。未执行本机运行库或生产环境迁移，未发起真实采集或模型外发。
+
+## 2026-11-15 T1.5 审查修复工作包
+
+- 负责人授权修复 PR #592 已报告的 P1 周期漏卡和 P2 分页性能、无关锁竞争、历史筛选解释问题；新发现只报告。执行者 Codex，现有工作树 `.worktrees/opportunity-t15-read-api`，分支 `codex/opportunity-t15-read-api`，起点 `78d0fb9560e9350b2968860236d3ae51cd27676e`。
+- 严格时点、撤回限制、同一评论来源资格和协议组内指标不变；先补隔离回归，再完成修复、独立 review 和最终提交的远端 CI。本地运行库、生产迁移、真实采集和模型外发不在授权内。
+- 修复：新增前向迁移 `0223_opportunity_card_period_index`，新建机会卡索引表，把当前指标表的周期、协议和等级作为卡片的同事务索引，列表按该索引筛选并以 `periodMatches` 说明命中组。索引与卡片 payload 共用指纹；旧程序更新卡片但未更新索引，或旧卡尚未重建时，周期筛选明确返回 `opportunity_period_snapshot_unavailable`。旧卡迁移后保留并排队重建；若旧版执行器消费队列但未写索引，新执行器会重新发现并排队。未重建前不伪造历史等级。
+- 独立复审指出首版候选 0222 对已有表执行 `ALTER`，违反 D-005；该候选只曾在已销毁的隔离测试库执行，未进入任何运行库。现从迁移清单移除该候选，以新的 0223 创建机会卡自有表，不修改既有表；旧候选仍可从提交历史审计。
+- 复审另指出旧执行器可能在新版启动追平后消费重建队列。自动执行器现于请求或指标周期到期时复用卡片重建的失配检测，重新排队后按原有防抖处理；独立审查已定点核对该调度与重建调用链，未独立运行测试。
+- 依据分页复用现有资格与来源分类，按批扫描候选计算跨页指纹，仅对当前页调用完整来源／上下文读取；作者依据及周期列表只锁自身读取的卡片来源，评论／作品依据排除无关的模型调用表，同时保留运行时来源覆盖审计和撤回限制。
+- 隔离回归：`bash /private/tmp/opportunity-t15-fix-red.sh` 在修复前输出 `period_filter` 的 `0 passed; 2 failed` 和作者锁用例的 `0 passed; 1 failed`；`bash /private/tmp/opportunity-t15-fix-smoke.sh` 重跑共 `11 passed; 0 failed`，覆盖增量重算、历史等级、未知／已知协议、旧卡升级与旧执行器消费队列后的恢复、锁、分页、标准卡片快照、自动调度与 HTTP API，专用容器和卷已清理。
+- `bash /private/tmp/opportunity-t15-cross-smoke.sh` → 评论研究共享读取 `11 passed; 0 failed`；`bash scripts/test-local-runtime-schema.sh` → `Fresh and repeat runtime schema migration passed; retired tables absent.` 两者均使用专用合成 PostgreSQL 容器，容器和卷已清理。
+- `bash /private/tmp/opportunity-t15-perf-review-2c6u45a4/run.sh` → 同样的本机调试构建、单次合成样本，读取 1 条、997 条候选从审查时 7580 ms 降到 969 ms；19／98／498 条分别为 683／719／835 ms。候选摘要仍需全量扫描以校验跨页一致性，数字不是生产 SLA。
+- `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo check -p linggan-api --locked` → `Finished dev profile`，exit 0；`bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`；按用户要求仅对本次修改的 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`，exit 0。
+- 末轮标准卡片测试首次遇到 `SourcesBusy`，按短锁规则重跑后 `1 passed; 0 failed`；真实调度入口的失配发现及到期选域专项 `1 passed; 0 failed`。
+- 远端 Delivery `43813837722` 的机会卡 PostgreSQL 用例 `shadow_versions_avoid_existing_numbers_and_follow_current_changes` 失败：该历史升级测试主动移除 0217 卡片表，但新迁移 0223 依赖该表。测试装配已同步排除 0223，业务迁移与指标规则不变；`bash /private/tmp/opportunity-t15-shadow-compat-proof.sh` 隔离重跑 `1 passed; 0 failed`，专用容器和卷已清理。最终 CI 以最终 head 为准。
+- `cargo clippy -p linggan-intelligence --lib --locked --no-deps` → exit 101，48 项既有 `too_many_lines` 错误，位置均不在本次修改的函数；本次新增长函数已拆分。追加 `-- -A clippy::too_many_lines` 后 exit 0、42 条警告；不将此结果称为严格 Clippy 通过，既有问题未修改。
+- 新迁移只在隔离测试中执行；未迁移或部署本机运行库与生产环境，未进行真实采集或模型外发。独立 review 和远端 CI 须针对 PR #592 的最终 head 核实，不沿用旧 head 的通过记录。

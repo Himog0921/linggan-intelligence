@@ -234,7 +234,7 @@ Mog 在本地工程收尾后要求“继续下一步”，本次按已说明范�
 
 L1 候选已本地提交为 `c544f14d9b4e9987ba1eb28c77e8dff92d67e01b`。Mog 随后要求“继续按实施手册推进，先不要推送或上线”；本轮只补已有视频测试与隔离运行器，不改生产处理器、模型配置、迁移或页面。完整 L0 尚无明确的相关性／材料质量判据，现有领域使用资格和最低可读材料检查不能替代 L0，因此未自行新增阈值或模型任务。
 
-显式运行 `bash scripts/test-ocr-recognition-postgres.sh --video-local-chain`，使用缓存模型、全合成素材及自有临时 PostgreSQL；不会落入默认静态图片 OCR 测试。提供 12 秒有声两画面视频与 2 秒无音轨空白视频，现有 `linggan-media-worker --jobs-file` 真正执行 ffprobe、Whisper medium、ffmpeg 抽帧与 PaddleOCR，而非预写识读结果。
+（历史记录；该入口已随 [DEC-0013](../../decisions/0013-retire-video-frame-text.md) 删除）显式运行 `bash scripts/test-ocr-recognition-postgres.sh --video-local-chain`，使用缓存模型、全合成素材及自有临时 PostgreSQL；不会落入默认静态图片 OCR 测试。提供 12 秒有声两画面视频与 2 秒无音轨空白视频，现有 `linggan-media-worker --jobs-file` 真正执行 ffprobe、Whisper medium、ffmpeg 抽帧与 PaddleOCR，而非预写识读结果。
 
 | 检查 | 实测结果 |
 | --- | --- |

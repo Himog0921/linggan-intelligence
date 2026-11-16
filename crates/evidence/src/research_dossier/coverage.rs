@@ -16,7 +16,7 @@ pub(super) fn project(materials: &[Value], expected: Option<u64>) -> Value {
     json!({"imageInventory":{"basis":if expected.is_some(){"platform_image_list"}else{"observed_set"},"expectedPages":expected,
         "acquiredPages":acquired,"processedPages":processed,"missingPages":[],
         "unknownOrder":false},
-        "sources":{"body":source(materials,"body"),"images":source(materials,"image"),"audio":source(materials,"audio"),"videoFrames":source(materials,"video_frame")},
+        "sources":{"body":source(materials,"body"),"images":source(materials,"image"),"audio":source(materials,"audio")},
         "issues":[]})
 }
 

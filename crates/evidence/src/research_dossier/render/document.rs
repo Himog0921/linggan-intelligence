@@ -104,7 +104,6 @@ fn section_label(kind: &str) -> &str {
         "publication" | "body" => "发布文案",
         "images" | "image" => "图片资料",
         "audio" => "视频口播",
-        "frames" | "videoFrames" | "video_frame" => "画面文字",
         _ => "内容",
     }
 }

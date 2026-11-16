@@ -22,7 +22,7 @@ function saved() {
   } };
 }
 const ready = { state: 'ready', kind: 'image_text', gaps: [], scopeNote: null };
-const videoScope = '本次依据口播与已提取的画面文字，未覆盖整段视频的全部画面。';
+const videoScope = '本次依据口播，不包含视频画面内容。';
 function response(analysis: unknown, selected = work, materialReadiness: unknown = ready) {
   return new Response(JSON.stringify({ contract: 'content-understanding.read.v1', workRef: selected, analysis, materialReadiness }), { headers: { 'Content-Type': 'application/json' } });
 }
@@ -133,13 +133,13 @@ it('视频材料准备中显示口播与画面处理原因，不假装缺失或�
   vi.stubGlobal('fetch', vi.fn(async () => response(null, work, {
     state: 'preparing', kind: 'video', scopeNote: videoScope, gaps: [
       { code: 'asr_pending', state: 'preparing', message: '口播转写正在处理。', slotKey: 'video' },
-      { code: 'frames_pending', state: 'preparing', message: '画面文字正在提取。', slotKey: 'video' },
+      { code: 'audio_not_ready', state: 'preparing', message: '正在处理口播。', slotKey: 'video' },
     ],
   })));
   mount();
   expect(await screen.findByText('材料准备中')).toBeVisible();
   expect(screen.getByText('口播转写正在处理。')).toBeVisible();
-  expect(screen.getByText('画面文字正在提取。')).toBeVisible();
+  expect(screen.getByText('正在处理口播。')).toBeVisible();
   expect(screen.queryByText(videoScope)).not.toBeInTheDocument();
   expect(screen.queryByText('来自同一张卡片的整篇摘要。')).not.toBeInTheDocument();
 });

@@ -3,7 +3,7 @@ import { normalizedTagLabel, pureTagLabels } from './dossierTagText';
 import { confirmedEmptySpeech } from './dossierPresent';
 import { hasReadingSourceText } from './dossierReadingContent';
 
-export const SECTION_LABELS: Record<ReadingSectionKind, string> = { publication: '发布文案', images: '图片资料', audio: '视频口播', frames: '画面文字节选' };
+export const SECTION_LABELS: Record<ReadingSectionKind, string> = { publication: '发布文案', images: '图片资料', audio: '视频口播' };
 export interface ReadingEntry { unit: DossierMaterial; block: DossierBlock }
 export interface ReadingIssue extends DossierIssue { displayKey: string }
 export interface ResolvedReadingGroup { group: ReadingGroup; entries: ReadingEntry[]; issues: ReadingIssue[] }
@@ -77,8 +77,8 @@ export function readingAnchor(prefix: string, ref: string): string { return `${p
 /** One concise row per relevant missing content type. Processing diagnostics stay in source detail. */
 export function readingGaps(dossier: Dossier): ReadingGap[] {
   const rows: ReadingGap[] = [];
-  const kinds = { body: '发布文案', images: '图片文字', audio: '视频口播', videoFrames: '画面文字' } as const;
-  const materialKinds = { body: 'body', images: 'image', audio: 'audio', videoFrames: 'video_frame' } as const;
+  const kinds = { body: '发布文案', images: '图片文字', audio: '视频口播' } as const;
+  const materialKinds = { body: 'body', images: 'image', audio: 'audio' } as const;
   const messages: Record<string, { state: string; message: string }> = {
     not_acquired: { state: '尚未取得', message: '来源尚未取得。' },
     not_processed: { state: '待识读', message: '尚无可用文字。' },
@@ -89,8 +89,6 @@ export function readingGaps(dossier: Dossier): ReadingGap[] {
     const source = dossier.coverage.sources[key];
     const units = dossier.materials.filter(unit => unit.kind === materialKinds[key]);
     if (source.units === 0 && units.length === 0) continue;
-    // Frame sampling is optional enrichment, not a missing video transcript.
-    if (key === 'videoFrames' && units.every(unit => !unit.currentRevisionRef && !unit.processing)) continue;
     const incomplete = units.filter(unit => !unit.blocks.some(hasReadingSourceText) && !confirmedEmptySpeech(unit)
       && !['not_applicable', 'known_empty', 'restricted', 'not_acquired'].includes(unit.sourceState));
     if (key === 'images' && units.some(unit => unit.issues.some(issue => issue.code === 'online_image_pending'))) {

@@ -119,7 +119,6 @@ pub(crate) async fn enrich_batch(
                 "comment_body" => "comment_body",
                 "ocr_text" => "ocr_text",
                 "asr_text" => "asr_text",
-                "frame_ocr_text" => "frame_ocr_text",
                 _ => continue,
             };
             if !item.matched_fields.contains(&field) {

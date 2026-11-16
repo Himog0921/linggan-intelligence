@@ -38,4 +38,3 @@ jobs:
           cargo test -p linggan-worker --bin linggan-media-worker --locked
           bash scripts/test-ocr-recognition-postgres.sh --purge-only
           bash scripts/test-ocr-recognition-postgres.sh --reading-only
-          bash scripts/test-ocr-recognition-postgres.sh --local-only

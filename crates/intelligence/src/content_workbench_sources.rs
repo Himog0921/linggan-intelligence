@@ -281,7 +281,6 @@ fn fragment_kind(field: &str) -> Option<(SourceKind, SourceField)> {
         "tags" => (SourceKind::Note, SourceField::Tags),
         "ocr" => (SourceKind::Ocr, SourceField::Ocr),
         "transcript" => (SourceKind::Transcript, SourceField::Transcript),
-        "frame_text" => (SourceKind::FrameText, SourceField::FrameText),
         _ => return None,
     })
 }

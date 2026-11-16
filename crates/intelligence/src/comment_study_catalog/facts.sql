@@ -63,7 +63,8 @@ WITH observations AS MATERIALIZED (
     SELECT DISTINCT content_public_ref, comment_external_id FROM history
     WHERE state IN ('pending','running')
 ), facts AS MATERIALIZED (
-    SELECT latest.*, cache.source_ref AS cached_source_ref, cache.clean_state,
+    SELECT latest.*, author.author_external_id AS work_author_external_id,
+           cache.source_ref AS cached_source_ref, cache.clean_state,
            cache.research_text, cache.clean_reasons,
            raw.body_text IS NOT NULL AS has_body,
            -- Research usage rows decide the role; a work that only has creator-context

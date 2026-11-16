@@ -58,7 +58,7 @@ pub fn response_schema() -> Value {
         "仅使用本字段的 enum。整篇在讲什么或作者发布的目的用 discussion，例如作者推介一套学习资料。具体提供的方法、解释、信息和案例用 provision，例如资料附练习答案。作者主张不等于作者立场。明确立场用 author_position，受众与处境用 audience_context。assertionKind 独立填写。整篇主议题由作者主张时，unitType 填 discussion，assertionKind 填 author_claim，在陈述中注明归因。"
     );
     core_fields["knowledgeUnits"]["items"]["properties"]["evidenceRefs"]["description"] = json!(
-        "这里仅填证据条目 ID（例如 ev1），不能填材料编号（例如 s1、image_1）。引用直接支撑本单元的细节。书名用《…》。逐字引语标为原话「…」或原文「…」，画面原文「…」引用视频画面文字，口播原话「…」引用口播。静态图片的识读引句用图片原文「…」。主题与术语可用普通引号。书名及逐字引语应逐字出现在本单元引用的原文或逐图识读引句中。已提供对应画面文字时引用可定位的文字，不用画面概述替代。由画面文字支持的关键细节，使用该文字所在 frame_text 的 citationId 建立文字依据；细节来自不同画面时，各引对应片段。同一细节重复出现时选一个能支撑它的片段。口播细节引用 transcript；整体标题或画面标题不能单独支撑更具体的内容。每个关键数字、否定、条件和先后顺序都要由所列依据支持。"
+        "这里仅填证据条目 ID（例如 ev1），不能填材料编号（例如 s1、image_1）。引用直接支撑本单元的细节。书名用《…》。逐字引语标为原话「…」或原文「…」，口播原话「…」引用口播。图片或画面中识读的引句用图片原文「…」。主题与术语可用普通引号。书名及逐字引语应逐字出现在本单元引用的原文或逐图识读引句中。同一细节重复出现时选一个能支撑它的片段。口播细节引用 transcript；整体标题或画面标题不能单独支撑更具体的内容。每个关键数字、否定、条件和先后顺序都要由所列依据支持。"
     );
     core_fields["candidateLabels"]["description"] = json!(
         "每条候选标签必须同时填写 dimension、label、retrievalUse、unitIds。dimension 只能从本字段的 enum 选择；author_position 是知识单元类型，不能作为标签维度。没有合适维度时省略该候选标签，知识单元仍保留。unitIds 关联 knowledgeUnits 中实际存在的单元 ID，不能遗漏或为空。示例仅演示完整结构，使用本篇实际标签与 ID。"
@@ -72,7 +72,7 @@ pub fn response_schema() -> Value {
     let text = &card["evidence"]["items"]["oneOf"][0]["properties"];
     let mut text_fields = fields(text, &["id", "inputCitationId", "quote"]);
     text_fields["quote"]["description"] = json!(
-        "从对应 inputCitationId 的 text 中逐字复制一段连续且唯一出现的原文。保留大小写、空格、换行和标点，不改写、拼接或补字。口播转写中人名分写也按原文复制，例如「Li Lei」不能合写为「LiLei」。原文截断或引号不成对时，可选足以支持结论的内部连续短语。输出前核对 quote 在该 text 中逐字匹配且只出现一次。概括写在 statement。已有编号的 frame_text 属于原文文字；本次直接从图片识读的文字使用 vision。"
+        "从对应 inputCitationId 的 text 中逐字复制一段连续且唯一出现的原文。保留大小写、空格、换行和标点，不改写、拼接或补字。口播转写中人名分写也按原文复制，例如「Li Lei」不能合写为「LiLei」。原文截断或引号不成对时，可选足以支持结论的内部连续短语。输出前核对 quote 在该 text 中逐字匹配且只出现一次。概括写在 statement。本次直接从图片识读的文字使用 vision。"
     );
     text_fields["inputCitationId"]["pattern"] = json!("^s[1-9][0-9]*$");
     text_fields["inputCitationId"]["description"] =

@@ -391,10 +391,10 @@ export function dossierMaterialJson(n: number, overrides: Record<string, unknown
 export interface DossierOptions { bodyText?: string; materials?: unknown[]; coverage?: Record<string, unknown>; note?: Record<string, unknown>; readingView?: { mainBlockRefs: string[]; supplementBlockRefs: string[]; sections?: ReadingSection[] } }
 /** Synthetic transport fixtures only; production ordering belongs to the Rust reading owner. */
 function fixtureReadingSections(materials: { kind: string; blocks: { ref: string; kind?: string }[] }[], refs: string[], work: string): ReadingSection[] {
-  const mapping: Record<string, ReadingSectionKind> = { body: 'publication', tags: 'publication', image: 'images', audio: 'audio', video_frame: 'frames' };
+  const mapping: Record<string, ReadingSectionKind> = { body: 'publication', tags: 'publication', image: 'images', audio: 'audio' };
   const entries = new Map(materials.flatMap(unit => unit.blocks.map(block => [block.ref, { unit, block }] as const)));
   const sections: ReadingSection[] = [];
-  const kindOrder: ReadingSectionKind[] = ['publication', 'images', 'audio', 'frames'];
+  const kindOrder: ReadingSectionKind[] = ['publication', 'images', 'audio'];
   const sorted = [...refs].sort((a, b) => kindOrder.indexOf(mapping[entries.get(a)?.unit.kind ?? ''] ?? 'publication') - kindOrder.indexOf(mapping[entries.get(b)?.unit.kind ?? ''] ?? 'publication'));
   for (const ref of sorted) {
     const entry = entries.get(ref);
@@ -423,7 +423,7 @@ export function dossierJson(n: number, options: DossierOptions = {}) {
       ],
       readingView: { mainBlockRefs: [] as string[], supplementBlockRefs: [] as string[], sections: [] as ReadingSection[] },
       coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 2, acquiredPages: 1, processedPages: 1, missingPages: [2], unknownOrder: false },
-        sources: { body: { state: 'available', units: 1, readings: 1 }, images: { state: 'partial', units: 2, readings: 1 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } }, issues: [], ...options.coverage },
+        sources: { body: { state: 'available', units: 1, readings: 1 }, images: { state: 'partial', units: 2, readings: 1 }, audio: { state: 'not_applicable', units: 0, readings: 0 } }, issues: [], ...options.coverage },
       attachments: { comments: { href: `${base}/comments` }, author: { href: `${base}/metadata?sections=author` }, interaction: { href: `${base}/metadata?sections=interaction` } },
       selection: { mode: 'full', kinds: [], unitRefs: [], blockRefs: [], imagePages: [], omittedUnits: 0, completeRevision: REVISION },
     },

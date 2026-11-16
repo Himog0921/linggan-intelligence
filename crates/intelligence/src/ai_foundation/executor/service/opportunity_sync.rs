@@ -2,9 +2,9 @@
 //! A failed projection is retried by the existing automation tick and cannot roll back publication.
 
 use crate::opportunity::{
-    CardRebuildMode, CommenterDigest, RebuildMode, current_as_of, enqueue_source_events,
-    load_current_metric_definition, rebuild_opportunity_cards, rebuild_problem_metrics,
-    sync_comment_mentions_for_domain,
+    CardRebuildMode, CommenterDigest, RebuildMode, current_as_of, enqueue_period_index_repairs,
+    enqueue_source_events, load_current_metric_definition, rebuild_opportunity_cards,
+    rebuild_problem_metrics, sync_comment_mentions_for_domain,
 };
 use linggan_storage_postgres::Database;
 use sqlx::{Postgres, pool::PoolConnection};
@@ -151,7 +151,7 @@ impl OpportunitySync {
                 return;
             }
         }
-        let card_domains = match self.due_card_domains(database).await {
+        let card_domains = match self.due_card_domains(database, requested || due).await {
             Ok(domains) => domains,
             Err(error) => {
                 self.defer(&error);
@@ -204,7 +204,16 @@ impl OpportunitySync {
         }
     }
 
-    async fn due_card_domains(&self, database: &Database) -> Result<Vec<Uuid>, String> {
+    async fn due_card_domains(
+        &self,
+        database: &Database,
+        scan_indexes: bool,
+    ) -> Result<Vec<Uuid>, String> {
+        if scan_indexes {
+            enqueue_period_index_repairs(database)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
         sqlx::query_scalar("SELECT DISTINCT problem.domain_ref FROM linggan_opportunity_card_change change \
             JOIN linggan_opportunity_problem problem USING(problem_ref) \
             CROSS JOIN linggan_opportunity_metric_definition_current current \
@@ -317,5 +326,67 @@ async fn wait_for_gate_lock(
                     && !drain.is_requested() => {}
             Err(error) => return Err(error),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    mod full_schema {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../apps/api/src/local_web/full_schema_fixture.rs"
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the disposable opportunity PostgreSQL proof"]
+    async fn scheduled_period_index_repair_discovers_legacy_writer() {
+        let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("disposable proof URL");
+        let db = linggan_storage_postgres::testing::isolated_proof_schema(
+            &url,
+            "opportunity_period_index_scheduler",
+            full_schema::FULL_MIGRATIONS,
+        )
+        .await
+        .unwrap();
+        let domain = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+        let problem = Uuid::new_v4();
+        sqlx::query("INSERT INTO linggan_opportunity_problem(problem_ref,source_ref,source_definition_ref,domain_ref,label) VALUES($1,$1,$2,$3,'synthetic')")
+            .bind(problem).bind(Uuid::new_v4()).bind(domain).execute(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint) VALUES($1,'{}',scope_001_now(),1,1,repeat('b',64))")
+            .bind(problem).execute(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_opportunity_card_period_index(problem_ref,taxonomy_version,metric_def_version,card_fingerprint,period_index) VALUES($1,1,1,repeat('a',64),'[]')")
+            .bind(problem).execute(db.pool()).await.unwrap();
+        sqlx::query("DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1")
+            .bind(problem)
+            .execute(db.pool())
+            .await
+            .unwrap();
+        let sync = OpportunitySync {
+            pending: AtomicBool::new(false),
+            failure_reported: AtomicBool::new(false),
+            gate_active: AtomicBool::new(true),
+            gate_connection: Mutex::new(None),
+            needs_catchup: AtomicBool::new(false),
+            next_metrics: Mutex::new(Instant::now()),
+        };
+        assert!(sync.due_card_domains(&db, false).await.unwrap().is_empty());
+        assert!(sync.due_card_domains(&db, true).await.unwrap().is_empty());
+        let queued: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM linggan_opportunity_card_change WHERE problem_ref=$1)",
+        )
+        .bind(problem)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        assert!(queued, "periodic discovery must requeue a stale index");
+        sqlx::query("UPDATE linggan_opportunity_card_change SET changed_at=clock_timestamp()-interval '301 seconds' WHERE problem_ref=$1")
+            .bind(problem).execute(db.pool()).await.unwrap();
+        assert_eq!(
+            sync.due_card_domains(&db, false).await.unwrap(),
+            vec![domain]
+        );
     }
 }

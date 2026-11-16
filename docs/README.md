@@ -1,6 +1,6 @@
 # 文档总索引
 
-- [OCR 封面标题与异常内容旧计划](plans/active/ocr-title-quality-454.md)：#454/#464 交付记录；现行阅读与修正以[唯一底稿合同](data-contracts/research-dossier.md)为准，最新版本地能力见[Paddle 运行手册](runbooks/paddle-ocr-runtime.md)。
+- [OCR 封面标题与异常内容旧计划](plans/active/ocr-title-quality-454.md)：#454/#464 交付记录；现行阅读与修正以[唯一底稿合同](data-contracts/research-dossier.md)为准，本机 Paddle 运行手册已随视频画面文字下线归档（[DEC-0013](decisions/0013-retire-video-frame-text.md)）。
 - [OCR 手动图片文字识别：实施与验收](plans/active/ocr-manual-recognition-454.md)：#454 当前候选；保留 local-v4/local-vl-v1/DeepSeek，统一当前读本、按需编辑与历次结果清理，未合并、未部署。
 采集完整交付入口：[COLLECTION-JTBD-001 单次采集](plans/active/collection-single-run-398.md)（Issue #398 / Draft PR #406；替代 #400 的限制，含 UI 与验收矩阵）。[运行与数据合同](data-contracts/collection-single-run-001.md)、[正式 UI 核对](design/changes/collection-single-run-398.md)、[单独 UI 审美审查](design/changes/collection-single-run-398-visual-audit.md)。旧[两页导航](plans/active/collection-jtbd-001.md)保留历史范围。
 - [PR #576 单次主题研究收口实施手册](plans/active/pr-576-single-pass-closeout.md)：`topic-map.single-pass.v1` 的 G0–G5 执行合同、修复证据与交付边界；未合并、未部署。
@@ -76,6 +76,7 @@
 ## 2026-10-27 · 创作模块（资产版）开工准备 CREATION-ASSETS-001（范围已确认，2026-10-28）
 
 - [现状继承审计](audits/creation-assets-inheritance-audit-2026-10-27.md)：交互 Demo 每项能力对应到现有代码与合同（复用/扩展/新建/冲突），冲突项选项与建议；第 8 节记录 Mog 的决定。
+- [DEC-0013 视频画面文字下线](decisions/0013-retire-video-frame-text.md)：抽帧 OCR 的生产、读取与消费代码删除，历史数据保留；85 份含画面文字的旧 L1 结果失效待重跑，无口播视频暂时无法理解；待专项重建。
 - [DEC-0012 创作资产层](decisions/0012-creation-asset-layer.md)：资产层、选题框、衔接句口径、三级检查、补充决定，以及模型外发与采集的授权记录；含 Codex D01–D12 对照。DEC-0009 顶部已写入对应修订段，DEC-0011 加了范围补充。
 - [创作流程规格](product/creation-asset-workflow.md)：用户、路径、对象与状态、第一版范围、验收场景、检查规则全表；附录 B 的领域对象与数据仍是草案。
 - [页面与交互规格（草案）](design/pages/creation-assets-pages.md)：写稿、材料桌、资产库、证据库“复刻成样板”、入口；每个页面在对应切片开工前再评审。
@@ -234,7 +235,7 @@ Mog 2026-10-15 决定所有正式网页统一为一个 React + TypeScript 应用
 | [design/acceptance/ops-page-001-visual-acceptance.md](design/acceptance/ops-page-001-visual-acceptance.md) | 一次性报告；已上线，Mog 业务验收待做 | ACC-OPS-PAGE-001：运营页面在共享库副本上的走查、四类数据边界、失败与快速切换、共享页头放下第 6 项及 13 处修正 |
 | [design/acceptance/ops-page-002-visual-acceptance.md](design/acceptance/ops-page-002-visual-acceptance.md) | 一次性报告；D3 已上线，业务验收待 Mog | ACC-OPS-PAGE-002：运营总览隔离走查、D3 上线回执与分层证明、Issue #417 合并后修复验证 |
 | [data-contracts/ocr-content-layering.md](data-contracts/ocr-content-layering.md) | 权威当前 | OCR raw/layout/行引用、分层状态、标题回退与视觉模型输出闭集 |
-| [runbooks/paddle-ocr-runtime.md](runbooks/paddle-ocr-runtime.md) | 权威当前 | 本机 Paddle runtime 准备、无 Tesseract 回退、迁移后受控重排步骤 |
+| [archive/runbooks/paddle-ocr-runtime.md](archive/runbooks/paddle-ocr-runtime.md) | 历史归档 | 本机 Paddle runtime 准备步骤；2026-11-16 随视频画面文字下线归档，见 DEC-0013 |
 | [decisions/0006-comment-research-clean-rebuild.md](decisions/0006-comment-research-clean-rebuild.md) | 权威当前 | Issue #295：开发期销毁旧评论研究派生层，保留原始 Evidence 与资格事实；唯一的新评论研究合同与本机 reset 边界 |
 | [plans/active/comment-research-rebuild-001.md](plans/active/comment-research-rebuild-001.md) | 活跃计划；Issue #295；实现中 | 按领域选择笔记、冻结同篇语境与评论目标、严格语义接纳、长期 Problem 归并及旧路径删除的交付顺序 |
 | [plans/active/comment-study-p3-quality-gate-010.md](plans/active/comment-study-p3-quality-gate-010.md) | 活跃计划；Issue #316；受保护工作树 | P3 候选的主线整合准备、Gold Set/Recall@K 协议與无真实评论/模型调用的验证边界 |

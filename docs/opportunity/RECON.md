@@ -694,3 +694,17 @@ multi_identities|28423  admitted_after_work_first_package|11643
 
 - `apps/worker/tests/ocr_cleanup_postgres.rs` 的 `baseline` 必须停在 0168 之前，以验证当时的 OCR 清理；该测试仍使用当前 producer/材料读取代码生成合成数据。
 - 当前材料读取调用 0204 的 `linggan_opportunity_observed_at(text)`。历史测试仅从 `database/migrations/0204_opportunity_comment_eligibility.sql` 的原文提取该函数，以便当前读取代码运行；不执行 0204 的其他业务迁移，也不修改历史迁移。
+
+## 15. T1.5 只读接口补充勘察（`d0f2fbc9`）
+
+- API 总路由及启动状态位于 `apps/api/src/local_web.rs:186,343,528`；`comment_study::local_comment_study_guard` 位于 `apps/api/src/local_web/comment_study.rs:19`，外层 `public_access::guard` 限制公开入口。读取错误复用 `local_read_json_error`（`local_web.rs:2379`）。
+- 现有 cursor 编解码、查询范围哈希及位置约束在 `crates/intelligence/src/comment_study_catalog/cursor.rs:67,84,106`；`Database::pool` 位于 `crates/storage-postgres/src/pool.rs:28`。
+- 当前卡片及反向原声引用分别由 `database/migrations/0217_opportunity_card_read_model.sql:2,13` 定义，撤回会同步移除引用该来源的卡片；问题注册与血缘在 `database/migrations/0205_opportunity_problem_taxonomy.sql:10,26`，`linggan_opportunity_resolve_problem_id` 位于 `:113`，拆分可能返回多个目标。
+- 卡片原声的现有资格选择位于 `crates/intelligence/src/opportunity/card/voices.rs:15`，并复用 `crates/intelligence/src/comment_study_source.rs:65`；当前快照签发、受限来源可见性与来源覆盖核对分别位于 `crates/intelligence/src/opportunity/card/snapshot.rs:69,115,132`。
+
+## 16. T1.5 审查问题的补充勘察（`78d0fb95`）
+
+- 卡片指标的周期行在 `crates/intelligence/src/opportunity/problem_metrics/store.rs:10` 中以相同输入指纹复用，只有 `computed_as_of` 更新；`database/migrations/0217_opportunity_card_read_model.sql:154` 的指标变更触发器将实际字段变化写入 `linggan_opportunity_card_change`。读模型由 `crates/intelligence/src/opportunity/card.rs:130,155,466` 在同一事务中重算、组装、保存并清理相应变更。
+- 现有评论目录事实与资格由 `crates/intelligence/src/comment_study_catalog/facts.sql:1`、`crates/intelligence/src/comment_study_source/gate.rs:1` 和 `crates/intelligence/src/comment_study_source.rs:248` 共用；可研究来源在 `comment_study_source.rs:65,334` 选择并附加上下文。机会卡原声通过 `crates/intelligence/src/opportunity/card/voices.rs:49` 组合这些来源，不另有一套正文资格定义。
+- 列表与单卡当前共用的锁表集合及依据读取位于 `crates/intelligence/src/opportunity/card/read.rs:13,293,413`；历史等级是同一 `linggan_opportunity_problem_metric_period` 中的协议、周期维度，不是跨协议汇总。
+- 本工作包新增的 `0223_opportunity_card_period_index.sql` 创建机会卡周期索引表，不改现有表；`card.rs` 保存时直接复制同一事务、同一版本和 `as_of` 的指标等级，并将索引与 payload 一起计算指纹。升级前的旧卡保持索引未知并排队重建；新版执行器也会重新识别旧程序写入后缺失或不匹配的索引。索引不创建另一套指标计算。

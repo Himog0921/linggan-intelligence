@@ -57,6 +57,617 @@ async fn p1(db: &linggan_storage_postgres::Database) -> Value {
 
 #[tokio::test]
 #[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn period_filter_keeps_unchanged_cards_after_incremental_metrics() {
+    use linggan_intelligence::opportunity::{
+        OpportunityListQuery, OpportunityReadError, RebuildMode, read_opportunities,
+        rebuild_problem_metrics,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let query = OpportunityListQuery {
+        period: Some("2026-11-09".to_owned()),
+        ..Default::default()
+    };
+    let contains = |value: &Value| {
+        value["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|card| card["problem"]["id"] == problem.to_string())
+    };
+    assert!(contains(
+        &read_opportunities(&db, domain, &query).await.unwrap()
+    ));
+    sqlx::raw_sql("CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-11-10T00:01:00Z' $$")
+        .execute(db.pool()).await.unwrap();
+    rebuild_problem_metrics(
+        &db,
+        domain,
+        "2026-11-10T00:01:00Z",
+        &digest,
+        RebuildMode::Incremental,
+    )
+    .await
+    .unwrap();
+    assert!(contains(
+        &read_opportunities(&db, domain, &query).await.unwrap()
+    ));
+
+    // A changed metric is not the older card's snapshot; retain its original period index.
+    sqlx::query("UPDATE linggan_opportunity_problem_metric_period SET input_fingerprint=repeat('f',64) WHERE problem_ref=$1 AND period_start='2026-11-09' AND metric_def_version=1 AND protocol_version IS NULL")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    assert!(contains(
+        &read_opportunities(&db, domain, &query).await.unwrap()
+    ));
+    // An older writer can change a card without updating the new index during rollout.
+    let (original_payload, original_fingerprint): (Value, String) = sqlx::query_as(
+        "SELECT payload,input_fingerprint FROM linggan_opportunity_opportunity_card WHERE problem_ref=$1",
+    ).bind(problem).fetch_one(db.pool()).await.unwrap();
+    let mut legacy_payload = original_payload.clone();
+    legacy_payload["problem"]["statement"] = serde_json::json!("synthetic old writer update");
+    sqlx::query("UPDATE linggan_opportunity_opportunity_card SET payload=$2,input_fingerprint=repeat('e',64) WHERE problem_ref=$1")
+        .bind(problem).bind(legacy_payload).execute(db.pool()).await.unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &query).await,
+        Err(OpportunityReadError::PeriodSnapshotUnavailable)
+    ));
+    sqlx::query("UPDATE linggan_opportunity_opportunity_card SET payload=$2,input_fingerprint=$3 WHERE problem_ref=$1")
+        .bind(problem).bind(original_payload).bind(original_fingerprint).execute(db.pool()).await.unwrap();
+    sqlx::query("DELETE FROM linggan_opportunity_card_period_index WHERE problem_ref=$1")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &query).await,
+        Err(OpportunityReadError::PeriodSnapshotUnavailable)
+    ));
+    assert!(contains(
+        &read_opportunities(&db, domain, &OpportunityListQuery::default())
+            .await
+            .unwrap()
+    ));
+    sqlx::query("INSERT INTO linggan_opportunity_card_period_index(problem_ref,taxonomy_version,metric_def_version,card_fingerprint,period_index) SELECT problem_ref,taxonomy_version,metric_def_version,input_fingerprint,'[{\"periodStart\":\"2026-02-30\",\"protocolVersion\":null,\"evidenceTier\":\"candidate\"}]'::jsonb FROM linggan_opportunity_opportunity_card WHERE problem_ref=$1")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &query).await,
+        Err(OpportunityReadError::InvalidModel)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn period_index_upgrade_preserves_cards_and_queues_rebuilds() {
+    let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("disposable proof URL");
+    let migration =
+        include_str!("../../../../database/migrations/0223_opportunity_card_period_index.sql");
+    let baseline = super::full_schema_fixture::FULL_MIGRATIONS.replace(migration, "");
+    let baseline = baseline
+        .lines()
+        .filter(|line| !line.contains("VALUES ('0223_opportunity_card_period_index'"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let db = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        "opportunity_t15_period_upgrade",
+        &baseline,
+    )
+    .await
+    .unwrap();
+    let problem = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_opportunity_problem(problem_ref,source_ref,source_definition_ref,domain_ref,label) VALUES($1,$1,$2,'00000000-0000-4000-8000-000000000001','synthetic')")
+        .bind(problem).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint) VALUES($1,'{}'::jsonb,scope_001_now(),1,1,repeat('a',64))")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    sqlx::query("DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
+    let row: (Value, Option<Value>, bool) = sqlx::query_as("SELECT c.payload,i.period_index,EXISTS(SELECT 1 FROM linggan_opportunity_card_change WHERE problem_ref=$1) FROM linggan_opportunity_opportunity_card c LEFT JOIN linggan_opportunity_card_period_index i USING(problem_ref) WHERE c.problem_ref=$1")
+        .bind(problem).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(row.0, serde_json::json!({}));
+    assert!(row.1.is_none());
+    assert!(row.2);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn period_index_recovers_after_legacy_executor_consumes_change() {
+    use linggan_intelligence::opportunity::{
+        OpportunityListQuery, OpportunityReadError, read_opportunities,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let query = OpportunityListQuery {
+        period: Some("2026-11-09".to_owned()),
+        ..Default::default()
+    };
+    // Simulate the old executor writing only the card and consuming its queue row.
+    sqlx::query("UPDATE linggan_opportunity_opportunity_card SET input_fingerprint=repeat('e',64) WHERE problem_ref=$1")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    sqlx::query("DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &query).await,
+        Err(OpportunityReadError::PeriodSnapshotUnavailable)
+    ));
+    let first = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+        .await
+        .unwrap();
+    assert!(first.changes_deferred >= 1);
+    let queued: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_opportunity_card_change WHERE problem_ref=$1)",
+    )
+    .bind(problem)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(
+        queued,
+        "the new executor must rediscover a missing or stale index"
+    );
+    sqlx::query("UPDATE linggan_opportunity_card_change SET changed_at=clock_timestamp()-interval '301 seconds' WHERE problem_ref=$1")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    let second = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+        .await
+        .unwrap();
+    assert!(second.cards_built >= 1);
+    let matching: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_opportunity_opportunity_card c JOIN linggan_opportunity_card_period_index i USING(problem_ref) WHERE c.problem_ref=$1 AND i.card_fingerprint=c.input_fingerprint)")
+        .bind(problem).fetch_one(db.pool()).await.unwrap();
+    assert!(matching);
+    assert!(read_opportunities(&db, domain, &query).await.is_ok());
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn historical_period_filter_identifies_the_matched_protocol_and_tier() {
+    use linggan_intelligence::opportunity::{OpportunityListQuery, read_opportunities};
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let query = OpportunityListQuery {
+        period: Some("2026-11-02".to_owned()),
+        tier: Some("significant".to_owned()),
+        ..Default::default()
+    };
+    let list = read_opportunities(&db, domain, &query).await.unwrap();
+    let card = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|card| card["problem"]["id"] == problem.to_string())
+        .unwrap();
+    assert_eq!(card["demand"]["groups"][0]["evidenceTier"], "established");
+    let matched = list["periodMatches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["problemId"] == problem.to_string())
+        .unwrap();
+    assert_eq!(matched["periodStart"], "2026-11-02");
+    assert_eq!(matched["groups"][0]["protocolVersion"], Value::Null);
+    assert_eq!(matched["groups"][0]["evidenceTier"], "significant");
+    sqlx::query("UPDATE linggan_opportunity_problem_metric_period SET evidence_tier='established' WHERE problem_ref=$1 AND period_start='2026-11-02' AND metric_def_version=1 AND protocol_version IS NULL")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    let after = read_opportunities(&db, domain, &query).await.unwrap();
+    assert!(
+        after["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|card| card["problem"]["id"] == problem.to_string())
+    );
+    assert_eq!(
+        after["periodMatches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["problemId"] == problem.to_string())
+            .unwrap()["groups"][0]["evidenceTier"],
+        "significant"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn period_matches_keep_unknown_and_known_protocols_separate() {
+    use linggan_intelligence::opportunity::{OpportunityListQuery, read_opportunities};
+    let db = database().await;
+    opportunity_creator_dataset::build(&db).await.unwrap();
+    let digest = CommenterDigest::from_key(vec![42; 32]).unwrap();
+    sync_comment_mentions(&db, &digest).await.unwrap();
+    sqlx::raw_sql("CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE AS $$ SELECT timestamptz '2026-11-10T00:00:00Z' $$")
+        .execute(db.pool()).await.unwrap();
+    let domain = Uuid::parse_str(opportunity_dataset::DOMAIN).unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let list = read_opportunities(
+        &db,
+        domain,
+        &OpportunityListQuery {
+            period: Some("2026-11-02".to_owned()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let matched = list["periodMatches"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["problemId"] == problem.to_string())
+        .unwrap();
+    let groups = matched["groups"].as_array().unwrap();
+    assert!(
+        groups
+            .iter()
+            .any(|group| group["protocolVersion"].is_null())
+    );
+    assert!(groups.iter().any(|group| group["protocolVersion"] == 1));
+    assert_eq!(groups.len(), 2);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn creator_evidence_is_not_blocked_by_unrelated_model_writes() {
+    use linggan_intelligence::opportunity::{
+        EvidenceKind, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card,
+        read_evidence, read_opportunities,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let mut blocker = db.pool().begin().await.unwrap();
+    sqlx::query("LOCK TABLE linggan_model_invocation IN ROW EXCLUSIVE MODE")
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    for kind in [EvidenceKind::Comments, EvidenceKind::Works] {
+        let result = read_evidence(
+            &db,
+            problem,
+            &EvidenceQuery {
+                kind,
+                cursor: None,
+                limit: Some(1),
+            },
+        )
+        .await;
+        assert!(
+            result.is_ok(),
+            "unrelated model writes must not block evidence: {result:?}"
+        );
+    }
+    sqlx::query("LOCK TABLE linggan_opportunity_problem_metric_period IN ROW EXCLUSIVE MODE")
+        .execute(&mut *blocker)
+        .await
+        .unwrap();
+    assert!(read_card(&db, problem).await.is_ok());
+    assert!(
+        read_opportunities(
+            &db,
+            domain,
+            &OpportunityListQuery {
+                period: Some("2026-11-02".to_owned()),
+                ..Default::default()
+            }
+        )
+        .await
+        .is_ok()
+    );
+    let evidence = read_evidence(
+        &db,
+        problem,
+        &EvidenceQuery {
+            kind: EvidenceKind::Creators,
+            cursor: None,
+            limit: Some(1),
+        },
+    )
+    .await;
+    assert!(
+        evidence.is_ok(),
+        "unrelated model writes must not block creator evidence: {evidence:?}"
+    );
+    blocker.rollback().await.unwrap();
+    let mut restriction_writer = db.pool().begin().await.unwrap();
+    sqlx::query("LOCK TABLE linggan_material_comment_restriction IN ROW EXCLUSIVE MODE")
+        .execute(&mut *restriction_writer)
+        .await
+        .unwrap();
+    for kind in [
+        EvidenceKind::Comments,
+        EvidenceKind::Works,
+        EvidenceKind::Creators,
+    ] {
+        let result = read_evidence(
+            &db,
+            problem,
+            &EvidenceQuery {
+                kind,
+                cursor: None,
+                limit: Some(1),
+            },
+        )
+        .await;
+        assert!(matches!(
+            result,
+            Err(OpportunityReadError::Snapshot(CardError::SourcesBusy))
+        ));
+    }
+    restriction_writer.rollback().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn evidence_page_reads_source_context_only_for_the_requested_page() {
+    use linggan_intelligence::comment_study_source::{StudySourceRole, selected_source_in};
+    use linggan_intelligence::opportunity::{EvidenceKind, EvidenceQuery, read_evidence};
+    let (db, domain, digest) = prepare().await;
+    sqlx::raw_sql(r#"
+      ALTER TABLE linggan_material_comment DISABLE TRIGGER USER;
+      UPDATE linggan_material_comment SET body_text='SYNTHETIC 后一作品有效评论',body_state='KNOWN'
+      WHERE comment_external_id='c-work-1-1';
+      ALTER TABLE linggan_material_comment ENABLE TRIGGER USER;
+      INSERT INTO linggan_comment_clean_cache(source_ref,cleaner_version,raw_sha256,research_text,clean_state,clean_reasons,created_at)
+      SELECT material_ref,'comment-clean.v2',repeat('a',64),body_text,'direct','[]'::jsonb,'2026-11-09T00:00:00Z'
+      FROM linggan_material_comment WHERE comment_external_id='c-work-1-1';
+    "#).execute(db.pool()).await.unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let source: Uuid = sqlx::query_scalar(
+        "SELECT material_ref FROM linggan_material_comment WHERE comment_external_id='c-work-1-1'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let work = Uuid::parse_str("00000000-0000-4000-8000-000000000101").unwrap();
+    sqlx::raw_sql(r#"
+      ALTER FUNCTION linggan_material_content_author_at(uuid,timestamptz) RENAME TO synthetic_original_author_at;
+      CREATE FUNCTION linggan_material_content_author_at(p_content uuid,p_as_of timestamptz)
+      RETURNS TABLE(author_external_id text,attribution_source text,observed_at timestamptz)
+      LANGUAGE plpgsql STABLE AS $$
+      BEGIN
+        IF p_content='00000000-0000-4000-8000-000000000101'::uuid AND
+           position('SELECT c.material_ref,c.content_public_ref,c.comment_external_id,c.parent_comment_external_id' IN current_query())>0 THEN
+          RAISE EXCEPTION 'synthetic off-page source was read';
+        END IF;
+        RETURN QUERY SELECT * FROM synthetic_original_author_at(p_content,p_as_of);
+      END $$;
+    "#).execute(db.pool()).await.unwrap();
+    let page = read_evidence(
+        &db,
+        problem,
+        &EvidenceQuery {
+            kind: EvidenceKind::Comments,
+            cursor: None,
+            limit: Some(1),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(page["items"].as_array().unwrap().len(), 1);
+    assert_eq!(page["page"]["hasMore"], true);
+    let mut tx = db.pool().begin().await.unwrap();
+    let probe = selected_source_in(
+        &mut tx,
+        domain,
+        work,
+        source,
+        StudySourceRole::Primary,
+        "2026-11-10T00:00:00Z",
+    )
+    .await;
+    assert!(
+        probe
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("synthetic off-page source was read")
+    );
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn read_endpoints_share_card_sources_and_fail_closed_after_change() {
+    use linggan_intelligence::opportunity::{
+        EvidenceKind, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card,
+        read_evidence, read_opportunities,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let card = read_card(&db, problem).await.unwrap();
+    assert_eq!(card, p1(&db).await);
+
+    let mut query = EvidenceQuery {
+        kind: EvidenceKind::Comments,
+        cursor: None,
+        limit: Some(2),
+    };
+    let first = read_evidence(&db, problem, &query).await.unwrap();
+    assert_eq!(first["items"].as_array().unwrap().len(), 2);
+    assert_eq!(first["page"]["hasMore"], true);
+    let encoded = first.to_string();
+    assert!(!encoded.contains("commenterHash"));
+    assert!(!encoded.contains("authorExternalId"));
+    query.cursor = first["page"]["nextCursor"].as_str().map(str::to_owned);
+    let second = read_evidence(&db, problem, &query).await.unwrap();
+    assert!(!second["items"].as_array().unwrap().is_empty());
+    assert_eq!(first["page"]["asOf"], second["page"]["asOf"]);
+    let later_ref = &second["items"].as_array().unwrap().last().unwrap()["commentRef"];
+    let changed_work = Uuid::parse_str(later_ref["contentRef"].as_str().unwrap()).unwrap();
+    let changed_comment = later_ref["commentExternalId"].as_str().unwrap();
+    let task = Uuid::new_v4();
+    let attempt = Uuid::new_v4();
+    let package = Uuid::new_v4();
+    let producer = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_runtime_task(task_id,task_spec_hash,task_spec,source,platform,page_type,created_at) \
+        VALUES($1,md5($1::text)||md5($1::text||'task'),'{}'::jsonb,'manual','xhs','seed','2026-11-09T23:58:00Z')")
+        .bind(task).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_attempt(attempt_id,task_id,producer_instance_id,started_at) VALUES($1,$2,$3,'2026-11-09T23:58:00Z')")
+        .bind(attempt).bind(task).bind(producer).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_capture_package(package_ref,attempt_id,task_id,producer_instance_id,package_kind,platform,package_hash,observed_at,captured_at,coverage,payload,accepted_at) \
+        VALUES($1,$2,$3,$4,'comments','xhs',md5($1::text)||md5($1::text||'package'),'2026-11-09T23:59:00Z','2026-11-09T23:59:00Z','{}','{}','2026-11-09T23:59:00Z')")
+        .bind(package).bind(attempt).bind(task).bind(producer).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason,created_at) \
+        VALUES($1,0,'accepted_for_library_content','synthetic later observation','2026-11-09T23:59:00Z')")
+        .bind(package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_comment(material_ref,content_public_ref,package_ref,record_ordinal, \
+        comment_external_id,root_comment_external_id,parent_comment_external_id,parent_identity_source_field,is_reply, \
+        body_text,body_state,author_external_id,observed_at,created_at) \
+        SELECT $3,content_public_ref,$4,0,comment_external_id,root_comment_external_id, \
+        parent_comment_external_id,parent_identity_source_field,is_reply,body_text||' SYNTHETIC change','KNOWN', \
+        author_external_id,'2026-11-09T23:59:00Z','2026-11-09T23:59:00Z' \
+        FROM linggan_material_comment WHERE content_public_ref=$1 AND comment_external_id=$2 LIMIT 1")
+        .bind(changed_work).bind(changed_comment).bind(Uuid::new_v4()).bind(package).execute(db.pool()).await.unwrap();
+    assert!(matches!(
+        read_evidence(&db, problem, &query).await,
+        Err(OpportunityReadError::PageChanged)
+    ));
+
+    let works = read_evidence(
+        &db,
+        problem,
+        &EvidenceQuery {
+            kind: EvidenceKind::Works,
+            cursor: None,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!works["items"].as_array().unwrap().is_empty());
+    assert!(
+        works["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|work| work["basis"] == "comment_mention")
+    );
+    let creators = read_evidence(
+        &db,
+        problem,
+        &EvidenceQuery {
+            kind: EvidenceKind::Creators,
+            cursor: None,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!creators["items"].as_array().unwrap().is_empty());
+    assert!(
+        creators["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|creator| creator.get("protocolVersion").is_some())
+    );
+
+    let group = &card["demand"]["groups"][0];
+    let filtered = read_opportunities(
+        &db,
+        domain,
+        &OpportunityListQuery {
+            period: group["current"]["periodStart"].as_str().map(str::to_owned),
+            tier: group["evidenceTier"].as_str().map(str::to_owned),
+            supply_state: Some("not_evaluated".to_owned()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        filtered["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["problem"]["id"] == problem.to_string())
+    );
+
+    let mut list_query = OpportunityListQuery {
+        limit: Some(1),
+        ..Default::default()
+    };
+    let list = read_opportunities(&db, domain, &list_query).await.unwrap();
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list["page"]["hasMore"], true);
+    list_query.cursor = list["page"]["nextCursor"].as_str().map(str::to_owned);
+    sqlx::query("UPDATE linggan_opportunity_opportunity_card SET input_fingerprint=repeat('f',64) WHERE problem_ref=$1")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &list_query).await,
+        Err(OpportunityReadError::PageChanged)
+    ));
+
+    let old = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_opportunity_problem(problem_ref,source_ref,source_definition_ref,domain_ref,label,created_at,updated_at) \
+        SELECT $1,$1,source_definition_ref,domain_ref,'synthetic old problem',created_at,updated_at \
+        FROM linggan_opportunity_problem WHERE problem_ref=$2")
+        .bind(old).bind(problem).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_opportunity_problem_lineage(operation_ref,from_problem_ref,to_problem_ref,relation) VALUES($1,$2,$3,'merge')")
+        .bind(Uuid::new_v4()).bind(old).bind(problem).execute(db.pool()).await.unwrap();
+    let redirected = read_card(&db, old).await.unwrap();
+    assert_eq!(redirected["problem"]["id"], problem.to_string());
+    assert_eq!(redirected["problem"]["redirectedFrom"], old.to_string());
+
+    let voice = &card["demand"]["sampleVoices"][0]["commentRef"];
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,$2,'synthetic withdrawal')")
+        .bind(Uuid::parse_str(voice["contentRef"].as_str().unwrap()).unwrap())
+        .bind(voice["commentExternalId"].as_str().unwrap())
+        .execute(db.pool()).await.unwrap();
+    assert!(matches!(
+        read_card(&db, old).await,
+        Err(OpportunityReadError::NotFound)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
 async fn card_reads_a_work_with_a_selected_image_reading() {
     let (db, domain, digest) = prepare().await;
     sqlx::raw_sql(r#"

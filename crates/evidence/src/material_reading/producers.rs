@@ -33,12 +33,6 @@ pub async fn publish_job_in(
             ("image", "ordinary_ocr")
         }
         "asr" => ("audio", "asr"),
-        "video_frame_ocr"
-            if claim.processor_version
-                == crate::processor_version_for_kind("video_frame_ocr").unwrap() =>
-        {
-            ("video_frame", "frame_ocr")
-        }
         _ => return Err(invalid("material_reading_processor_invalid")),
     };
     let source = media_source_in(
@@ -237,13 +231,7 @@ AND NOT EXISTS(SELECT 1 FROM linggan_media_ocr_retirement WHERE retired_job_ref=
     } else {
         ReadingContent {
             blocks: vec![],
-            issues: if kind == "video_frame" {
-                vec![
-                    json!({"key":"historical_video_sampling_incomplete","code":"sampling_incomplete","message":"历史采样帧未检出文字，不代表整段视频无文字。","resolution":"source_refresh"}),
-                ]
-            } else {
-                vec![]
-            },
+            issues: vec![],
             source_state: if reason.as_deref() == Some("no_audio_stream_observed") {
                 "not_applicable"
             } else {
@@ -318,7 +306,6 @@ async fn media_source_in(
         JOIN linggan_media_blob b ON b.sha256=m.blob_sha256 \
         WHERE j.job_ref=$2 AND ($3::text IS NOT NULL OR linggan_dossier_slot_active($1,j.slot_key,scope_001_now())) AND m.blob_sha256=j.blob_sha256 AND p.accepted_at<=scope_001_now() AND o.created_at<=scope_001_now() \
         AND disposition.disposition='accepted_for_media_identity' AND ((j.processor_kind='image_ocr' AND b.mime_type LIKE 'image/%') \
-        OR (j.processor_kind='video_frame_ocr' AND b.mime_type LIKE 'video/%') \
         OR (j.processor_kind='asr' AND (b.mime_type LIKE 'video/%' OR (o.purpose<>'live_photo' AND b.mime_type LIKE 'audio/%')))) AND (($3::text IS NOT NULL AND m.materialization_ref::text=$3) OR ($3::text IS NULL \
         AND o.source_generation=(SELECT max(o2.source_generation) FROM linggan_material_media_origin o2 JOIN linggan_runtime_capture_package p2 USING(package_ref) JOIN linggan_runtime_record_disposition d2 ON d2.package_ref=o2.package_ref AND d2.record_ordinal=o2.record_ordinal WHERE o2.slot_key=j.slot_key AND o2.content_public_ref=$1 AND o2.created_at<=scope_001_now() AND p2.accepted_at<=scope_001_now() AND d2.disposition='accepted_for_media_identity' ))) \
         ORDER BY o.source_generation DESC,m.verified_at DESC,m.materialization_ref DESC LIMIT 1")

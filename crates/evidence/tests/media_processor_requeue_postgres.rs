@@ -15,8 +15,7 @@ mod fixture;
 use fixture::{proof_database, submit_package};
 use linggan_evidence::{
     MediaProcessingClaimOutcome, admit_media_blob, claim_media_processing_work,
-    enqueue_missing_video_frame_jobs, ensure_media_processing_work, processor_version_for_kind,
-    requeue_outdated_processor_jobs,
+    ensure_media_processing_work, processor_version_for_kind, requeue_outdated_processor_jobs,
 };
 use linggan_storage_postgres::Database;
 use sqlx::Row;
@@ -194,7 +193,7 @@ async fn seed_image(database: &Database, index: usize) -> (String, String) {
     (sha256, slot_key)
 }
 
-/// 造一段视频：经既有媒体链产生 `thumbnail`、`audio_extract`、`asr`、`video_frame_ocr` 四条作业。
+/// 造一段视频：经既有媒体链产生 `thumbnail`、`audio_extract`、`asr` 三条作业。
 async fn seed_video(database: &Database, index: usize) -> (String, String) {
     let content_id = format!("note-requeue-video-{index}");
     let slot_key = format!("xhs:{content_id}:video:1");
@@ -233,7 +232,7 @@ async fn seed_video(database: &Database, index: usize) -> (String, String) {
 /// 造一条**只有旧版本作业**的媒体键——也就是生产库今天的形状。
 ///
 /// 这里不能用 `seed_image`／`seed_video`：那两条路会经准入**当场**建出当前版本的
-/// `image_ocr`／`asr`／`video_frame_ocr`，键上从此就有了一条 `local-v2`。而重排的判据正是
+/// `image_ocr`／`asr`，键上从此就有了一条 `local-v2`。而重排的判据正是
 /// 「这个键上还没有当前版本」——于是它**正确地**一条都不排，用例却以为自己测到了存量。
 /// 第一版就是这么写的，7 条断言在隔离库上全红（`left: 0, right: 1`）。
 ///
@@ -395,10 +394,9 @@ async fn admission_uses_the_registered_version_per_kind() {
             ("audio_extract".to_owned(), BASELINE.to_owned()),
             ("thumbnail".to_owned(), BASELINE.to_owned()),
             ("thumbnail".to_owned(), BASELINE.to_owned()),
-            ("video_frame_ocr".to_owned(), CURRENT.to_owned()),
         ],
-        "准入这条路必须按 `processor_version_for_kind` 逐类取版本：行为变过的三类抬到 {CURRENT}，\
-         没变的两类**不许**跟着抬——抬了就会凭空多出一轮谁也没要求过的重跑"
+        "准入这条路必须按 `processor_version_for_kind` 逐类取版本：asr 抬到 {ASR_CURRENT}，\
+         没变的两类**不许**跟着抬——抬了就会凭空多出一轮谁也没要求过的重跑；视频画面文字已下线，不再准入"
     );
 }
 
@@ -411,14 +409,6 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
     let (video_sha, video_slot) = seed_media_without_jobs(&database, 2, "video").await;
     insert_outdated_job(&database, &image_sha, &image_slot, "image_ocr", BASELINE).await;
     insert_outdated_job(&database, &video_sha, &video_slot, "asr", BASELINE).await;
-    insert_outdated_job(
-        &database,
-        &video_sha,
-        &video_slot,
-        "video_frame_ocr",
-        BASELINE,
-    )
-    .await;
     // 行为没变的两类也各放一条旧作业：要点名的类里有一类「本来就没有新版本」，
     // 那一条要在点了名之后**一条都不多**，而不是靠它压根不存在来蒙混过关。
     insert_outdated_job(&database, &image_sha, &image_slot, "thumbnail", BASELINE).await;
@@ -439,12 +429,7 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
     assert_eq!(jobs_of(&database, "image_ocr", BASELINE).await.len(), 1);
 
     // 没点名的三类：一条不动。
-    for (kind, version) in [
-        ("asr", BASELINE),
-        ("asr", ASR_CURRENT),
-        ("video_frame_ocr", BASELINE),
-        ("video_frame_ocr", CURRENT),
-    ] {
+    for (kind, version) in [("asr", BASELINE), ("asr", ASR_CURRENT)] {
         let expected = usize::from(version == BASELINE);
         assert_eq!(
             jobs_of(&database, kind, version).await.len(),
@@ -453,18 +438,12 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
         );
     }
 
-    // 转录与视频帧文字：这一次一起排，各自补出一条。
-    let summary =
-        requeue_outdated_processor_jobs(&database, &kinds(&["asr", "video_frame_ocr"]), false)
-            .await
-            .expect("both kinds are registered");
+    // 转录：点名后补出一条。
+    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["asr"]), false)
+        .await
+        .expect("asr is registered");
     assert_eq!(summary[0].enqueued_jobs, 1);
-    assert_eq!(summary[1].enqueued_jobs, 1);
     assert_eq!(jobs_of(&database, "asr", ASR_CURRENT).await.len(), 1);
-    assert_eq!(
-        jobs_of(&database, "video_frame_ocr", CURRENT).await.len(),
-        1
-    );
     assert_eq!(jobs_of(&database, "asr", BASELINE).await.len(), 1);
 
     // 行为没变的两类：目标版本就是它们已经躺着的版本，点了名也一条都排不出来。
@@ -487,19 +466,18 @@ async fn requeue_covers_only_the_outdated_jobs_of_the_named_kinds() {
 async fn requeue_preserves_the_job_keys_and_writes_one_pending_event() {
     let database = proof_database("media_requeue_event").await;
     let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
-    let outdated =
-        insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
+    let outdated = insert_outdated_job(&database, &sha256, &slot_key, "asr", BASELINE).await;
 
-    let before = jobs_of(&database, "video_frame_ocr", CURRENT).await;
-    requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
+    let before = jobs_of(&database, "asr", ASR_CURRENT).await;
+    requeue_outdated_processor_jobs(&database, &kinds(&["asr"]), false)
         .await
         .expect("the named kind is registered");
-    let enqueued = enqueued_by(&database, "video_frame_ocr", CURRENT, &before).await;
+    let enqueued = enqueued_by(&database, "asr", ASR_CURRENT, &before).await;
 
     let (blob, slot, version, scope) = job_row(&database, enqueued).await;
     assert_eq!(blob, sha256);
     assert_eq!(slot.as_deref(), Some(slot_key.as_str()));
-    assert_eq!(version, CURRENT);
+    assert_eq!(version, ASR_CURRENT);
     assert_eq!(scope, "full_blob");
     assert_eq!(
         event_rows(&database, enqueued).await,
@@ -516,24 +494,18 @@ async fn requeue_preserves_the_job_keys_and_writes_one_pending_event() {
 async fn requeue_is_idempotent() {
     let database = proof_database("media_requeue_idempotent").await;
     let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
-    insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
+    insert_outdated_job(&database, &sha256, &slot_key, "asr", BASELINE).await;
 
-    let first = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
+    let first = requeue_outdated_processor_jobs(&database, &kinds(&["asr"]), false)
         .await
         .expect("the named kind is registered");
-    let second = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
+    let second = requeue_outdated_processor_jobs(&database, &kinds(&["asr"]), false)
         .await
         .expect("a second run is not an error");
     assert_eq!(first[0].enqueued_jobs, 1);
     assert_eq!(second[0].enqueued_jobs, 0);
-    assert_eq!(
-        jobs_of(&database, "video_frame_ocr", CURRENT).await.len(),
-        1
-    );
-    assert_eq!(
-        jobs_of(&database, "video_frame_ocr", BASELINE).await.len(),
-        1
-    );
+    assert_eq!(jobs_of(&database, "asr", ASR_CURRENT).await.len(), 1);
+    assert_eq!(jobs_of(&database, "asr", BASELINE).await.len(), 1);
 }
 
 /// 同一个键上躺着两个旧版本（抬过不止一次版本时会出现）：只补一条。
@@ -543,28 +515,17 @@ async fn requeue_is_idempotent() {
 async fn requeue_adds_one_job_when_one_key_holds_several_older_versions() {
     let database = proof_database("media_requeue_two_older_versions").await;
     let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
-    insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", "local-v0").await;
-    insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
+    insert_outdated_job(&database, &sha256, &slot_key, "asr", "local-v0").await;
+    insert_outdated_job(&database, &sha256, &slot_key, "asr", BASELINE).await;
 
-    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
+    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["asr"]), false)
         .await
         .expect("two older versions on one key do not break the statement");
     assert_eq!(summary[0].enqueued_jobs, 1);
-    assert_eq!(
-        jobs_of(&database, "video_frame_ocr", CURRENT).await.len(),
-        1
-    );
+    assert_eq!(jobs_of(&database, "asr", ASR_CURRENT).await.len(), 1);
     // 两个旧版本都原样留着。
-    assert_eq!(
-        jobs_of(&database, "video_frame_ocr", BASELINE).await.len(),
-        1
-    );
-    assert_eq!(
-        jobs_of(&database, "video_frame_ocr", "local-v0")
-            .await
-            .len(),
-        1
-    );
+    assert_eq!(jobs_of(&database, "asr", BASELINE).await.len(), 1);
+    assert_eq!(jobs_of(&database, "asr", "local-v0").await.len(), 1);
 }
 
 /// 排出来只是「插了作业」；它真的会被 worker 领走才算数。可认领的 work 行由 worker 每 tick 的
@@ -574,38 +535,36 @@ async fn requeue_adds_one_job_when_one_key_holds_several_older_versions() {
 async fn requeued_jobs_become_claimable_work() {
     let database = proof_database("media_requeue_claimable").await;
     let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
-    let outdated =
-        insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
+    let outdated = insert_outdated_job(&database, &sha256, &slot_key, "asr", BASELINE).await;
     ensure_media_processing_work(&database)
         .await
         .expect("every job becomes runnable work");
     // 存量在库里的样子：那两条都已经做过了，可领的活只该是重排出来的那条。
-    for job_ref in jobs_of(&database, "video_frame_ocr", CURRENT).await {
+    for job_ref in jobs_of(&database, "asr", ASR_CURRENT).await {
         mark_work_completed(&database, job_ref).await;
     }
     mark_work_completed(&database, outdated).await;
-    let before = jobs_of(&database, "video_frame_ocr", CURRENT).await;
+    let before = jobs_of(&database, "asr", ASR_CURRENT).await;
 
-    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
+    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["asr"]), false)
         .await
         .expect("the named kind is registered");
     assert_eq!(summary[0].enqueued_jobs, 1);
-    let enqueued = enqueued_by(&database, "video_frame_ocr", CURRENT, &before).await;
+    let enqueued = enqueued_by(&database, "asr", ASR_CURRENT, &before).await;
     ensure_media_processing_work(&database)
         .await
         .expect("the requeued job becomes runnable work");
 
-    let claim =
-        match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["video_frame_ocr"]))
-            .await
-            .expect("the claim is readable")
-        {
-            MediaProcessingClaimOutcome::Claimed(claim) => claim,
-            other => panic!("the requeued job is claimable: {other:?}"),
-        };
+    let claim = match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["asr"]))
+        .await
+        .expect("the claim is readable")
+    {
+        MediaProcessingClaimOutcome::Claimed(claim) => claim,
+        other => panic!("the requeued job is claimable: {other:?}"),
+    };
     assert_eq!(claim.job_ref, enqueued);
-    assert_eq!(claim.processor_kind, "video_frame_ocr");
-    assert_eq!(claim.processor_version, CURRENT);
+    assert_eq!(claim.processor_kind, "asr");
+    assert_eq!(claim.processor_version, ASR_CURRENT);
     assert_eq!(claim.blob_sha256, sha256);
 }
 
@@ -627,24 +586,12 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
     let database = proof_database("media_requeue_missing_material").await;
     let (healthy_sha, healthy_slot) = seed_media_without_jobs(&database, 2, "video").await;
     let (missing_sha, missing_slot) = seed_media_key_without_its_material(&database, 1).await;
-    let missing_v1 = insert_outdated_job(
-        &database,
-        &missing_sha,
-        &missing_slot,
-        "video_frame_ocr",
-        BASELINE,
-    )
-    .await;
-    let healthy_v1 = insert_outdated_job(
-        &database,
-        &healthy_sha,
-        &healthy_slot,
-        "video_frame_ocr",
-        BASELINE,
-    )
-    .await;
-    let before = jobs_of(&database, "video_frame_ocr", CURRENT).await;
-    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
+    let missing_v1 =
+        insert_outdated_job(&database, &missing_sha, &missing_slot, "asr", BASELINE).await;
+    let healthy_v1 =
+        insert_outdated_job(&database, &healthy_sha, &healthy_slot, "asr", BASELINE).await;
+    let before = jobs_of(&database, "asr", ASR_CURRENT).await;
+    let summary = requeue_outdated_processor_jobs(&database, &kinds(&["asr"]), false)
         .await
         .expect("the named kind is registered");
     assert_eq!(
@@ -661,7 +608,7 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
     // 认出新排出来的两条，按槽位分开——一条的素材不在库里，一条正常。
     let mut missing_job = None;
     let mut healthy_job = None;
-    for job_ref in jobs_of(&database, "video_frame_ocr", CURRENT).await {
+    for job_ref in jobs_of(&database, "asr", ASR_CURRENT).await {
         if before.contains(&job_ref) {
             continue;
         }
@@ -705,10 +652,9 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
     .await
     .expect("排队时间是可变控制状态");
 
-    let outcome =
-        claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["video_frame_ocr"]))
-            .await
-            .expect("读不出输入的作业不是错误，是一次正常结局");
+    let outcome = claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["asr"]))
+        .await
+        .expect("读不出输入的作业不是错误，是一次正常结局");
     match outcome {
         MediaProcessingClaimOutcome::Retired {
             job_ref,
@@ -716,7 +662,7 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
             reason,
         } => {
             assert_eq!(job_ref, missing_job, "退休的必须是队首那条");
-            assert_eq!(processor_kind, "video_frame_ocr");
+            assert_eq!(processor_kind, "asr");
             assert_eq!(reason, "source_material_missing");
         }
         other => panic!("素材不在的作业应当当场退休，而不是 {other:?}"),
@@ -760,14 +706,13 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
             .expect("the healthy work row is readable");
     assert_eq!(healthy_state, "pending", "退休只退它自己那条");
 
-    let claim =
-        match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["video_frame_ocr"]))
-            .await
-            .expect("the claim is readable")
-        {
-            MediaProcessingClaimOutcome::Claimed(claim) => claim,
-            other => panic!("队首退休之后，下一条应当照常领得到：{other:?}"),
-        };
+    let claim = match claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["asr"]))
+        .await
+        .expect("the claim is readable")
+    {
+        MediaProcessingClaimOutcome::Claimed(claim) => claim,
+        other => panic!("队首退休之后，下一条应当照常领得到：{other:?}"),
+    };
     assert_eq!(claim.job_ref, healthy_job);
     assert_eq!(claim.blob_sha256, healthy_sha);
 }
@@ -778,25 +723,19 @@ async fn a_requeued_job_without_its_material_is_retired_without_blocking_the_que
 async fn dry_run_reports_what_a_real_run_would_do_and_leaves_nothing_behind() {
     let database = proof_database("media_requeue_dry_run").await;
     let (sha256, slot_key) = seed_media_without_jobs(&database, 1, "video").await;
-    insert_outdated_job(&database, &sha256, &slot_key, "video_frame_ocr", BASELINE).await;
+    insert_outdated_job(&database, &sha256, &slot_key, "asr", BASELINE).await;
 
-    let preview = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), true)
+    let preview = requeue_outdated_processor_jobs(&database, &kinds(&["asr"]), true)
         .await
         .expect("a dry run is readable");
     assert_eq!(preview[0].enqueued_jobs, 1);
-    assert_eq!(
-        jobs_of(&database, "video_frame_ocr", CURRENT).await.len(),
-        0
-    );
+    assert_eq!(jobs_of(&database, "asr", ASR_CURRENT).await.len(), 0);
 
-    let real = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), false)
+    let real = requeue_outdated_processor_jobs(&database, &kinds(&["asr"]), false)
         .await
         .expect("the named kind is registered");
     assert_eq!(real[0].enqueued_jobs, preview[0].enqueued_jobs);
-    assert_eq!(
-        jobs_of(&database, "video_frame_ocr", CURRENT).await.len(),
-        1
-    );
+    assert_eq!(jobs_of(&database, "asr", ASR_CURRENT).await.len(), 1);
 }
 
 /// 名字打错必须当场报错。安静地排 0 条会被读成「这一类没有旧作业」——正是本次重排要消灭的
@@ -807,7 +746,8 @@ async fn requeue_refuses_a_kind_that_has_no_registered_version() {
     let database = proof_database("media_requeue_unregistered").await;
 
     assert_eq!(processor_version_for_kind("image_ocr"), Some(CURRENT));
-    assert_eq!(processor_version_for_kind("video_frame_ocr"), Some(CURRENT));
+    // Video frame text was retired on 2026-11-16; its historical jobs keep their version.
+    assert_eq!(processor_version_for_kind("video_frame_ocr"), None);
     assert_eq!(processor_version_for_kind("asr"), Some(ASR_CURRENT));
     assert_eq!(processor_version_for_kind("thumbnail"), Some(BASELINE));
     assert_eq!(processor_version_for_kind("audio_extract"), Some(BASELINE));
@@ -820,291 +760,6 @@ async fn requeue_refuses_a_kind_that_has_no_registered_version() {
         error.to_string().contains("image_ocr_ocr"),
         "报错要点出是哪个名字：{error}"
     );
-}
-
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn missing_video_frames_can_be_repaired_without_old_jobs_or_repeating_asr() {
-    let database = proof_database("missing_video_frame_jobs").await;
-    let (sha, slot) = seed_video(&database, 9101).await;
-    let (outside_sha, _) = seed_video(&database, 9102).await;
-    seed_video(&database, 9103).await;
-    let (existing_sha, existing_slot) = seed_video(&database, 9104).await;
-    let (restricted_sha, _) = seed_video(&database, 9105).await;
-    let (image_sha, _) = seed_image(&database, 9106).await;
-    let root = std::path::PathBuf::from(std::env::var_os("LINGGAN_LOCAL_MEDIA_ROOT").unwrap());
-    for hash in [&sha, &outside_sha, &existing_sha, &restricted_sha] {
-        let path = root.join(format!("blobs/{}/{hash}", &hash[..2]));
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, vec![0_u8; 8192]).unwrap();
-    }
-    // Reproduce historical job removal only inside this disposable synthetic schema.
-    sqlx::query("TRUNCATE linggan_media_processing_job CASCADE")
-        .execute(database.pool())
-        .await
-        .unwrap();
-    let asr = insert_outdated_job(&database, &sha, &slot, "asr", ASR_CURRENT).await;
-    insert_outdated_job(
-        &database,
-        &existing_sha,
-        &existing_slot,
-        "video_frame_ocr",
-        BASELINE,
-    )
-    .await;
-    linggan_evidence::record_blob_disposition(
-        &database,
-        &restricted_sha,
-        linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
-        "synthetic-proof",
-        "restricted video",
-    )
-    .await
-    .unwrap();
-    let works:Vec<Uuid>=sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id IN ('note-requeue-video-9101','note-requeue-video-9103','note-requeue-video-9104','note-requeue-video-9105','note-requeue-image-9106') ORDER BY public_ref")
-        .fetch_all(database.pool()).await.unwrap();
-    let legacy = requeue_outdated_processor_jobs(&database, &kinds(&["video_frame_ocr"]), true)
-        .await
-        .unwrap();
-    assert_eq!(legacy[0].enqueued_jobs, 1);
-    let preview = enqueue_missing_video_frame_jobs(&database, &works, true)
-        .await
-        .unwrap();
-    assert_eq!(preview.enqueued_jobs, 1);
-    assert!(
-        jobs_of(&database, "video_frame_ocr", CURRENT)
-            .await
-            .is_empty()
-    );
-    assert_eq!(jobs_of(&database, "asr", ASR_CURRENT).await, vec![asr]);
-    assert!(
-        enqueue_missing_video_frame_jobs(&database, &[], false)
-            .await
-            .is_err()
-    );
-    let mut invalid_scope = works.clone();
-    invalid_scope.push(Uuid::new_v4());
-    assert!(
-        enqueue_missing_video_frame_jobs(&database, &invalid_scope, false)
-            .await
-            .is_err()
-    );
-    assert!(
-        jobs_of(&database, "video_frame_ocr", CURRENT)
-            .await
-            .is_empty()
-    );
-    let (first, concurrent) = tokio::join!(
-        enqueue_missing_video_frame_jobs(&database, &works, false),
-        enqueue_missing_video_frame_jobs(&database, &works, false)
-    );
-    assert_eq!(
-        first.unwrap().enqueued_jobs + concurrent.unwrap().enqueued_jobs,
-        1
-    );
-    assert_eq!(
-        enqueue_missing_video_frame_jobs(&database, &works, false)
-            .await
-            .unwrap()
-            .enqueued_jobs,
-        0
-    );
-    let jobs = jobs_of(&database, "video_frame_ocr", CURRENT).await;
-    assert_eq!(jobs.len(), 1);
-    assert_eq!(
-        job_row(&database, jobs[0]).await,
-        (
-            sha.clone(),
-            Some(slot.clone()),
-            CURRENT.into(),
-            "full_blob".into()
-        )
-    );
-    assert_eq!(
-        event_rows(&database, jobs[0]).await,
-        vec![(
-            "pending".into(),
-            Some("queued_for_missing_video_frames".into())
-        )]
-    );
-    assert_eq!(jobs_of(&database, "asr", ASR_CURRENT).await, vec![asr]);
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM linggan_media_processing_job WHERE blob_sha256=$1"
-        )
-        .bind(&image_sha)
-        .fetch_one(database.pool())
-        .await
-        .unwrap(),
-        0
-    );
-    ensure_media_processing_work(&database).await.unwrap();
-    for job in jobs_of(&database, "video_frame_ocr", BASELINE).await {
-        mark_work_completed(&database, job).await;
-    }
-    let MediaProcessingClaimOutcome::Claimed(claim) =
-        claim_media_processing_work(&database, Uuid::new_v4(), &kinds(&["video_frame_ocr"]))
-            .await
-            .unwrap()
-    else {
-        panic!("a repaired job must be claimable through the normal worker path")
-    };
-    assert_eq!(claim.job_ref, jobs[0]);
-    assert_eq!(claim.blob_sha256, sha);
-    let outside: Uuid = sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='note-requeue-video-9102'").fetch_one(database.pool()).await.unwrap();
-    let binary = std::env::var_os("LINGGAN_MEDIA_REQUEUE_PROOF_BIN")
-        .expect("the dossier-input runner builds the repair CLI");
-    for args in [
-        vec!["--missing-video-frames"],
-        vec!["--missing-video-frames", ""],
-        vec!["--missing-video-frames", "invalid"],
-        vec![
-            "--missing-video-frames",
-            "00000000-0000-4000-8000-000000000001,invalid",
-        ],
-        vec![
-            "--missing-video-frames",
-            "00000000-0000-4000-8000-000000000001",
-            "--kinds",
-            "asr",
-        ],
-    ] {
-        let output = std::process::Command::new(&binary)
-            .env_remove("LINGGAN_LOCAL_DATABASE_URL")
-            .args(args)
-            .output()
-            .unwrap();
-        assert_eq!(output.status.code(), Some(2));
-        assert!(!String::from_utf8_lossy(&output.stderr).contains("LINGGAN_LOCAL_DATABASE_URL"));
-    }
-    let url = format!(
-        "{}?options=-csearch_path%3Dmissing_video_frame_jobs",
-        std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap()
-    );
-    for (preview, count) in [(true, 1), (false, 1), (false, 0)] {
-        let mut command = std::process::Command::new(&binary);
-        command
-            .env("LINGGAN_LOCAL_DATABASE_URL", &url)
-            .args(["--missing-video-frames", &outside.to_string()]);
-        if preview {
-            command.arg("--dry-run");
-        }
-        let output = command.output().unwrap();
-        assert!(
-            output.status.success(),
-            "repair CLI failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert!(String::from_utf8_lossy(&output.stdout).contains(&format!(" {count} 条")));
-        assert_eq!(
-            jobs_of(&database, "video_frame_ocr", CURRENT).await.len(),
-            if preview { 1 } else { 2 }
-        );
-    }
-}
-
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn missing_video_frames_do_not_repeat_current_readings() {
-    use linggan_evidence::material_reading::{self, NewReading, Publication};
-    let db = proof_database("missing_frames_current_readings").await;
-    let mut works = vec![];
-    let mut slots = vec![];
-    let root = std::path::PathBuf::from(std::env::var_os("LINGGAN_LOCAL_MEDIA_ROOT").unwrap());
-    for index in [9201, 9202, 9203] {
-        let (sha, slot) = seed_video(&db, index).await;
-        let path = root.join(format!("blobs/{}/{sha}", &sha[..2]));
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(path, vec![0_u8; 8192]).unwrap();
-        slots.push(slot);
-    }
-    sqlx::query("TRUNCATE linggan_media_processing_job CASCADE")
-        .execute(db.pool())
-        .await
-        .unwrap();
-    for (slot, state) in slots
-        .into_iter()
-        .zip(["present", "known_empty", "not_applicable"])
-    {
-        let (work, source): (Uuid, Uuid) = sqlx::query_as("SELECT origin.content_public_ref, materialization.materialization_ref FROM linggan_material_media_origin origin JOIN linggan_media_download_attempt attempt ON attempt.media_observation_ref=origin.observation_ref JOIN linggan_media_materialization materialization USING(download_attempt_ref) WHERE origin.slot_key=$1").bind(&slot).fetch_one(db.pool()).await.unwrap();
-        let mut tx = db.pool().begin().await.unwrap();
-        let reading = material_reading::publish_in(&mut tx, NewReading {
-            content_public_ref: work, unit_key: format!("video_frame:{slot}"), kind: "video_frame".into(), slot_key: Some(slot), page: None,
-            source_version: source.to_string(), source_state: state.into(), derivative_ref: None,
-            producer_ref: Some(Uuid::new_v4()), generated_by: "frame_ocr".into(), rule_version: "synthetic-frame-replay.v1".into(),
-            blocks: if state == "present" { vec![serde_json::json!({"ref":"frame","kind":"paragraph","text":"合成画面文字","speaker":"unconfirmed"})] } else { vec![] },
-            issues: vec![], source_location: serde_json::json!({"synthetic":true}), publication: Publication::Automatic { expected_current: None },
-        }).await.unwrap();
-        assert!(reading.current);
-        tx.commit().await.unwrap();
-        works.push(work);
-    }
-    for work in &works {
-        let dossier = linggan_evidence::research_dossier::read(&db, *work)
-            .await
-            .unwrap()
-            .unwrap();
-        assert!(
-            dossier
-                .materials
-                .iter()
-                .any(|m| m["kind"] == "video_frame" && m["currentRevisionRef"].is_string())
-        );
-    }
-    assert_eq!(
-        enqueue_missing_video_frame_jobs(&db, &works, false)
-            .await
-            .unwrap()
-            .enqueued_jobs,
-        0
-    );
-    assert!(jobs_of(&db, "video_frame_ocr", CURRENT).await.is_empty());
-}
-
-#[tokio::test]
-#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
-async fn missing_video_frames_respect_the_source_processing_policy() {
-    let db = proof_database("missing_frames_policy").await;
-    let (sha, slot) = seed_video(&db, 9301).await;
-    let root = std::path::PathBuf::from(std::env::var_os("LINGGAN_LOCAL_MEDIA_ROOT").unwrap());
-    let path = root.join(format!("blobs/{}/{sha}", &sha[..2]));
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    std::fs::write(path, vec![0_u8; 8192]).unwrap();
-    let (work, task): (Uuid, Uuid) = sqlx::query_as("SELECT origin.content_public_ref,package.task_id FROM linggan_material_media_origin origin JOIN linggan_runtime_capture_package package USING(package_ref) WHERE origin.slot_key=$1").bind(&slot).fetch_one(db.pool()).await.unwrap();
-    let target = Uuid::new_v4();
-    let authorization = Uuid::new_v4();
-    let request = Uuid::new_v4();
-    let decision = Uuid::new_v4();
-    let order = Uuid::new_v4();
-    let station = Uuid::new_v4();
-    let lease = Uuid::new_v4();
-    sqlx::query("INSERT INTO collection_observation_target(target_ref,platform,target_kind,identity_key,source) VALUES($1,'xhs','creator','synthetic-policy','manual')").bind(target).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_acquisition_authorization(authorization_ref,platform,target_kind,lane,allowed_task_templates,allowed_dispatch_lanes,max_work_units,purpose,granted_by,expires_at) VALUES($1,'xhs','creator','deep_archive',ARRAY['material_deepening'],ARRAY['immediate'],1,'synthetic policy proof','person',scope_001_now()+interval '1 day')").bind(authorization).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_acquisition_request(request_ref,target_ref,domain_ref,observation_role,lane,purpose,requested_by) VALUES($1,$2,'00000000-0000-4000-8000-000000000001','primary','deep_archive','synthetic policy proof','person')").bind(request).bind(target).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_admission_decision(decision_ref,request_ref,outcome,reason_code,authorization_ref) VALUES($1,$2,'admitted','synthetic',$3)").bind(decision).bind(request).bind(authorization).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_work_order(work_order_ref,decision_ref,target_ref,lane,max_works,stop_conditions) VALUES($1,$2,$3,'deep_archive',1,'[\"maximum_quota\"]')").bind(order).bind(decision).bind(target).execute(db.pool()).await.unwrap();
-    sqlx::query(
-        "INSERT INTO execution_station(station_ref,display_name) VALUES($1,'合成处理许可夹具')",
-    )
-    .bind(station)
-    .execute(db.pool())
-    .await
-    .unwrap();
-    sqlx::query("INSERT INTO collection_work_order_lease(lease_ref,work_order_ref,station_ref,capture_identity,expires_at) VALUES($1,$2,$3,'{}',scope_001_now()+interval '1 hour')").bind(lease).bind(order).bind(station).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_work_order_lease_task(lease_ref,task_id,sequence_no) VALUES($1,$2,1)").bind(lease).bind(task).execute(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO collection_work_order_material_target(work_order_ref,content_public_ref,ordinal,allow_ocr) VALUES($1,$2,1,false)").bind(order).bind(work).execute(db.pool()).await.unwrap();
-    sqlx::query("TRUNCATE linggan_media_processing_job CASCADE")
-        .execute(db.pool())
-        .await
-        .unwrap();
-    assert_eq!(
-        enqueue_missing_video_frame_jobs(&db, &[work], false)
-            .await
-            .unwrap()
-            .enqueued_jobs,
-        0
-    );
-    assert!(jobs_of(&db, "video_frame_ocr", CURRENT).await.is_empty());
 }
 
 #[tokio::test]

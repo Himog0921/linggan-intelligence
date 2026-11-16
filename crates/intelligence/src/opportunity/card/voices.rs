@@ -3,9 +3,14 @@ use super::{CardError, model};
 use crate::{
     comment_cleaning::CLEANER_VERSION,
     comment_study_catalog,
-    comment_study_source::{StudySourceRole, selected_source_in},
+    comment_study_source::{
+        StudySourceError, StudySourceRole, selected_source_in, selected_source_researchable,
+    },
 };
-use sqlx::{Postgres, Row, Transaction};
+use serde::Serialize;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use sqlx::{AssertSqlSafe, Postgres, Row, Transaction};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -21,10 +26,26 @@ pub(super) async fn select(
     tz: &str,
     basis: &str,
 ) -> Result<(Vec<model::Voice>, BTreeMap<String, usize>), CardError> {
-    let sql = format!(
+    select_with_limit(
+        tx,
+        domain,
+        problem,
+        taxonomy,
+        as_of,
+        tz,
+        basis,
+        Some(MAX_SAMPLE_VOICES),
+    )
+    .await
+}
+
+fn candidate_sql() -> String {
+    format!(
         "{}, {}, eligible AS MATERIALIZED (\
          SELECT * FROM linggan_opportunity_eligible_comments($1,$2::timestamptz,$6,$7)) \
          SELECT q.material_ref,q.content_public_ref,q.comment_external_id,q.exclusion_reason,\
+           q.parent_comment_external_id,q.body_state,q.author_external_id,q.work_author_external_id,\
+           q.observation_role,q.source_restricted,current.body_text,\
            likes.like_count,original.body_text IS NOT DISTINCT FROM current.body_text AS same_body \
          FROM qualified q JOIN eligible ON eligible.content_ref=q.content_public_ref \
            AND eligible.comment_external_id=q.comment_external_id \
@@ -41,8 +62,20 @@ pub(super) async fn select(
                   q.content_public_ref,q.comment_external_id",
         comment_study_catalog::facts_sql(),
         comment_study_catalog::like_heads_sql()
-    );
-    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+    )
+}
+
+async fn select_with_limit(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    problem: Uuid,
+    taxonomy: i64,
+    as_of: &str,
+    tz: &str,
+    basis: &str,
+    limit: Option<usize>,
+) -> Result<(Vec<model::Voice>, BTreeMap<String, usize>), CardError> {
+    let rows = sqlx::query(AssertSqlSafe(candidate_sql()))
         .bind(domain)
         .bind(as_of)
         .bind(CLEANER_VERSION)
@@ -61,7 +94,7 @@ pub(super) async fn select(
             *excluded.entry(reason).or_default() += 1;
             continue;
         }
-        if voices.len() == MAX_SAMPLE_VOICES {
+        if limit.is_some_and(|limit| voices.len() == limit) {
             continue;
         }
         if !row.try_get::<bool, _>("same_body")? {
@@ -95,4 +128,238 @@ pub(super) async fn select(
         });
     }
     Ok((voices, excluded))
+}
+
+// A cursor bounds each database fetch; source/context reads are limited to the requested page.
+const CANDIDATE_FETCH_SIZE: usize = 128;
+
+pub(super) struct SourceScope<'a> {
+    pub domain: Uuid,
+    pub problem: Uuid,
+    pub taxonomy: i64,
+    pub as_of: &'a str,
+    pub tz: &'a str,
+    pub basis: &'a str,
+}
+
+#[derive(Clone, Copy)]
+pub(super) enum PageKind {
+    Comments,
+    Works,
+}
+
+pub(super) struct SourcePage {
+    pub items: Vec<Value>,
+    pub excluded: BTreeMap<String, usize>,
+    pub fingerprint: String,
+    pub total: usize,
+}
+
+#[derive(Debug, thiserror::Error)]
+pub(super) enum SourcePageError {
+    #[error(transparent)]
+    Card(#[from] CardError),
+    #[error("opportunity_card_source_selection_changed")]
+    SourceSelectionChanged,
+}
+
+impl From<sqlx::Error> for SourcePageError {
+    fn from(error: sqlx::Error) -> Self {
+        Self::Card(CardError::Database(error))
+    }
+}
+
+impl From<StudySourceError> for SourcePageError {
+    fn from(error: StudySourceError) -> Self {
+        Self::Card(CardError::Source(error))
+    }
+}
+
+impl From<serde_json::Error> for SourcePageError {
+    fn from(error: serde_json::Error) -> Self {
+        Self::Card(CardError::Serialization(error))
+    }
+}
+
+fn hash_item(hasher: &mut Sha256, item: &impl Serialize) -> Result<(), CardError> {
+    let encoded = serde_json::to_vec(item)?;
+    let length = u64::try_from(encoded.len()).map_err(|_| CardError::InvalidMetrics)?;
+    hasher.update(length.to_be_bytes());
+    hasher.update(encoded);
+    Ok(())
+}
+
+#[derive(Default)]
+struct CandidateScan {
+    hasher: Sha256,
+    excluded: BTreeMap<String, usize>,
+    comments: Vec<(Uuid, model::Voice)>,
+    works: BTreeMap<Uuid, Uuid>,
+    comment_count: usize,
+}
+
+impl CandidateScan {
+    fn push(
+        &mut self,
+        row: sqlx::postgres::PgRow,
+        start: usize,
+        end: usize,
+        kind: PageKind,
+    ) -> Result<(), SourcePageError> {
+        if let Some(reason) = row.try_get::<Option<String>, _>("exclusion_reason")? {
+            *self.excluded.entry(reason).or_default() += 1;
+            return Ok(());
+        }
+        if !row.try_get::<bool, _>("same_body")? {
+            *self
+                .excluded
+                .entry("sourceBodyChanged".to_owned())
+                .or_default() += 1;
+            return Ok(());
+        }
+        if !selected_source_researchable(&row)? {
+            *self
+                .excluded
+                .entry("sourceUnavailable".to_owned())
+                .or_default() += 1;
+            return Ok(());
+        }
+        let content_ref: Uuid = row.try_get("content_public_ref")?;
+        let source_ref: Uuid = row.try_get("material_ref")?;
+        let voice = model::Voice {
+            comment_ref: model::CommentRef {
+                content_ref,
+                comment_external_id: row.try_get("comment_external_id")?,
+            },
+            text: Some(row.try_get::<String, _>("body_text")?),
+            likes: row.try_get("like_count")?,
+            work_id: content_ref,
+            tombstone: false,
+        };
+        match kind {
+            PageKind::Comments => {
+                hash_item(&mut self.hasher, &voice)?;
+                if (start..end).contains(&self.comment_count) {
+                    self.comments.push((source_ref, voice));
+                }
+                self.comment_count = self
+                    .comment_count
+                    .checked_add(1)
+                    .ok_or(CardError::InvalidMetrics)?;
+            }
+            PageKind::Works => {
+                self.works.entry(content_ref).or_insert(source_ref);
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Preserve the shared qualification and complete-result fingerprint while limiting source
+/// context reads to the page. The ordered candidate scan is streamed in bounded batches.
+pub(super) async fn select_page(
+    tx: &mut Transaction<'_, Postgres>,
+    scope: &SourceScope<'_>,
+    start: usize,
+    limit: usize,
+    kind: PageKind,
+) -> Result<SourcePage, SourcePageError> {
+    // The fingerprint consumes the complete cursor, even though source context is paged.
+    sqlx::query("SET LOCAL cursor_tuple_fraction = 1.0")
+        .execute(&mut **tx)
+        .await?;
+    let statement = format!(
+        "DECLARE opportunity_voice_page NO SCROLL CURSOR FOR {}",
+        candidate_sql()
+    );
+    sqlx::query(AssertSqlSafe(statement))
+        .bind(scope.domain)
+        .bind(scope.as_of)
+        .bind(CLEANER_VERSION)
+        .bind(Option::<Uuid>::None)
+        .bind(Option::<String>::None)
+        .bind(scope.tz)
+        .bind(scope.basis)
+        .bind(scope.problem)
+        .bind(scope.taxonomy)
+        .execute(&mut **tx)
+        .await?;
+    let mut scan = CandidateScan::default();
+    let end = start.saturating_add(limit);
+    let fetch = format!("FETCH FORWARD {CANDIDATE_FETCH_SIZE} FROM opportunity_voice_page");
+    loop {
+        let rows = sqlx::query(AssertSqlSafe(fetch.as_str()))
+            .fetch_all(&mut **tx)
+            .await?;
+        let fetched = rows.len();
+        for row in rows {
+            scan.push(row, start, end, kind)?;
+        }
+        if fetched < CANDIDATE_FETCH_SIZE {
+            break;
+        }
+    }
+    sqlx::query("CLOSE opportunity_voice_page")
+        .execute(&mut **tx)
+        .await?;
+    let CandidateScan {
+        mut hasher,
+        excluded,
+        comments,
+        works,
+        comment_count,
+    } = scan;
+    let mut items = Vec::new();
+    let total = match kind {
+        PageKind::Comments => {
+            for (source_ref, voice) in comments {
+                let source = selected_source_in(
+                    tx,
+                    scope.domain,
+                    voice.work_id,
+                    source_ref,
+                    StudySourceRole::Primary,
+                    scope.as_of,
+                )
+                .await?
+                .ok_or(SourcePageError::SourceSelectionChanged)?;
+                if voice.text.as_deref() != Some(source.raw_text.as_str()) {
+                    return Err(SourcePageError::SourceSelectionChanged);
+                }
+                items.push(serde_json::to_value(voice)?);
+            }
+            comment_count
+        }
+        PageKind::Works => {
+            for work in works.keys() {
+                hash_item(&mut hasher, work)?;
+            }
+            for (work, source_ref) in works.iter().skip(start).take(limit) {
+                selected_source_in(
+                    tx,
+                    scope.domain,
+                    *work,
+                    *source_ref,
+                    StudySourceRole::Primary,
+                    scope.as_of,
+                )
+                .await?
+                .ok_or(SourcePageError::SourceSelectionChanged)?;
+                items.push(json!({"workId":work,"basis":"comment_mention"}));
+            }
+            works.len()
+        }
+    };
+    hash_item(&mut hasher, &excluded)?;
+    let fingerprint = hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok(SourcePage {
+        items,
+        excluded,
+        fingerprint,
+        total,
+    })
 }

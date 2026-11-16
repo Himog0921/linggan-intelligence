@@ -292,6 +292,13 @@ fn classify(row: &sqlx::postgres::PgRow) -> Result<Result<Candidate, &'static st
     }))
 }
 
+/// Apply the exact source classifier to an already selected catalog observation.
+pub(crate) fn selected_source_researchable(
+    row: &sqlx::postgres::PgRow,
+) -> Result<bool, sqlx::Error> {
+    Ok(classify(row)?.is_ok())
+}
+
 async fn fetch_eligible_sources(
     tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,

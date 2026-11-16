@@ -5,7 +5,7 @@ import { dossierTabStatus } from './dossierTabStatus';
 const normal = () => parseDossierPayload(dossierJson(1, {
   materials: [dossierMaterialJson(1, { kind: 'body', blocks: [{ ref: 'body', kind: 'paragraph', text: '已有正文' }] })],
   readingView: { mainBlockRefs: ['body'], supplementBlockRefs: [] },
-  coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 0, acquiredPages: 0, processedPages: 0, missingPages: [], unknownOrder: false }, sources: { body: { state: 'available', units: 1, readings: 1 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } },
+  coverage: { imageInventory: { basis: 'platform_image_list', expectedPages: 0, acquiredPages: 0, processedPages: 0, missingPages: [], unknownOrder: false }, sources: { body: { state: 'available', units: 1, readings: 1 }, images: { state: 'not_applicable', units: 0, readings: 0 }, audio: { state: 'not_applicable', units: 0, readings: 0 } } },
 })).dossier;
 it('normal reading has no quality or ready badge; unknown does not become normal', () => {
   expect(dossierTabStatus(normal(), null, false)).toBeNull();

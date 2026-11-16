@@ -211,8 +211,10 @@ fn expected_pages(inventory: &Inventory) -> Option<u64> {
 fn media_materials(work: Uuid, readings: &[Value], slots: &[Value]) -> Vec<Value> {
     let mut materials = vec![];
     for slot in slots {
+        // Video frame text was retired on 2026-11-16 pending a dedicated rebuild;
+        // historical frame readings stay in storage but no longer enter the dossier.
         let kinds: &[&str] = if slot["component"] == "motion" {
-            &["audio", "video_frame"]
+            &["audio"]
         } else {
             &["image"]
         };
@@ -271,7 +273,6 @@ fn media_materials(work: Uuid, readings: &[Value], slots: &[Value]) -> Vec<Value
             }
             if let Some(processing) = slot["processing"].get(match *kind {
                 "audio" => "asr",
-                "video_frame" => "video_frame_ocr",
                 _ => "image_ocr",
             }) {
                 material["processing"] = processing.clone();
@@ -292,22 +293,6 @@ fn media_materials(work: Uuid, readings: &[Value], slots: &[Value]) -> Vec<Value
                     "来源已取得，尚无当前可用的规范化识读",
                     "source_refresh"
                 )]);
-            }
-            if *kind == "video_frame"
-                && material["sourceState"] == "present"
-                && material["blocks"]
-                    .as_array()
-                    .is_some_and(|blocks| !blocks.is_empty())
-            {
-                material["issues"]
-                    .as_array_mut()
-                    .expect("issues")
-                    .push(issue(
-                        "video_sampling_incomplete",
-                        "sampling_incomplete",
-                        "仅包含实际采样的帧，未覆盖整段视频",
-                        "source_refresh",
-                    ));
             }
             if slot["duplicateReadingConflict"] == true {
                 material["issues"]
@@ -401,7 +386,6 @@ pub(super) fn fragments(work: &WorkResourceCurrent, materials: &[Value]) -> Vec<
                 Some("tags") => "tags",
                 Some("image") => "ocr",
                 Some("audio") => "transcript",
-                Some("video_frame") => "frame_text",
                 _ => continue,
             };
             let text = content::block_text(block);
@@ -528,7 +512,7 @@ mod live_photo_tests {
         video["slotKey"] = json!("video");
         video["purpose"] = json!("video");
         let units = media_materials(Uuid::nil(), &[], &[live.clone(), video]);
-        assert_eq!(units.len(), 2);
+        assert_eq!(units.len(), 1, "a video yields only its speech unit");
         assert!(units.iter().all(|u| u["slotKey"] == "video"));
         let reading = json!({"ref":"speech", "slotKey":"live", "kind":"audio", "sourceVersion":"v1", "sourceState":"present", "blocks":[{"ref":"b","kind":"paragraph","text":"现场声音"}],"issues":[]});
         let units = media_materials(Uuid::nil(), &[reading.clone()], std::slice::from_ref(&live));
