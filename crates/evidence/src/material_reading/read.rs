@@ -1,13 +1,25 @@
 use super::*;
 
-type ImageSources<'a> = BTreeMap<(Uuid, &'a str), (&'a str, &'a str)>;
+type ImageSources = crate::research_dossier::DisplayedImageSources;
 
 pub async fn read_current_in(
     conn: &mut PgConnection,
     works: &[Uuid],
     as_of: &str,
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
-    read_rows(conn, works, as_of, None, None, None).await
+    if works.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let currents =
+        crate::work_resource_current::read_work_resource_currents_in(conn, works, as_of).await?;
+    let references: Vec<_> = currents.iter().collect();
+    let sources =
+        crate::research_dossier::displayed_image_sources_in(conn, &references, as_of).await?;
+    let mut result = read_current_from_currents_in(conn, &references, as_of, &sources).await?;
+    for work in works {
+        result.entry(*work).or_default();
+    }
+    Ok(result)
 }
 
 /// Reuse the canonical body source from the caller's same-transaction Current.
@@ -16,7 +28,7 @@ pub(crate) async fn read_current_from_currents_in(
     conn: &mut PgConnection,
     currents: &[&crate::work_resource_current::WorkResourceCurrent],
     as_of: &str,
-    image_sources: &ImageSources<'_>,
+    image_sources: &ImageSources,
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
     let works: Vec<_> = currents.iter().map(|current| current.public_ref).collect();
     let bodies: BTreeMap<_, _> = currents
@@ -51,27 +63,14 @@ pub(crate) async fn current_reference_in(
     unit_ref: Uuid,
     as_of: &str,
 ) -> Result<Option<Uuid>, sqlx::Error> {
-    let row = sqlx::query("SELECT u.*,r.derivative_ref FROM linggan_material_unit u LEFT JOIN linggan_material_reading r ON r.reading_ref=u.current_reading_ref AND r.unit_ref=u.unit_ref WHERE u.content_public_ref=$1 AND u.unit_ref=$2")
-        .bind(work).bind(unit_ref).fetch_one(&mut *conn).await?;
-    let unit = Unit::from_row(&row);
-    let derivative = row.get("derivative_ref");
-    if unit.current.is_some()
-        && source::unrestricted(conn, &unit, derivative, &unit.source).await?
-        && source::current(
-            conn,
-            work,
-            &unit.kind,
-            unit.slot.as_deref(),
-            &unit.source,
-            derivative,
-            as_of,
-        )
-        .await?
-    {
-        Ok(unit.current)
-    } else {
-        Ok(None)
-    }
+    let rows = read_current_in(conn, &[work], as_of).await?;
+    Ok(rows
+        .get(&work)
+        .into_iter()
+        .flatten()
+        .find(|row| row["ref"] == unit_ref.to_string())
+        .and_then(|row| row["currentRevisionRef"].as_str())
+        .and_then(|value| Uuid::parse_str(value).ok()))
 }
 
 async fn read_rows(
@@ -80,7 +79,7 @@ async fn read_rows(
     as_of: &str,
     readings: Option<&[Uuid]>,
     bodies: Option<&BTreeMap<Uuid, Option<Uuid>>>,
-    image_sources: Option<&ImageSources<'_>>,
+    image_sources: Option<&ImageSources>,
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
     if works.is_empty() {
         return Ok(BTreeMap::new());
@@ -93,19 +92,29 @@ async fn read_rows(
         LEFT JOIN linggan_material_reading_command rc ON rc.command_ref=s.command_ref \
         WHERE u.content_public_ref=ANY($1) ORDER BY u.content_public_ref,r.page_ordinal NULLS LAST,u.unit_key,r.created_at"
     } else {
-        "SELECT u.unit_ref,u.content_public_ref,u.kind,u.slot_key,s.page_ordinal,s.source_version,s.source_state,s.reading_ref AS current_reading_ref,s.revision,s.adoption,s.verification, \
+        "WITH selected_images AS MATERIALIZED (SELECT * FROM jsonb_to_recordset($4::jsonb) AS image(work_ref uuid,slot_key text,source_version text,blob_sha256 text)) \
+        SELECT u.unit_ref,u.content_public_ref,u.kind,u.slot_key,s.page_ordinal,s.source_version,s.source_state,s.reading_ref AS current_reading_ref,s.revision,s.adoption,s.verification, \
         r.reading_ref,r.source_version AS reading_source_version,r.derivative_ref,r.producer_ref,r.producer_kind,r.rule_version,r.blocks,r.issues,r.source_location,r.created_at::text AS reading_created_at,CASE WHEN rc.command_ref IS NOT NULL THEN jsonb_build_object('commandRef',rc.command_ref,'actor',rc.actor,'reason',rc.reason,'action',rc.action,'reviewedAt',rc.created_at::text) END AS review \
-        FROM linggan_material_unit u JOIN LATERAL(SELECT * FROM linggan_material_reading_selection s WHERE s.unit_ref=u.unit_ref AND s.created_at<=$2::text::timestamptz ORDER BY s.revision DESC LIMIT 1) s ON true \
+        FROM linggan_material_unit u JOIN LATERAL(SELECT * FROM linggan_material_reading_selection s WHERE s.unit_ref=u.unit_ref AND s.created_at<=$2::text::timestamptz \
+        AND (u.kind<>'image' OR NOT EXISTS(SELECT 1 FROM selected_images i WHERE i.work_ref=u.content_public_ref AND i.slot_key=u.slot_key) \
+        OR EXISTS(SELECT 1 FROM selected_images i WHERE i.work_ref=u.content_public_ref AND i.slot_key=u.slot_key AND (i.source_version=s.source_version OR EXISTS(SELECT 1 FROM linggan_media_materialization m WHERE m.materialization_ref::text=s.source_version AND m.blob_sha256=i.blob_sha256 AND m.verified_at<=$2::text::timestamptz)))) \
+        ORDER BY s.revision DESC LIMIT 1) s ON true \
         LEFT JOIN linggan_material_reading r ON r.reading_ref=s.reading_ref AND r.unit_ref=u.unit_ref AND r.created_at<=$2::text::timestamptz \
         LEFT JOIN linggan_material_reading_command rc ON rc.command_ref=s.command_ref \
         WHERE u.content_public_ref=ANY($1) AND $3::uuid[] IS NULL ORDER BY u.content_public_ref,s.page_ordinal NULLS LAST,u.unit_key"
     };
-    let rows = sqlx::query(sql)
-        .bind(works)
-        .bind(as_of)
-        .bind(readings)
-        .fetch_all(&mut *conn)
-        .await?;
+    let query = sqlx::query(sql).bind(works).bind(as_of).bind(readings);
+    let rows = if readings.is_some() {
+        query.fetch_all(&mut *conn).await?
+    } else {
+        let sources: Vec<_> = image_sources.into_iter().flat_map(|images| images.iter()).map(|((work, slot), (version, sha))| {
+            json!({"work_ref": work, "slot_key": slot, "source_version": version, "blob_sha256": sha})
+        }).collect();
+        query
+            .bind(sqlx::types::Json(sources))
+            .fetch_all(&mut *conn)
+            .await?
+    };
     let mut result: BTreeMap<Uuid, Vec<Value>> = works.iter().map(|w| (*w, vec![])).collect();
     for row in rows {
         let mut unit = Unit::from_row(&row);
@@ -134,9 +143,9 @@ async fn read_rows(
             match unit
                 .slot
                 .as_deref()
-                .and_then(|slot| images.get(&(unit.work, slot)))
+                .and_then(|slot| images.get(&(unit.work, slot.to_owned())))
             {
-                Some((version, _)) if *version == unit.source => true,
+                Some((version, _)) if version == &unit.source => true,
                 Some((_, sha)) => source::has_image_blob(conn, &unit.source, sha, as_of).await?,
                 None => false,
             }

@@ -180,7 +180,7 @@ async fn review_reading_in(
     let now: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut *tx)
         .await?;
-    if unit.source != r.source_version
+    if (unit.kind != "image" && unit.source != r.source_version)
         || !source::current(
             tx,
             work,
@@ -202,6 +202,9 @@ async fn review_reading_in(
     if current != r.expected_current_revision_ref {
         return Err(ReadingError::Conflict);
     }
+    if unit.kind == "image" {
+        unit.source.clone_from(&r.source_version);
+    }
     if !source::bytes_available(tx, &unit).await? {
         return Err(ReadingError::OriginalUnavailable);
     }
@@ -218,6 +221,12 @@ async fn review_reading_in(
     } else {
         None
     };
+    if unit.kind == "image" {
+        if let Some(previous) = &before {
+            unit.state = previous.get("source_state");
+            unit.page = previous.get("page_ordinal");
+        }
+    }
     let original_blocks: Vec<Value> = before
         .as_ref()
         .map(|row| serde_json::from_value(row.get("blocks")))

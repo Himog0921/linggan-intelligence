@@ -82,21 +82,8 @@ pub(crate) async fn read_from_currents_in(
 ) -> Result<BTreeMap<Uuid, ResearchDossier>, sqlx::Error> {
     let mut output = BTreeMap::new();
     for batch in currents.chunks(100) {
-        let mut inventories = inventory::read_in(tx, batch, as_of).await?;
-        let image_sources = inventories
-            .iter()
-            .flat_map(|(work, inventory)| {
-                inventory.slots.iter().filter_map(|slot| {
-                    if slot["component"] != "image" || slot["sourceState"] != "present" {
-                        return None;
-                    }
-                    let key = slot["slotKey"].as_str()?;
-                    let version = slot["sourceVersion"].as_str()?;
-                    let sha = slot["blobSha256"].as_str()?;
-                    Some(((*work, key), (version, sha)))
-                })
-            })
-            .collect();
+        let mut inventories = inventory::read_in(&mut **tx, batch, as_of).await?;
+        let image_sources = image_sources(&inventories);
         let mut readings = crate::material_reading::read_current_from_currents_in(
             &mut **tx,
             batch,
@@ -119,6 +106,52 @@ pub(crate) async fn read_from_currents_in(
         }
     }
     Ok(output)
+}
+
+pub(crate) type DisplayedImageSources = BTreeMap<(Uuid, String), (String, String)>;
+
+fn image_sources(inventories: &BTreeMap<Uuid, inventory::Inventory>) -> DisplayedImageSources {
+    inventories
+        .iter()
+        .flat_map(|(work, inventory)| {
+            inventory.slots.iter().filter_map(|slot| {
+                if slot["component"] != "image" || slot["sourceState"] != "present" {
+                    return None;
+                }
+                Some((
+                    (*work, slot["slotKey"].as_str()?.to_owned()),
+                    (
+                        slot["sourceVersion"].as_str()?.to_owned(),
+                        slot["blobSha256"].as_str()?.to_owned(),
+                    ),
+                ))
+            })
+        })
+        .collect()
+}
+
+pub(crate) async fn displayed_image_sources_in(
+    conn: &mut sqlx::PgConnection,
+    currents: &[&crate::work_resource_current::WorkResourceCurrent],
+    as_of: &str,
+) -> Result<DisplayedImageSources, sqlx::Error> {
+    Ok(image_sources(
+        &inventory::read_in(conn, currents, as_of).await?,
+    ))
+}
+
+/// Resolve the same displayed image source for standalone reading and editing.
+pub(crate) async fn displayed_image_source_in(
+    conn: &mut sqlx::PgConnection,
+    work: Uuid,
+    slot: &str,
+    as_of: &str,
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    let currents =
+        crate::work_resource_current::read_work_resource_currents_in(conn, &[work], as_of).await?;
+    let sources =
+        displayed_image_sources_in(conn, &currents.iter().collect::<Vec<_>>(), as_of).await?;
+    Ok(sources.get(&(work, slot.to_owned())).cloned())
 }
 
 pub async fn read(

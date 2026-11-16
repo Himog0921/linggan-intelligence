@@ -77,6 +77,8 @@ export function readingAnchor(prefix: string, ref: string): string { return `${p
 /** One concise row per relevant missing content type. Processing diagnostics stay in source detail. */
 export function readingGaps(dossier: Dossier): ReadingGap[] {
   const rows: ReadingGap[] = [];
+  const pendingImageUpdate = dossier.coverage.issues.find(issue => issue.code === 'image_update_pending');
+  if (pendingImageUpdate) rows.push({ key: 'image-update', label: '图片资料', state: '新图未齐', message: pendingImageUpdate.message });
   const kinds = { body: '发布文案', images: '图片文字', audio: '视频口播' } as const;
   const materialKinds = { body: 'body', images: 'image', audio: 'audio' } as const;
   const messages: Record<string, { state: string; message: string }> = {

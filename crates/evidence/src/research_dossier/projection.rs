@@ -22,7 +22,18 @@ pub(super) fn assemble(
     materials.extend(media);
     let note = note(work, &materials, &slots);
     let fragments = fragments(work, &materials);
-    let coverage = coverage::project(&materials, expected_pages(&inventory));
+    let mut coverage = coverage::project(&materials, expected_pages(&inventory));
+    if inventory.pending_image_update {
+        coverage["issues"]
+            .as_array_mut()
+            .expect("coverage issues")
+            .push(issue(
+                "image_update_pending",
+                "image_update_pending",
+                "新图集尚未全部取得，当前显示已取得的版本。",
+                "source_refresh",
+            ));
+    }
     let base = format!(
         "/api/local/work-resources/{}/research-dossier",
         work.public_ref
@@ -238,8 +249,7 @@ fn media_materials(work: Uuid, readings: &[Value], slots: &[Value]) -> Vec<Value
                 });
             // Live-photo motion is optional context, not an unprocessed video speech obligation.
             // Existing readings and raw motion remain accessible; independent videos keep their gaps.
-            if slot["purpose"] == "live_photo" && slot["component"] == "motion"
-            {
+            if slot["purpose"] == "live_photo" && slot["component"] == "motion" {
                 continue;
             }
             let mut material = if let Some(r) = reading {

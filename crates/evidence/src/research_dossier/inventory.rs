@@ -2,7 +2,7 @@
 use crate::work_resource_current::WorkResourceCurrent;
 use serde::Serialize;
 use serde_json::{Value, json};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{PgConnection, Row};
 use std::collections::BTreeMap;
 use uuid::Uuid;
 
@@ -10,18 +10,23 @@ use uuid::Uuid;
 pub(super) struct Inventory {
     pub slots: Vec<Value>,
     pub manifest: Option<Value>,
+    pub pending_image_update: bool,
     pub tags: BTreeMap<Uuid, Value>,
 }
 
 pub(super) async fn read_in(
-    tx: &mut Transaction<'_, Postgres>,
+    conn: &mut PgConnection,
     currents: &[&WorkResourceCurrent],
     as_of: &str,
 ) -> Result<BTreeMap<Uuid, Inventory>, sqlx::Error> {
     let works: Vec<_> = currents.iter().map(|work| work.public_ref).collect();
-    let versions = read_image_versions(tx, &works, as_of).await?;
+    let versions = read_image_versions(conn, &works, as_of).await?;
     let mut result = BTreeMap::<Uuid, Inventory>::new();
     for version in &versions {
+        result
+            .entry(version.work_ref)
+            .or_default()
+            .pending_image_update = version.pending_update;
         if let Some(manifest) = &version.manifest {
             result.entry(version.work_ref).or_default().manifest = Some(manifest.clone());
         }
@@ -70,7 +75,7 @@ FROM origins o CROSS JOIN LATERAL (
  ORDER BY m.verified_at DESC,m.materialization_ref DESC LIMIT 1
 ) m ON true
 ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NULLS LAST,o.slot_key,component.kind
-"#).bind(&works).bind(as_of).bind(sqlx::types::Json(&versions)).fetch_all(&mut **tx).await?;
+"#).bind(&works).bind(as_of).bind(sqlx::types::Json(&versions)).fetch_all(&mut *conn).await?;
     for row in rows {
         let work: Uuid = row.get("content_public_ref");
         let source: Option<Uuid> = row.get("materialization_ref");
@@ -102,8 +107,8 @@ ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NU
             "sourceState":if restricted {"restricted"} else if source.is_some() {"present"} else {"not_acquired"}
         }));
     }
-    read_historical_manifests(tx, currents, as_of, &mut result).await?;
-    read_tags(tx, &works, as_of, &mut result).await?;
+    read_historical_manifests(conn, currents, as_of, &mut result).await?;
+    read_tags(conn, &works, as_of, &mut result).await?;
     Ok(result)
 }
 
@@ -143,10 +148,12 @@ struct ImageVersion {
     legacy_cutoff: Option<String>,
     #[serde(skip)]
     manifest: Option<Value>,
+    #[serde(skip)]
+    pending_update: bool,
 }
 
 async fn read_image_versions(
-    tx: &mut Transaction<'_, Postgres>,
+    conn: &mut PgConnection,
     works: &[Uuid],
     as_of: &str,
 ) -> Result<Vec<ImageVersion>, sqlx::Error> {
@@ -187,12 +194,16 @@ WITH manifests AS MATERIALIZED (
 ), first_manifest AS (
  SELECT DISTINCT ON (work_ref) * FROM manifests
  ORDER BY work_ref,accepted_at,created_at,package_ref
+), latest_manifest AS (
+ SELECT DISTINCT ON (work_ref) work_ref,package_ref FROM manifests
+ ORDER BY work_ref,accepted_at DESC,created_at DESC,package_ref DESC
 ), selected AS (
  SELECT first.work_ref,
         COALESCE(ready.package_ref,CASE WHEN NOT legacy.exists THEN first.package_ref END) AS package_ref,
         CASE WHEN ready.package_ref IS NULL AND legacy.exists THEN first.accepted_at::text END AS legacy_cutoff,
-        COALESCE(ready.inventory,CASE WHEN NOT legacy.exists THEN first.inventory END) AS inventory
- FROM first_manifest first LEFT JOIN ready USING(work_ref)
+        COALESCE(ready.inventory,CASE WHEN NOT legacy.exists THEN first.inventory END) AS inventory,
+        latest.package_ref IS DISTINCT FROM ready.package_ref AS pending_update
+ FROM first_manifest first LEFT JOIN ready USING(work_ref) JOIN latest_manifest latest USING(work_ref)
  CROSS JOIN LATERAL (
    SELECT EXISTS (
      SELECT 1 FROM linggan_material_media_origin o
@@ -206,7 +217,7 @@ WITH manifests AS MATERIALIZED (
    ) AS exists
  ) legacy
 )
-SELECT work_ref,package_ref,legacy_cutoff,
+SELECT work_ref,package_ref,legacy_cutoff,pending_update,
        inventory || jsonb_build_object('packageRef',package_ref) AS manifest
 FROM selected
 "#,
@@ -219,14 +230,15 @@ FROM selected
             package_ref: row.try_get("package_ref")?,
             legacy_cutoff: row.try_get("legacy_cutoff")?,
             manifest: row.try_get("manifest")?,
+            pending_update: row.try_get("pending_update")?,
         })
     })
-    .fetch_all(&mut **tx)
+    .fetch_all(&mut *conn)
     .await
 }
 
 async fn read_historical_manifests(
-    tx: &mut Transaction<'_, Postgres>,
+    conn: &mut PgConnection,
     currents: &[&WorkResourceCurrent],
     as_of: &str,
     inventories: &mut BTreeMap<Uuid, Inventory>,
@@ -262,7 +274,7 @@ WHERE h.detail_ref=ANY($1) AND p.platform='xhs'
     )
     .bind(missing)
     .bind(as_of)
-    .fetch_all(&mut **tx)
+    .fetch_all(&mut *conn)
     .await?;
     for row in rows {
         let work: Uuid = row.get("content_public_ref");
@@ -323,7 +335,7 @@ fn apply_historical_pages(slots: &mut [Value], observed: &[Uuid], materialized: 
 }
 
 async fn read_tags(
-    tx: &mut Transaction<'_, Postgres>,
+    conn: &mut PgConnection,
     works: &[Uuid],
     as_of: &str,
     result: &mut BTreeMap<Uuid, Inventory>,
@@ -338,7 +350,7 @@ WHERE d.content_public_ref=ANY($1) AND p.created_at<=$2::timestamptz
  AND d.created_at<=$2::timestamptz AND capture.accepted_at<=$2::timestamptz
  AND p.projection_contract=$3
 GROUP BY d.content_public_ref,d.material_ref,p.state,p.projection_contract
-"#).bind(works).bind(as_of).bind(crate::material_hashtag::VERSION).fetch_all(&mut **tx).await?;
+"#).bind(works).bind(as_of).bind(crate::material_hashtag::VERSION).fetch_all(&mut *conn).await?;
     for row in rows {
         let work: Uuid = row.get("content_public_ref");
         let source: Uuid = row.get("material_ref");

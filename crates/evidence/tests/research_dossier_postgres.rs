@@ -247,6 +247,19 @@ async fn replacement_image_manifest_waits_for_every_page_receipt() {
     let id = "image-cutover";
     let work = detail(&db, id, json!({"bodyText":""})).await;
     let previous = images(&db, id, 2, &[("image", 1, 'a'), ("image", 2, 'b')]).await;
+    let slot = format!("xhs:{id}:image:1");
+    let original = publish_image(
+        &db,
+        work,
+        &slot,
+        previous[0],
+        "旧版图片文字",
+        material_reading::Publication::Automatic {
+            expected_current: None,
+        },
+    )
+    .await;
+    assert!(original.current);
     let new = observe_images(
         &db,
         id,
@@ -256,6 +269,28 @@ async fn replacement_image_manifest_waits_for_every_page_receipt() {
     .await;
     let page_one = store_image(&db, new[0], 'c').await;
     let page_three = store_image(&db, new[2], 'e').await;
+    let staged_reading = publish_image(
+        &db,
+        work,
+        &slot,
+        page_one,
+        "新版图片文字",
+        material_reading::Publication::Automatic {
+            expected_current: Some(original.reading_ref),
+        },
+    )
+    .await;
+    assert!(
+        !staged_reading.current,
+        "a reading from an unfinished replacement must not replace the displayed version"
+    );
+    // Model a selection written by the previous runtime before this fix.
+    let mut legacy = db.pool().begin().await.unwrap();
+    sqlx::query("UPDATE linggan_material_unit SET source_version=$1,current_reading_ref=$2,revision=revision+1,adoption='automatic',verification='unchecked',updated_at=scope_001_now() WHERE unit_ref=$3")
+        .bind(page_one.to_string()).bind(staged_reading.reading_ref).bind(staged_reading.unit_ref).execute(&mut *legacy).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_reading_selection(selection_ref,unit_ref,revision,event,source_version,source_state,reading_ref,page_ordinal,adoption,verification) SELECT gen_random_uuid(),unit_ref,revision,'automatic',source_version,source_state,current_reading_ref,page_ordinal,adoption,verification FROM linggan_material_unit WHERE unit_ref=$1")
+        .bind(staged_reading.unit_ref).execute(&mut *legacy).await.unwrap();
+    legacy.commit().await.unwrap();
     let staged = dossier::read(&db, work).await.unwrap().unwrap();
     let sources = |read: &dossier::ResearchDossier| {
         read.materials
@@ -267,12 +302,61 @@ async fn replacement_image_manifest_waits_for_every_page_receipt() {
     assert_eq!(sources(&staged), previous);
     assert_eq!(staged.coverage["imageInventory"]["expectedPages"], 2);
     assert_eq!(staged.coverage["imageInventory"]["acquiredPages"], 2);
+    assert!(
+        staged.coverage["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "image_update_pending")
+    );
+    let old = staged
+        .materials
+        .iter()
+        .find(|material| material["slotKey"] == slot)
+        .unwrap();
+    assert_eq!(old["currentRevisionRef"], json!(original.reading_ref));
+    let old_unit: Uuid = old["ref"].as_str().unwrap().parse().unwrap();
+    let correction = material_reading::ReviewReadingRequest {
+        command_ref: Uuid::new_v4(),
+        expected_current_revision_ref: Some(original.reading_ref),
+        unit_ref: old_unit.to_string(),
+        source_version: previous[0].to_string(),
+        action: "edit".into(),
+        actor: "synthetic-editor".into(),
+        reason: "Correct the displayed version".into(),
+        edited_blocks: Some(vec![
+            json!({"kind":"paragraph","text":"已核对旧版文字","speaker":"unconfirmed"}),
+        ]),
+        verified: true,
+        resolved_issue_keys: vec![],
+    };
+    material_reading::review_reading(&db, old_unit, &correction)
+        .await
+        .unwrap();
+    let corrected = dossier::read(&db, work).await.unwrap().unwrap();
+    assert!(
+        corrected
+            .materials
+            .iter()
+            .any(|item| item["slotKey"] == slot && item["blocks"][0]["text"] == "已核对旧版文字")
+    );
 
     let page_two = store_image(&db, new[1], 'd').await;
     let current = dossier::read(&db, work).await.unwrap().unwrap();
     assert_eq!(sources(&current), vec![page_one, page_two, page_three]);
     assert_eq!(current.coverage["imageInventory"]["expectedPages"], 3);
     assert_eq!(current.coverage["imageInventory"]["acquiredPages"], 3);
+    assert!(
+        !current.coverage["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "image_update_pending")
+    );
+    assert!(matches!(
+        material_reading::review_reading(&db, old_unit, &correction).await,
+        Err(material_reading::ReadingError::SourceChanged)
+    ));
     let before_final_receipt = dossier::read_at(&db, work, Some(&staged.as_of))
         .await
         .unwrap()

@@ -164,6 +164,13 @@ fn coverage_limitations(
     materials: &[serde_json::Value],
 ) -> Vec<String> {
     let mut reasons = BTreeSet::new();
+    if coverage["issues"].as_array().is_some_and(|issues| {
+        issues
+            .iter()
+            .any(|issue| issue["code"] == "image_update_pending")
+    }) {
+        reasons.insert("some_media_not_available".into());
+    }
     let inventory = &coverage["imageInventory"];
     if inventory["expectedPages"].as_u64().is_none() {
         reasons.insert("image_total_unknown".into());

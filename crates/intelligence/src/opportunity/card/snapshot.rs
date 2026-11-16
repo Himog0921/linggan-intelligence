@@ -13,6 +13,7 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_comment_problem_membership",
     "linggan_comment_research_request",
     "linggan_comment_research_stage",
+    "linggan_historical_image_inventory",
     "linggan_local_schema_migration",
     "linggan_material_author_profile",
     "linggan_material_comment",
@@ -181,7 +182,7 @@ pub(super) async fn verify_for(
 
 #[cfg(test)]
 mod tests {
-    use super::{CardError, capture, require_visible_restrictions};
+    use super::{CardError, capture, require_visible_restrictions, verify};
     use sqlx::AssertSqlSafe;
     use uuid::Uuid;
 
@@ -190,6 +191,40 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../apps/api/src/local_web/full_schema_fixture.rs"
         ));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the disposable opportunity PostgreSQL proof"]
+    async fn historical_image_inventory_is_covered_and_locked() {
+        let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("disposable proof URL");
+        let db = linggan_storage_postgres::testing::isolated_proof_schema(
+            &url,
+            "opportunity_image_inventory_lock",
+            full_schema::FULL_MIGRATIONS,
+        )
+        .await
+        .unwrap();
+        let mut writer = db.pool().begin().await.unwrap();
+        sqlx::query("LOCK TABLE linggan_historical_image_inventory IN ROW EXCLUSIVE MODE")
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+        let mut blocked = db.pool().begin().await.unwrap();
+        assert!(matches!(
+            capture(&mut blocked).await,
+            Err(CardError::SourcesBusy)
+        ));
+        blocked.rollback().await.unwrap();
+        writer.rollback().await.unwrap();
+
+        let mut reader = db.pool().begin().await.unwrap();
+        capture(&mut reader).await.unwrap();
+        sqlx::query("SELECT count(*) FROM linggan_historical_image_inventory")
+            .execute(&mut *reader)
+            .await
+            .unwrap();
+        verify(&mut reader).await.unwrap();
+        reader.rollback().await.unwrap();
     }
 
     #[tokio::test]

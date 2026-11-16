@@ -509,3 +509,12 @@
 - 同一隔离回归中的创作者分页性能测试，在整合相关的图集 SQL 匹配修正后仍失败：既有 `current_reads` 断言得到 `0` 而期望 `1`；当前 main 的 SQL 已使用 `SELECT content.*`，断言仍匹配 `SELECT *`。该测试旧断言未在本工作包内扩展修复；因此不能将完整创作者回归称为通过。一次复用其他 worktree 编译目录的基线重跑可能复用了旧产物，不用于判定代码版本。
 - `bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`；对改动的 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`、`git diff --check` 与 `bash -n scripts/local-runtime.sh` 均为 exit 0。main `1fc1fa34` 的 Delivery `43870152072` 为 success；更早 `69adcef7` 的 Delivery `43843751226` 曾在选题浏览器测试失败，两个结果分别记录。
 - 本机 3001 仍运行 `bafb7d27`，health 显示数据库 READY、readiness 和 web ready。本次尚未迁移本机或生产库，未部署、未启动真实采集、未进行模型外发；隔离回归和 CI 不能替代实际页面与业务验收。独立审阅与整合 PR 的最终 CI 以最终提交的实际结果为准。
+
+### 图集版本裁定与整合验证
+
+- 独立审阅发现：新图集未取得完整时，旧版本仍显示，但未提示新图未齐；现有编辑来源判定也可能不同于页面。Mog 确认方案 A：旧版本继续展示，明确提示新图未齐，查看与编辑采用展示版本，所有新图验证后切换。已同步 `docs/data-contracts/research-dossier.md`。
+- 共用资料清单选择展示图片，覆盖信息通过 `image_update_pending` 表达未完成的新版本；目标检查据此标记素材不完整，前端复用该信息显示提示。读本选择、编辑与发布复用同一图片来源；对旧程序已提前选择新图的历史状态，读取可回到仍在展示的旧版选中读本。机会卡短锁与来源覆盖列表加入实际读取的历史图集表。
+- 使用专用构建目录与合成 PostgreSQL 的 `/private/tmp/opportunity-image-integration-proof-01a1d4e2.sh --integration-proof` → 图集切换与旧读本编辑 `1 passed`、素材读取 `7 passed`、历史图集来源锁及覆盖 `1 passed`、目标检查 `4 passed`；专用容器和卷清理已验证。图集测试包含旧程序提前选择新读本的状态、旧版可编辑、新版齐全后切换及旧命令来源失效。
+- `cd apps/web && npm run typecheck && npm run lint && npm test -- --run src/pages/corpus/evidence/DossierReading.test.tsx --maxWorkers=1` → typecheck／lint exit 0，`Tests 27 passed (27)`。方案 A 实施之前的机会卡隔离页面链路 `WEB_APP_PROOF_SCOPE=opportunity ... bash scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`，P1/P2/P3 及三类依据均由真实 Axum 和合成 PostgreSQL 读取；不能将该结果作为后续改动或本机部署的证明。
+- 审阅另指出图集回填脚本仅检查 `PGDATABASE` 非空，并未确认连接目标为本机；使用 `--apply` 时可能写入所连接的远端数据库。该项只记录，未运行或修改脚本。完整创作者性能回归的既有 `current_reads` SQL 匹配不一致也未扩展修复。
+- 最新只读远端检查发现 main 前进到 `6db818bd350ce71aada29c78e3b7cd44cf7db50b`（PR #602），未改动迁移目录、运行迁移清单或本次图集源文件；最终候选须以实际合入基线、审阅与 CI 为准。本机 0223 的授权仍有效；0224、本机部署和业务验收均未执行，生产迁移、真实采集及模型外发未授权。
