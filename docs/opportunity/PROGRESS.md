@@ -498,3 +498,14 @@
 - 为评估重启副作用，只读查询 AI 控制：`global=true`、`executor=true`，有 2 个 task 控制开启；查询时无 pending 条目、无 running invocation。这是既有运行状态，不代表新外发获准；后续若切换服务，必须避免因恢复执行器触发未授权外发。
 - 本记录工作树执行 `git diff --check` → exit 0；`bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`。
 - 状态：PR 已合并；本机部署和实际页面／业务链路验收未完成。等待 Mog 决定是否先集成现有图集改动，并单独授权本机 0223 迁移；生产环境迁移、真实采集和模型外发均未执行。
+
+## 2026-11-16 图集修复整合及本机发布准备
+
+- Mog 确认先在独立分支整合本机现有的两项图集修复；整合 PR 的合并仍需单独确认。另授权仅对本机 Intelligence 库执行 0223；生产迁移、真实采集和模型外发未授权。分支 `codex/opportunity-t16-t17-local-delivery`，工作树 `.worktrees/opportunity-t16-t17-local-delivery`。
+- 整合期间 main 已前进到 `1fc1fa344523df3ed543f62f0dab0d3a76c6ada4`，新增 0224。已合入当前 main 及现运行版本的 `a49b37fb`、`bafb7d27`，并在 fixture 与运行迁移清单中按 0222、0223、0224 顺序保留原文件和摘要；整合提交 `5ecd684b`。图集查询增加前置 CTE 后，创作者性能测试的查询匹配一并调整，提交 `2a7a3fd8`。
+- 只读账本查询输出 0222 的摘要为 `fe708de1a048635688031fbdde4918b54985c2e01485e0b2ed384c8ca550acd2`，总计 223 条；0223、0224 均未入账。0224 新增内容深度理解字段及约束，并调整该任务的 Skill 要求，尚无本机运行库迁移授权；部署包含 0224 的当前 main 时不得自动执行它。
+- `bash scripts/test-local-runtime-schema.sh` → `Fresh and repeat runtime schema migration passed; retired tables absent.`；仅在专用合成 PostgreSQL 中执行完整迁移顺序，测试容器和卷已移除。
+- `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_TARGET_DIR=/private/tmp/opportunity-image-integration-01a1d4e2-target bash /private/tmp/opportunity-image-integration-proof-01a1d4e2.sh --integration-proof` → 图集 `13 passed; 0 failed`，素材读取 `7 passed; 0 failed`。该临时脚本基于仓库隔离 runner，仅使用合成库；首次准备时遗漏专用媒体目录，一项测试因此中止，补齐后上述两组通过。
+- 同一隔离回归中的创作者分页性能测试，在整合相关的图集 SQL 匹配修正后仍失败：既有 `current_reads` 断言得到 `0` 而期望 `1`；当前 main 的 SQL 已使用 `SELECT content.*`，断言仍匹配 `SELECT *`。该测试旧断言未在本工作包内扩展修复；因此不能将完整创作者回归称为通过。一次复用其他 worktree 编译目录的基线重跑可能复用了旧产物，不用于判定代码版本。
+- `bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`；对改动的 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`、`git diff --check` 与 `bash -n scripts/local-runtime.sh` 均为 exit 0。main `1fc1fa34` 的 Delivery `43870152072` 为 success；更早 `69adcef7` 的 Delivery `43843751226` 曾在选题浏览器测试失败，两个结果分别记录。
+- 本机 3001 仍运行 `bafb7d27`，health 显示数据库 READY、readiness 和 web ready。本次尚未迁移本机或生产库，未部署、未启动真实采集、未进行模型外发；隔离回归和 CI 不能替代实际页面与业务验收。独立审阅与整合 PR 的最终 CI 以最终提交的实际结果为准。
