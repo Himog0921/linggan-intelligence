@@ -37,6 +37,11 @@
 - [问题记录](opportunity/QUESTIONS.md)：Q-01 至 Q-15 已答复（评论平台时间采用日精度，见 D-034）。
 - [交接说明](opportunity/HANDOFF.md)：开工顺序、已合并交付的最终迁移编号、本地环境、采集目标与下一步（2026-11-13）。
 
+## 2026-11-15 · L2 单篇深入研究 V0.3
+
+- [V0.3 研究方法与实施规范](plans/active/deep-content-research-v03.md)：三种研究模式共用一个 L2 Skill（附 Skill 正文草案）、子问题与逐条判定、材料清单与指纹、Core 版本绑定、召回与一致率评测；第 1.2 节 M1–M6 已由 Mog 确认，待工程合同审查，未实施。
+- [V0.2 原稿](archive/plans/deep-content-research-v02.md)：历史归档，已被 V0.3 替代。
+
 ## 2026-11-10 · 统一内容理解 L1 开发
 
 - [当前执行表](plans/active/unified-content-understanding-v1.2-execution.md)：先跑通一篇保存、读取和底稿展示，再做二十篇验收；独立开发已授权，未上线。
