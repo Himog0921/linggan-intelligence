@@ -277,7 +277,7 @@ impl FrozenDeep {
         &self,
         text: &str,
         card: &Value,
-    ) -> Result<(Value, Value, Value), &'static str> {
+    ) -> Result<(Value, Value, Value), super::deep_v2::Withheld> {
         super::deep_v2::accept(text, card, &self.input_manifest, &self.sub_questions)
     }
 

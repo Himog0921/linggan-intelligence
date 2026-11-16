@@ -134,6 +134,18 @@ async fn content_understanding_real_browser_chain() {
              WHERE failure_code='content_understanding_deep_rejected_excess' AND attempt_count=1)"
     ).fetch_one(db.pool()).await.unwrap();
     assert_eq!(deep_counts, (1, 1, 2, 2, 1));
+    let outcome: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_content_understanding_deep_outcome
+         WHERE failure_code='content_understanding_deep_rejected_excess'
+           AND jsonb_array_length(rejected)=1",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        outcome, 1,
+        "a withheld L2 run keeps its raw output and rejections"
+    );
     assert_eq!(deep_calls, 2);
     db.pool().close().await;
 }

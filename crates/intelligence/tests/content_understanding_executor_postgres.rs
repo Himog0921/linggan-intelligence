@@ -40,31 +40,41 @@ const BODY: &str = "合成说明🙂：先摆出材料，再按步骤核对；�
 const PNG: &str =
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
 
-/// The new migration must stay identical across the file, the runtime applier and
+/// The L2 migrations must stay identical across the file, the runtime applier and
 /// the API full-schema fixture ledger; a hand-copied digest drifts silently.
 #[test]
 fn full_schema_fixtures_record_the_actual_deep_v2_migration_digest() {
-    const MIGRATION: &str =
-        include_str!("../../../database/migrations/0224_content_understanding_deep_v2.sql");
-    let digest: String = Sha256::digest(MIGRATION.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect();
-    let ledger_entry = format!("('0224_content_understanding_deep_v2','{digest}')");
     let fixture = include_str!("../../../apps/api/src/local_web/full_schema_fixture.rs");
-    assert!(
-        fixture.contains(&ledger_entry),
-        "api fixture migration ledger differs from the actual 0224 SQL"
-    );
-    assert!(
-        fixture.contains("database/migrations/0224_content_understanding_deep_v2.sql"),
-        "api fixture does not load the 0224 migration"
-    );
-    assert!(
-        include_str!("../../../scripts/local-runtime.sh")
-            .contains("apply_migration_once \"0224_content_understanding_deep_v2\""),
-        "local runtime does not apply the 0224 migration"
-    );
+    let runtime = include_str!("../../../scripts/local-runtime.sh");
+    for (id, sql) in [
+        (
+            "0224_content_understanding_deep_v2",
+            include_str!("../../../database/migrations/0224_content_understanding_deep_v2.sql"),
+        ),
+        (
+            "0225_content_understanding_deep_outcome",
+            include_str!(
+                "../../../database/migrations/0225_content_understanding_deep_outcome.sql"
+            ),
+        ),
+    ] {
+        let digest: String = Sha256::digest(sql.as_bytes())
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert!(
+            fixture.contains(&format!("('{id}','{digest}')")),
+            "api fixture migration ledger differs from the actual {id} SQL"
+        );
+        assert!(
+            fixture.contains(&format!("database/migrations/{id}.sql")),
+            "api fixture does not load the {id} migration"
+        );
+        assert!(
+            runtime.contains(&format!("apply_migration_once \"{id}\"")),
+            "local runtime does not apply the {id} migration"
+        );
+    }
 }
 
 #[tokio::test]
