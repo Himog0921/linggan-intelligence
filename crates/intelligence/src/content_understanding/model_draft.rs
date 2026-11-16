@@ -23,12 +23,26 @@ pub fn accept_model_draft(
     snapshot: &Snapshot,
     generation: &Generation,
 ) -> Result<Value, &'static str> {
-    let result = accept_draft(draft, snapshot, generation, true)?;
-    verify_literal_support(&result, snapshot)?;
+    let result = accept_draft(draft.clone(), snapshot, generation, true, &BTreeSet::new())?;
+    let unsupported = verify_literal_support(&result, snapshot)?;
+    if unsupported.is_empty() {
+        return Ok(result);
+    }
+    // A unit whose book title or marked quotation has no literal support is dropped;
+    // the rest of the answer is assembled again without it.
+    let result = accept_draft(draft, snapshot, generation, true, &unsupported)?;
+    if !verify_literal_support(&result, snapshot)?.is_empty() {
+        return Err("unsupported_literal");
+    }
     Ok(result)
 }
 
-fn verify_literal_support(result: &Value, snapshot: &Snapshot) -> Result<(), &'static str> {
+/// Returns the units whose literal claims lack support. An unsupported literal
+/// in the summary still fails the answer, because the summary has no fallback.
+fn verify_literal_support(
+    result: &Value,
+    snapshot: &Snapshot,
+) -> Result<BTreeSet<String>, &'static str> {
     let card = &result["card"];
     let Some(evidence) = card["evidence"].as_array() else {
         return Err("invalid_draft");
@@ -121,6 +135,7 @@ fn verify_literal_support(result: &Value, snapshot: &Snapshot) -> Result<(), &'s
         .filter_map(Value::as_str)
         .collect();
     let mut summary_refs = BTreeSet::new();
+    let mut unsupported = BTreeSet::new();
     for unit in units {
         let refs: BTreeSet<_> = unit["evidenceRefs"]
             .as_array()
@@ -128,7 +143,10 @@ fn verify_literal_support(result: &Value, snapshot: &Snapshot) -> Result<(), &'s
             .flatten()
             .filter_map(Value::as_str)
             .collect();
-        supported(unit["statement"].as_str().unwrap_or_default(), &refs)?;
+        if supported(unit["statement"].as_str().unwrap_or_default(), &refs).is_err() {
+            unsupported.insert(unit["id"].as_str().unwrap_or_default().to_owned());
+            continue;
+        }
         if unit["id"]
             .as_str()
             .is_some_and(|id| summary_units.contains(id))
@@ -136,5 +154,8 @@ fn verify_literal_support(result: &Value, snapshot: &Snapshot) -> Result<(), &'s
             summary_refs.extend(refs);
         }
     }
-    supported(summary["text"].as_str().unwrap_or_default(), &summary_refs)
+    if unsupported.is_empty() {
+        supported(summary["text"].as_str().unwrap_or_default(), &summary_refs)?;
+    }
+    Ok(unsupported)
 }
