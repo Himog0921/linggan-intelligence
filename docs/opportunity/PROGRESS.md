@@ -420,3 +420,13 @@
 - 执行 `bash scripts/local-runtime.sh migrate`：退出码 0，实际输出 `migration 0217_opportunity_card_read_model applied`、`migration 0218_opportunity_author_observation_time applied`、`migration 0219_comment_current_safe_observation applied`、`migration 0220_opportunity_valid_work_anchor applied`、`migration 0221_opportunity_restriction_trigger_owner applied`。迁移后逐项核对全部已登记文件：`registered=222 ledger=222 missing=0 unrecognized=0 checksum_mismatches=0`；数据库容器及数据库身份与迁移前一致，首次入档评论和当前评论均为 29164。
 - 迁移后按原配置恢复 API 和 AI 执行器；`/health` 返回数据库 `READY`、readiness `ready`、web `ready`，运行 revision 仍为 `7437781be37f563b235999eccd62dcf761e14ab9`；巡检与媒体 worker 维持 disabled，恢复后运行中的模型调用和 AI 项均为 0。
 - 本机程序没有部署 PR #589，不能将数据库迁移或健康检查称为 T1.4 运行验收。旧程序处理后来出现的坏观察时间时仍有已知限制；PR 未合并，生产环境未迁移，真实采集、模型外发和业务验收均未执行。
+
+## 2026-11-15 T1.4 合并与本机发布
+
+- 负责人授权合并 [PR #589](https://github.com/Himog0921/linggan-intelligence/pull/589) 并发布本机，禁止生产迁移、真实采集和模型外发。最终 head `b022816678ea69c78c2bc4224fe752994108b0cb` 的 [Delivery 43795592936](https://github.com/Himog0921/linggan-intelligence/actions/runs/43795592936) 的 13 个所选任务和 gate 均为 `success`；合并提交 `e0e1db9879ace7e3f2e10f84578c4952ad86bdc8` 与已审 head 的文件树一致。
+- 从干净发布源运行 `LINGGAN_RUNTIME_DIR=<既有本机运行工作树> /bin/zsh scripts/runtime/install.sh --target-sha e0e1db9879ace7e3f2e10f84578c4952ad86bdc8`：排空 AI 后输出 `迁移台账已是最新`、`revision e0e1db98 就绪`；API 与 AI 执行器恢复，巡检和媒体 worker 保持禁用。本轮未再次执行迁移。
+- 本机机会卡开关设为 `enabled`。此前没有摘要校验记录或评论摘要；按 D-013／D-022 新建 32 字节本机私有摘要密钥，支持目录及密钥目录权限为 0700、密钥为 0600；密钥加密副本已解密比对通过，原运行配置另有私有备份。运行中机会卡门控取得 2 个锁，摘要校验记录为 1。
+- `curl -fsS http://127.0.0.1:3001/health | jq -c '{database:.database.state,readiness:.readiness.state,web:.webApp.state,revision:.webApp.runtimeRevision}'` 输出数据库 `READY`、readiness／web `ready`，完整 revision 为 `e0e1db9879ace7e3f2e10f84578c4952ad86bdc8`；运行身份、源码 HEAD、目标 pin 一致，账本 `222|0221_opportunity_restriction_trigger_owner`。
+- 从与运行版本同树的发布源运行 `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo build -p linggan-worker --bin linggan-opportunity --locked`，输出 `Finished dev profile`，有 6 条编译警告。在本机库执行 `sync-comment-mentions` 两次，均返回 `sourceMemberships=0`、`inserted=0`、`updated=0`；对已有 ADHD 领域执行 `rebuild-cards --domain 00000000-0000-4000-8000-000000000001 --full`，输出 `cardsBuilt=0`、`changesDeferred=0`。`check-invariants` 输出 `totalViolations=0`、`incomplete=true`；I4、I5、I10 不可用。
+- 实际浏览器打开 ADHD 评论研究：用户评论列表显示 18724 条，评论详情及所属作品区域可打开；用户问题页显示 `尚无通过归并核验且来源可读的问题`。同领域 `platform-time-report --tz Asia/Shanghai --periods 12` 对实际来源返回 6189 条合格评论、6188 条有平台时间，`timingViolations=0`；统计窗口和资格不同，不与页面总数直接对比。
+- 本机当前研究问题定义、评论归属及机会卡均为 0。T1.5 接口和 T1.6／T1.7 页面尚未实现，故无法验收有内容的机会卡及完整页面业务链；不得把空重建和现有评论页称为机会卡业务验收。复核模型调用记录总数为 192，运行中及排队 AI 项为 0；未主动发起真实采集或模型外发，生产环境未迁移。
