@@ -391,6 +391,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
             .collect::<Vec<_>>(),
         vec![
             "batchRef",
+            "deepAnalyses",
             "failureCode",
             "itemRef",
             "requestRef",

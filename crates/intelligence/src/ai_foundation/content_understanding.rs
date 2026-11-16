@@ -22,6 +22,7 @@ use linggan_storage_postgres::Database;
 pub use offline_recovery::{RecoveryReceipt, recover_saved_replies};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::BTreeSet;
 pub(crate) use deep_manifest::build as build_manifest;
 pub(crate) use source::{Packet, frozen_in, images_for_manifest_in, images_in};
 use sqlx::{Postgres, Row, Transaction};
@@ -229,6 +230,30 @@ pub async fn start(db: &Database, r: &Start) -> Result<Receipt, FoundationError>
     })
     .await
 }
+/// Current L2 method, default sub-questions and default material kinds.
+pub fn deep_modes() -> Value {
+    let modes: Vec<Value> = deep_manifest::MODES
+        .iter()
+        .map(|mode| {
+            let material_kinds: &[&str] = match *mode {
+                "creation_method" => &["core_unit", "core_evidence", "title", "body", "tag", "asr"],
+                _ => &["core_unit", "core_evidence", "title", "body", "tag", "asr", "cover"],
+            };
+            json!({
+                "researchMode":mode,
+                "defaultSubQuestions":deep_manifest::default_sub_questions(mode),
+                "defaultMaterialKinds":material_kinds
+            })
+        })
+        .collect();
+    json!({
+        "contract":"content-understanding.deep-modes.v1",
+        "methodVersion":generate_deep::METHOD,
+        "imageLimit":deep_manifest::MAX_IMAGES,
+        "modes":modes
+    })
+}
+
 pub async fn latest(
     db: &Database,
     domain: Uuid,
@@ -246,7 +271,7 @@ pub async fn latest(
         CASE WHEN result.offline_recovery THEN NULL ELSE c.failure_code END AS failure_code,
         COALESCE(review.result,result.result) AS result, review.revision_ref,
         COALESCE(result.offline_recovery,false) AS offline_recovery,
-        d.analysis_ref AS deep_ref,d.method_version AS deep_method,d.findings,d.question
+        deeps.list AS deep_analyses
         FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref)
         LEFT JOIN linggan_content_understanding_saved_core result ON result.request_ref=r.request_ref
           AND (NOT result.offline_recovery OR result.created_at<=$5::timestamptz)
@@ -256,11 +281,19 @@ pub async fn latest(
           ORDER BY created_at DESC,revision_ref DESC LIMIT 1
         ) review ON true
         LEFT JOIN LATERAL (
-          SELECT analysis_ref,method_version,findings,question FROM linggan_content_understanding_deep
-          WHERE core_ref=result.request_ref AND review.revision_ref IS NULL
-            AND domain_ref=$4 AND created_at<=$5::timestamptz
-          ORDER BY revision DESC LIMIT 1
-        ) d ON true
+          SELECT jsonb_agg(jsonb_build_object(
+            'analysisRef',d.analysis_ref,'coreRef',d.core_ref,'domainRef',d.domain_ref,
+            'researchMode',q.research_mode,'baseMode',q.base_mode,'question',d.question,
+            'subQuestions',q.sub_questions,'subQuestionStatus',d.sub_question_status,
+            'methodVersion',d.method_version,'skillVersion',ic.executed_skill_version_ref,
+            'findings',d.findings,'coreBasis',q.core_basis,'inputManifest',q.input_manifest,
+            'createdAt',to_char(d.created_at AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"'))
+            ORDER BY d.created_at DESC,d.revision DESC) AS list
+          FROM linggan_content_understanding_deep d
+          LEFT JOIN linggan_content_understanding_deep_request q ON q.request_ref=d.analysis_ref
+          LEFT JOIN linggan_ai_batch_item_control ic ON ic.item_ref=q.item_ref
+          WHERE d.core_ref=result.request_ref AND d.domain_ref=$4 AND d.created_at<=$5::timestamptz
+        ) deeps ON true
         WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3
         ORDER BY (result.result IS NOT NULL) DESC,r.created_at DESC,r.request_ref DESC LIMIT 1")
         .bind(work).bind(&p.snapshot.material_snapshot_identity).bind(METHOD).bind(domain).bind(&cutoff)
@@ -279,13 +312,54 @@ pub async fn latest(
             if let Some(revision_ref) = r.get::<Option<Uuid>, _>("revision_ref") {
                 analysis["coreRevisionRef"] = json!(revision_ref);
             }
-            if let Some(deep_ref) = r.get::<Option<Uuid>, _>("deep_ref") {
-                analysis["result"]["card"]["deep"] = json!({
-                    "analysisRef":deep_ref,"methodVersion":r.get::<String,_>("deep_method"),
-                    "findings":r.get::<Value,_>("findings")
-                });
-                analysis["deepQuestion"] = json!(r.get::<String, _>("question"));
+            // v2 records are all returned; historical v1/manual records project
+            // as one entry (the newest) with null mode and no manifest.
+            let deeps = r
+                .get::<Option<Value>, _>("deep_analyses")
+                .unwrap_or_else(|| json!([]));
+            let mut analyses = Vec::new();
+            let mut historical = false;
+            for entry in deeps.as_array().into_iter().flatten() {
+                let v2 = entry["methodVersion"]
+                    .as_str()
+                    .is_some_and(|version| version == "content-understanding.l2.model.v2");
+                if !v2 {
+                    if historical {
+                        continue;
+                    }
+                    historical = true;
+                }
+                let mut refs = BTreeSet::new();
+                for finding in entry["findings"].as_array().into_iter().flatten() {
+                    for support in finding["support"].as_array().into_iter().flatten() {
+                        if let Some(reference) = support["materialRef"].as_str() {
+                            refs.insert(reference.to_string());
+                        }
+                    }
+                }
+                let materials: Vec<Value> = entry["inputManifest"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|material| {
+                        material["id"]
+                            .as_str()
+                            .is_some_and(|id| refs.contains(id))
+                    })
+                    .cloned()
+                    .collect();
+                analyses.push(json!({
+                    "analysisRef":entry["analysisRef"],"coreRef":entry["coreRef"],
+                    "coreBasis":entry["coreBasis"],"domainRef":entry["domainRef"],
+                    "researchMode":entry["researchMode"],"baseMode":entry["baseMode"],
+                    "question":entry["question"],"subQuestions":entry["subQuestions"],
+                    "subQuestionStatus":entry["subQuestionStatus"],
+                    "methodVersion":entry["methodVersion"],"skillVersion":entry["skillVersion"],
+                    "findings":entry["findings"],"materials":materials,
+                    "createdAt":entry["createdAt"]
+                }));
             }
+            analysis["deepAnalyses"] = json!(analyses);
             analysis
         }
         None => Value::Null,
