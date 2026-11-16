@@ -74,6 +74,27 @@ fn reject_at(pointer: &str, value: Value) {
     );
 }
 
+fn accepted_with(pointer: &str, value: Value) -> Value {
+    let (mut draft, snapshot, generation) = fixture();
+    *draft.pointer_mut(pointer).expect("synthetic pointer") = value;
+    accept(draft, &snapshot, &generation).unwrap_or_else(|code| panic!("{pointer}: {code}"))
+}
+fn has_note(result: &Value, reason: &str) -> bool {
+    result["admissionNotes"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|note| note["reason"] == reason)
+}
+fn unit_ids(result: &Value) -> Vec<String> {
+    result["card"]["core"]["knowledgeUnits"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|unit| unit["id"].as_str().unwrap().to_owned())
+        .collect()
+}
+
 #[test]
 fn mixed_card_binds_all_identity_and_keeps_only_union_of_used_evidence() {
     let (draft, snapshot, generation) = fixture();
@@ -156,22 +177,23 @@ fn mixed_card_binds_all_identity_and_keeps_only_union_of_used_evidence() {
 }
 
 #[test]
-fn explicit_main_topic_is_not_the_first_discussion_and_is_required() {
+fn main_topic_keeps_the_declared_discussion_and_otherwise_falls_back() {
     let (draft, snapshot, generation) = fixture();
     let result = accept(draft.clone(), &snapshot, &generation).unwrap();
     assert_eq!(result["card"]["core"]["mainTopicUnitId"], "u2");
+    assert!(result.get("admissionNotes").is_none());
     for id in ["u3", "missing", "1bad"] {
-        reject_at("/core/mainTopicUnitId", json!(id));
+        let result = accepted_with("/core/mainTopicUnitId", json!(id));
+        assert_eq!(result["card"]["core"]["mainTopicUnitId"], "u1", "{id}");
+        assert!(has_note(&result, "main_topic_reassigned"));
     }
     let mut missing = draft;
     missing["core"]
         .as_object_mut()
         .unwrap()
         .remove("mainTopicUnitId");
-    assert_eq!(
-        accept(missing, &snapshot, &generation).unwrap_err(),
-        "invalid_draft"
-    );
+    let result = accept(missing, &snapshot, &generation).unwrap();
+    assert_eq!(result["card"]["core"]["mainTopicUnitId"], "u1");
 }
 
 #[test]
@@ -199,7 +221,7 @@ fn category_projections_are_derived_from_unit_types_in_order() {
 }
 
 #[test]
-fn text_offsets_are_unicode_scalars_with_slice_origin_and_unique_exact_quote() {
+fn text_offsets_are_unicode_scalars_and_stored_quotes_are_literal_source_slices() {
     let (draft, snapshot, generation) = fixture();
     let result = accept(draft, &snapshot, &generation).unwrap();
     let text = &result["card"]["evidence"][0];
@@ -208,22 +230,34 @@ fn text_offsets_are_unicode_scalars_with_slice_origin_and_unique_exact_quote() {
     assert_eq!(text["sourceRef"], snapshot.texts[0].source_ref.to_string());
     assert_eq!(text["sourceVersion"], "text-v1");
     assert_eq!(text["quote"], "合成材料");
-    for (source_text, quote) in [
-        ("aaa", "aa"),
-        ("🙂🙂", "🙂"),
-        ("合成材料", "合成 材料"),
-        ("e\u{301}", "é"),
-        ("合成标题的“方法", "合成标题的“方法”"),
-        ("把剩下的情绪转化成动力。", "把剩余的情绪转化成动力。"),
-    ] {
+    let quoted = |source_text: &str, quote: &str| {
         let (mut draft, mut snapshot, generation) = text_only();
         snapshot.texts[0].text = source_text.into();
         draft["evidenceCandidates"]["text"] =
             json!([{"id":"t1","inputCitationId":"text-1","quote":quote}]);
-        assert_eq!(
-            accept(draft, &snapshot, &generation).unwrap_err(),
-            "invalid_text_quote"
-        );
+        accept(draft, &snapshot, &generation)
+    };
+    // A repeated phrase is still literal material; the first occurrence anchors it.
+    for (source_text, quote, start) in [("aaa", "aa", 7), ("🙂🙂", "🙂", 7)] {
+        let result = quoted(source_text, quote).unwrap();
+        assert_eq!(result["card"]["evidence"][0]["start"], start);
+        assert!(has_note(&result, "quote_repeated_first_used"));
+    }
+    // Spacing and punctuation differences keep the source's own characters.
+    for (source_text, quote) in [
+        ("合成材料", "合成 材料"),
+        ("合成标题的“方法", "合成标题的“方法”"),
+    ] {
+        let result = quoted(source_text, quote).unwrap();
+        assert_eq!(result["card"]["evidence"][0]["quote"], source_text);
+        assert!(has_note(&result, "quote_punctuation_ignored"));
+    }
+    // Changed characters are not in the material: the evidence and its units go.
+    for (source_text, quote) in [
+        ("e\u{301}", "é"),
+        ("把剩下的情绪转化成动力。", "把剩余的情绪转化成动力。"),
+    ] {
+        assert_eq!(quoted(source_text, quote).unwrap_err(), "invalid_draft");
     }
     let (draft, mut snapshot, generation) = text_only();
     snapshot.texts[0].start = usize::MAX;
@@ -265,34 +299,44 @@ fn image_aliases_with_identical_bytes_are_not_deduplicated_or_fabricated() {
     draft["imageContributions"].as_array_mut().unwrap().push(json!({"inputCitationId":"image-2","status":"no_new_information","summary":"与首图相同的合成图片","unitIds":[],"evidenceRefs":[]}));
     let result = accept(draft.clone(), &snapshot, &generation).unwrap();
     assert_eq!(result["imageContributions"].as_array().unwrap().len(), 2);
+    let contributions = |draft: Value| {
+        let result = accept(draft, &snapshot, &generation).unwrap();
+        result["imageContributions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|c| c["inputCitationId"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>()
+    };
     let mut duplicate = draft.clone();
     duplicate["imageContributions"][1]["inputCitationId"] = json!("image-1");
-    assert!(accept(duplicate, &snapshot, &generation).is_err());
+    assert_eq!(contributions(duplicate), ["image-1"]);
     let mut missing = draft.clone();
     missing["imageContributions"].as_array_mut().unwrap().pop();
-    assert!(accept(missing, &snapshot, &generation).is_err());
+    assert_eq!(contributions(missing), ["image-1"]);
     let mut fabricated = draft.clone();
     fabricated["imageContributions"][1]["inputCitationId"] = json!("image-3");
-    assert!(accept(fabricated, &snapshot, &generation).is_err());
+    assert_eq!(contributions(fabricated), ["image-1"]);
     draft["imageContributions"][1]["evidenceRefs"] = json!(["v1"]);
-    assert!(
-        accept(draft, &snapshot, &generation).is_err(),
-        "cross-image contribution accepted"
+    let result = accept(draft, &snapshot, &generation).unwrap();
+    assert_eq!(
+        result["imageContributions"][1]["evidenceRefs"],
+        json!([]),
+        "evidence from another image is not attached"
     );
 }
 
 #[test]
-fn contribution_statuses_are_explicit_and_failed_processing_is_not_a_final_answer() {
+fn contribution_statuses_are_explicit_and_unknown_statuses_become_unclear() {
     let (draft, snapshot, generation) = fixture();
     for status in ["used", "no_new_information", "unclear"] {
-        let mut v = draft.clone();
-        v["imageContributions"][0]["status"] = json!(status);
-        assert!(accept(v, &snapshot, &generation).is_ok());
+        let result = accepted_with("/imageContributions/0/status", json!(status));
+        assert_eq!(result["imageContributions"][0]["status"], status);
     }
     for status in ["failed", "ok", "unknown"] {
-        reject_at("/imageContributions/0/status", json!(status));
+        let result = accepted_with("/imageContributions/0/status", json!(status));
+        assert_eq!(result["imageContributions"][0]["status"], "unclear");
     }
-    reject_at("/imageContributions/0/evidenceRefs", json!([]));
     for status in ["no_new_information", "unclear"] {
         let mut v = draft.clone();
         v["imageContributions"][0]["status"] = json!(status);
@@ -303,132 +347,105 @@ fn contribution_statuses_are_explicit_and_failed_processing_is_not_a_final_answe
 }
 
 #[test]
-fn references_ids_and_duplicates_are_rejected_in_every_reference_surface() {
+fn references_are_filtered_and_malformed_ids_are_renamed_consistently() {
     for pointer in [
         "/core/summary/unitIds",
         "/core/candidateLabels/0/unitIds",
         "/imageContributions/0/unitIds",
     ] {
-        reject_at(pointer, json!(["missing"]));
-        reject_at(pointer, json!(["u2", "u2"]));
+        let result = accepted_with(pointer, json!(["u2", "u2", "missing"]));
+        let kept = &result
+            .pointer(&pointer.replace("/core/", "/card/core/"))
+            .cloned()
+            .unwrap_or(result["imageContributions"][0]["unitIds"].clone());
+        assert_eq!(kept, &json!(["u2"]), "{pointer}");
     }
-    for pointer in [
-        "/core/knowledgeUnits/0/evidenceRefs",
+    let result = accepted_with("/core/knowledgeUnits/0/evidenceRefs", json!(["missing"]));
+    assert_eq!(unit_ids(&result), ["u2", "u3"]);
+    assert!(has_note(&result, "no_supported_evidence"));
+    let result = accepted_with(
         "/imageContributions/0/evidenceRefs",
-    ] {
-        reject_at(pointer, json!(["missing"]));
-        reject_at(pointer, json!(["v1", "v1"]));
-        reject_at(pointer, json!(["bad id"]));
-    }
-    reject_at("/imageContributions/0/evidenceRefs", json!(["t1"]));
+        json!(["t1", "v1", "v1"]),
+    );
+    assert_eq!(
+        result["imageContributions"][0]["evidenceRefs"],
+        json!(["v1"])
+    );
     for id in ["", "1bad", "bad id", "a.b", "é", &"x".repeat(33)] {
-        reject_at("/core/knowledgeUnits/0/id", json!(id));
+        let result = accepted_with("/core/knowledgeUnits/0/id", json!(id));
+        assert_eq!(unit_ids(&result), ["ux1", "u2", "u3"], "{id:?}");
+        assert!(has_note(&result, "id_renamed"));
     }
-    reject_at("/core/knowledgeUnits/1/id", json!("u1"));
-    reject_at("/evidenceCandidates/vision/0/id", json!("t1"));
-    reject_at("/evidenceCandidates/vision/1/id", json!("v1"));
-    reject_at("/evidenceCandidates/text/1/id", json!("t1"));
+    let result = accepted_with("/core/knowledgeUnits/1/id", json!("u1"));
+    assert_eq!(unit_ids(&result), ["u1", "u3"]);
+    assert!(has_note(&result, "duplicate_id"));
+    let result = accepted_with("/evidenceCandidates/vision/0/id", json!("t1"));
+    assert_eq!(
+        unit_ids(&result),
+        ["u1", "u2"],
+        "u3 loses its only image evidence"
+    );
 }
 
 #[test]
-fn source_aliases_are_exact_for_referenced_evidence() {
-    for pointer in [
-        "/evidenceCandidates/text/0/inputCitationId",
-        "/evidenceCandidates/vision/0/inputCitationId",
-        "/evidenceCandidates/vision/1/inputCitationId",
-    ] {
-        reject_at(pointer, json!("not-sent"));
+fn text_evidence_anchors_where_the_quote_is_and_image_evidence_needs_a_sent_image() {
+    for value in [json!("not-sent"), json!("image-1")] {
+        let result = accepted_with("/evidenceCandidates/text/0/inputCitationId", value);
+        assert_eq!(result["card"]["evidence"][0]["inputCitationId"], "text-1");
+        assert!(has_note(&result, "quote_reanchored"));
     }
-    reject_at(
-        "/evidenceCandidates/text/0/inputCitationId",
-        json!("image-1"),
-    );
-    reject_at(
-        "/evidenceCandidates/vision/0/inputCitationId",
-        json!("text-1"),
-    );
-    reject_at("/evidenceCandidates/text/0/quote", json!("not in input"));
+    for value in [json!("not-sent"), json!("text-1")] {
+        let result = accepted_with("/evidenceCandidates/vision/0/inputCitationId", value);
+        assert_eq!(unit_ids(&result), ["u1", "u2"]);
+        assert!(has_note(&result, "invalid_image_evidence"));
+    }
+    let result = accepted_with("/evidenceCandidates/text/0/quote", json!("not in input"));
+    assert_eq!(unit_ids(&result), ["u3"]);
+    assert!(has_note(&result, "quote_not_in_material"));
 }
 
 #[test]
 fn unused_candidates_are_pruned_before_source_binding_without_rewriting_the_draft() {
     let (draft, snapshot, generation) = fixture();
     let expected = accept(draft.clone(), &snapshot, &generation).unwrap();
-    for (pointer, value, reference_pointer, id, error) in [
+    for (pointer, value) in [
         (
             "/evidenceCandidates/text/1/quote",
             json!(format!("{}”", snapshot.texts[0].text)),
-            "/core/knowledgeUnits/2/evidenceRefs",
-            "unusedText",
-            "invalid_text_quote",
         ),
         (
             "/evidenceCandidates/text/1/inputCitationId",
             json!("not-sent"),
-            "/core/knowledgeUnits/2/evidenceRefs",
-            "unusedText",
-            "invalid_evidence_source",
         ),
         (
             "/evidenceCandidates/vision/2/inputCitationId",
             json!("not-sent"),
-            "/imageContributions/0/evidenceRefs",
-            "unusedVision",
-            "invalid_evidence_source",
         ),
+        ("/evidenceCandidates/text/1/quote", json!("")),
+        ("/evidenceCandidates/vision/2/observation", json!("")),
     ] {
         let mut value_draft = draft.clone();
         *value_draft.pointer_mut(pointer).unwrap() = value;
         let unchanged = value_draft.clone();
         assert_eq!(
             accept(value_draft.clone(), &snapshot, &generation).unwrap(),
-            expected
+            expected,
+            "{pointer}"
         );
         assert_eq!(value_draft, unchanged);
-        *value_draft.pointer_mut(reference_pointer).unwrap() = json!([id]);
-        assert_eq!(
-            accept(value_draft, &snapshot, &generation).unwrap_err(),
-            error
-        );
-    }
-    for (pointer, value) in [
-        ("/evidenceCandidates/text/1/id", json!("t1")),
-        ("/evidenceCandidates/text/1/quote", json!("")),
-        ("/evidenceCandidates/vision/2/observation", json!("")),
-        ("/evidenceCandidates/vision/2/speakerRole", json!("invalid")),
-    ] {
-        reject_at(pointer, value);
     }
 }
 
 #[test]
-fn unknown_fields_cannot_smuggle_program_identity_offsets_or_projections() {
+fn unknown_fields_are_ignored_and_cannot_change_identity_offsets_or_projections() {
     let (draft, snapshot, generation) = fixture();
-    for pointer in [
-        "",
-        "/core",
-        "/core/summary",
-        "/core/knowledgeUnits/0",
-        "/core/candidateLabels/0",
-        "/imageContributions/0",
-        "/evidenceCandidates",
-        "/evidenceCandidates/text/0",
-        "/evidenceCandidates/vision/0",
-    ] {
-        let mut v = draft.clone();
-        v.pointer_mut(pointer)
-            .unwrap()
-            .as_object_mut()
-            .unwrap()
-            .insert("unexpected".into(), json!(true));
-        assert_eq!(
-            accept(v, &snapshot, &generation).unwrap_err(),
-            "invalid_draft"
-        );
-    }
+    let expected = accept(draft.clone(), &snapshot, &generation).unwrap();
     for (pointer, key, value) in [
+        ("", "unexpected", json!(true)),
+        ("/core/summary", "unexpected", json!(true)),
+        ("/imageContributions/0", "unexpected", json!(true)),
         ("", "analysisRef", json!(Uuid::from_u128(50))),
-        ("/core", "audienceUnitIds", json!([])),
+        ("/core", "audienceUnitIds", json!(["u1"])),
         ("/evidenceCandidates/text/0", "start", json!(0)),
         (
             "/evidenceCandidates/text/0",
@@ -452,69 +469,95 @@ fn unknown_fields_cannot_smuggle_program_identity_offsets_or_projections() {
             .as_object_mut()
             .unwrap()
             .insert(key.into(), value);
-        assert!(accept(v, &snapshot, &generation).is_err());
-    }
-}
-
-#[test]
-fn nullable_vision_fields_must_be_present_and_substantive_when_not_null() {
-    let (draft, snapshot, generation) = fixture();
-    for field in ["modelQuote", "observation"] {
-        let mut missing = draft.clone();
-        missing["evidenceCandidates"]["vision"][0]
-            .as_object_mut()
-            .unwrap()
-            .remove(field);
         assert_eq!(
-            accept(missing, &snapshot, &generation).unwrap_err(),
-            "invalid_draft"
+            accept(v, &snapshot, &generation).unwrap(),
+            expected,
+            "{pointer}/{key}"
         );
-        for value in [
-            json!(""),
-            json!(" \n\t\u{3000}"),
-            json!("字".repeat(501)),
-            json!(12),
-        ] {
-            reject_at(&format!("/evidenceCandidates/vision/0/{field}"), value);
-        }
     }
-    let mut both_null = draft;
-    both_null["evidenceCandidates"]["vision"][0]["observation"] = Value::Null;
-    assert!(accept(both_null, &snapshot, &generation).is_err());
 }
 
 #[test]
-fn type_enums_and_unicode_length_limits_are_checked_without_semantic_rewriting() {
-    for (pointer, value) in [
-        ("/core/contentType", "video"),
-        ("/core/knowledgeUnits/0/unitType", "interpretation"),
-        ("/core/knowledgeUnits/0/assertionKind", "discussion"),
-        ("/core/knowledgeUnits/0/speakerRole", "commenter"),
-        ("/core/candidateLabels/0/dimension", "topic"),
-        ("/evidenceCandidates/vision/0/speakerRole", "verified"),
-    ] {
-        reject_at(pointer, json!(value));
+fn blank_vision_fields_count_as_null_and_empty_image_evidence_is_dropped() {
+    let (draft, snapshot, generation) = fixture();
+    let expected = accept(draft.clone(), &snapshot, &generation).unwrap();
+    let mut missing = draft.clone();
+    missing["evidenceCandidates"]["vision"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("modelQuote");
+    assert_eq!(accept(missing, &snapshot, &generation).unwrap(), expected);
+    for value in [json!(""), json!(" \n\t\u{3000}"), json!("字".repeat(501))] {
+        let result = accepted_with("/evidenceCandidates/vision/0/modelQuote", value);
+        assert_eq!(result, expected);
     }
-    for (pointer, max) in [
-        ("/core/summary/text", 160),
-        ("/core/knowledgeUnits/0/statement", 280),
-        ("/core/candidateLabels/0/label", 80),
-        ("/core/candidateLabels/0/retrievalUse", 180),
-        ("/imageContributions/0/summary", 500),
+    for value in [json!(""), json!(12), Value::Null] {
+        let result = accepted_with("/evidenceCandidates/vision/0/observation", value);
+        assert_eq!(unit_ids(&result), ["u1", "u2"]);
+    }
+}
+
+#[test]
+fn unknown_enum_values_and_oversized_items_drop_only_that_item() {
+    let result = accepted_with("/core/contentType", json!("video"));
+    assert_eq!(result["card"]["core"]["contentType"], "other");
+    for pointer in [
+        "/core/knowledgeUnits/0/unitType",
+        "/core/knowledgeUnits/0/assertionKind",
+        "/core/knowledgeUnits/0/statement",
+        "/core/knowledgeUnits/0/evidenceRefs",
     ] {
-        let (mut draft, snapshot, generation) = fixture();
-        *draft.pointer_mut(pointer).unwrap() = json!("🙂".repeat(max));
-        assert!(
-            accept(draft, &snapshot, &generation).is_ok(),
-            "Unicode boundary {pointer}"
+        let value = if pointer.ends_with("statement") {
+            json!("🙂".repeat(281))
+        } else if pointer.ends_with("evidenceRefs") {
+            json!([])
+        } else {
+            json!("interpretation_or_discussion")
+        };
+        assert_eq!(
+            unit_ids(&accepted_with(pointer, value)),
+            ["u2", "u3"],
+            "{pointer}"
         );
-        reject_at(pointer, json!("🙂".repeat(max + 1)));
-        reject_at(pointer, json!(""));
-        reject_at(pointer, Value::Null);
     }
-    reject_at("/core/knowledgeUnits/0/evidenceRefs", json!([]));
-    reject_at("/core/summary/unitIds", json!([]));
-    reject_at("/core/candidateLabels/0/unitIds", json!([]));
+    for pointer in [
+        "/core/knowledgeUnits/0/speakerRole",
+        "/evidenceCandidates/vision/0/speakerRole",
+    ] {
+        let result = accepted_with(pointer, json!("commenter"));
+        assert!(
+            result.to_string().contains("\"speakerRole\":\"unknown\""),
+            "{pointer}"
+        );
+    }
+    for (pointer, value) in [
+        ("/core/candidateLabels/0/dimension", json!("topic")),
+        ("/core/candidateLabels/0/label", json!("🙂".repeat(81))),
+        (
+            "/core/candidateLabels/0/retrievalUse",
+            json!("🙂".repeat(181)),
+        ),
+        ("/core/candidateLabels/0/unitIds", json!([])),
+    ] {
+        let result = accepted_with(pointer, value);
+        assert_eq!(
+            result["card"]["core"]["candidateLabels"],
+            json!([]),
+            "{pointer}"
+        );
+    }
+    let result = accepted_with("/imageContributions/0/summary", json!("🙂".repeat(501)));
+    assert_eq!(result["imageContributions"], json!([]));
+    let result = accepted_with("/core/summary/unitIds", json!([]));
+    assert_eq!(result["card"]["core"]["summary"]["unitIds"], json!(["u2"]));
+    // The summary has no fallback, so its bounds still decide the answer.
+    let (draft, snapshot, generation) = fixture();
+    let mut boundary = draft.clone();
+    boundary["core"]["summary"]["text"] = json!("🙂".repeat(160));
+    assert!(accept(boundary, &snapshot, &generation).is_ok());
+    for value in [json!("🙂".repeat(161)), json!(""), Value::Null] {
+        reject_at("/core/summary/text", value);
+    }
 }
 
 #[test]
@@ -554,79 +597,68 @@ fn content_type_and_knowledge_type_all_documented_enum_values_are_accepted() {
 }
 
 #[test]
-fn collection_and_projection_count_ceilings_reject_rather_than_truncate() {
+fn collection_and_projection_ceilings_keep_the_first_items() {
     let (draft, snapshot, generation) = fixture();
-    for (kind, max) in [
-        ("audience_context", 4),
-        ("author_position", 4),
-        ("provision", 8),
-        ("reader_value", 4),
+    for (kind, projection, max) in [
+        ("audience_context", "audienceUnitIds", 4),
+        ("author_position", "authorPositionUnitIds", 4),
+        ("reader_value", "readerValueUnitIds", 4),
     ] {
-        for count in [max, max + 1] {
-            let mut v = draft.clone();
-            v["core"]["knowledgeUnits"][2]["unitType"] = json!("discussion");
-            for index in 0..count {
-                let mut unit = v["core"]["knowledgeUnits"][0].clone();
-                unit["id"] = json!(format!("extra{index}"));
-                unit["unitType"] = json!(kind);
-                v["core"]["knowledgeUnits"]
-                    .as_array_mut()
-                    .unwrap()
-                    .push(unit);
-            }
-            assert_eq!(
-                accept(v, &snapshot, &generation).is_ok(),
-                count == max,
-                "{kind} count {count}"
-            );
-        }
-    }
-    for count in [12, 13] {
         let mut v = draft.clone();
-        let label = v["core"]["candidateLabels"][0].clone();
-        v["core"]["candidateLabels"] = json!(vec![label; count]);
-        assert_eq!(
-            accept(v, &snapshot, &generation).is_ok(),
-            count == 12,
-            "label count"
-        );
-        let mut v = draft.clone();
-        let units = v["core"]["knowledgeUnits"].as_array_mut().unwrap();
-        for index in 3..count {
-            let mut unit = units[0].clone();
+        for index in 0..max + 1 {
+            let mut unit = v["core"]["knowledgeUnits"][0].clone();
             unit["id"] = json!(format!("extra{index}"));
-            units.push(unit);
+            unit["unitType"] = json!(kind);
+            v["core"]["knowledgeUnits"]
+                .as_array_mut()
+                .unwrap()
+                .push(unit);
         }
+        let result = accept(v, &snapshot, &generation).unwrap();
         assert_eq!(
-            accept(v, &snapshot, &generation).is_ok(),
-            count == 12,
-            "unit count"
+            result["card"]["core"][projection].as_array().unwrap().len(),
+            max
         );
+        assert!(has_note(&result, "over_limit"), "{kind}");
     }
+    let mut v = draft.clone();
+    let label = v["core"]["candidateLabels"][0].clone();
+    v["core"]["candidateLabels"] = json!(vec![label; 13]);
+    let units = v["core"]["knowledgeUnits"].as_array_mut().unwrap();
+    for index in 3..13 {
+        let mut unit = units[0].clone();
+        unit["id"] = json!(format!("extra{index}"));
+        units.push(unit);
+    }
+    let result = accept(v, &snapshot, &generation).unwrap();
+    assert_eq!(
+        result["card"]["core"]["candidateLabels"]
+            .as_array()
+            .unwrap()
+            .len(),
+        12
+    );
+    assert_eq!(
+        result["card"]["core"]["knowledgeUnits"]
+            .as_array()
+            .unwrap()
+            .len(),
+        12
+    );
     reject_at("/core/knowledgeUnits", json!([]));
-    for count in [64, 65] {
-        let (mut v, snapshot, generation) = text_only();
-        v["evidenceCandidates"]["text"] = json!((0..count).map(|i| json!({"id":if i == 0 {"t1".to_owned()} else {format!("t{i}x")},"inputCitationId":"text-1","quote":"合成材料"})).collect::<Vec<_>>());
-        assert_eq!(
-            accept(v, &snapshot, &generation).is_ok(),
-            count == 64,
-            "combined candidates count"
-        );
-    }
-    for pointer in [
-        "/core/summary/unitIds",
-        "/core/candidateLabels/0/unitIds",
-        "/core/knowledgeUnits/0/evidenceRefs",
-        "/imageContributions/0/evidenceRefs",
-    ] {
-        reject_at(
-            pointer,
-            json!((0..9).map(|i| format!("id{i}")).collect::<Vec<_>>()),
-        );
-    }
-    reject_at(
-        "/imageContributions/0/unitIds",
-        json!((0..13).map(|i| format!("id{i}")).collect::<Vec<_>>()),
+    let (mut v, snapshot, generation) = text_only();
+    v["evidenceCandidates"]["text"] = json!((0..65).map(|i| json!({"id":if i == 0 {"t1".to_owned()} else {format!("t{i}x")},"inputCitationId":"text-1","quote":"合成材料"})).collect::<Vec<_>>());
+    assert!(
+        accept(v, &snapshot, &generation).is_ok(),
+        "unused candidates do not count"
+    );
+    let result = accepted_with(
+        "/core/knowledgeUnits/2/evidenceRefs",
+        json!(["v1", "t1", "v2", "v1"]),
+    );
+    assert_eq!(
+        result["card"]["core"]["knowledgeUnits"][2]["evidenceRefs"],
+        json!(["v1", "t1", "v2"])
     );
 }
 
@@ -844,10 +876,8 @@ fn response_schema_examples_keep_label_links_and_literal_truncated_quotes() {
         .as_object_mut()
         .unwrap()
         .remove("unitIds");
-    assert_eq!(
-        accept(draft, &snapshot, &generation).unwrap_err(),
-        "invalid_draft"
-    );
+    let result = accept(draft, &snapshot, &generation).unwrap();
+    assert_eq!(result["card"]["core"]["candidateLabels"], json!([]));
     let quote = &schema["properties"]["evidenceCandidates"]["properties"]["text"]["items"]["properties"]
         ["quote"];
     assert!(
@@ -867,9 +897,10 @@ fn response_schema_examples_keep_label_links_and_literal_truncated_quotes() {
     assert_eq!(evidence["start"], 13);
     assert_eq!(evidence["end"], 17);
     draft["evidenceCandidates"]["text"][0]["quote"] = json!("合成标题：“分步练习”");
+    let result = accept(draft, &snapshot, &generation).unwrap();
     assert_eq!(
-        accept(draft, &snapshot, &generation).unwrap_err(),
-        "invalid_text_quote"
+        result["card"]["evidence"][0]["quote"],
+        "合成标题：“分步练习"
     );
 }
 
@@ -923,16 +954,24 @@ fn missing_transcript_line_break_restores_the_exact_source_slice_and_anchor() {
 }
 
 #[test]
-fn transcript_wrap_repair_cannot_change_punctuation_or_guess_a_segment() {
+fn transcript_quotes_anchor_to_the_segment_that_holds_them_literally() {
     let quote = "合成材料，继续复核";
-    for (kind, cited_text) in [
-        ("transcript", "合成材料,\n继续复核"),
-        ("transcript", "合成材料， 继续复核"),
-        ("transcript", "合成材料，\n继续复核，合成材料，\n继续复核"),
-        ("transcript", "合成材料，\n继续复核。另：合成材料，继续复核"),
-        ("transcript", "合成材料，\n\n继续复核"),
-        ("transcript", "其他片段"),
-        ("frame_text", "合成材料，\n继续复核"),
+    for (kind, cited_text, anchored) in [
+        ("transcript", "合成材料,\n继续复核", "text-2"),
+        ("transcript", "合成材料， 继续复核", "text-2"),
+        (
+            "transcript",
+            "合成材料，\n继续复核，合成材料，\n继续复核",
+            "text-1",
+        ),
+        (
+            "transcript",
+            "合成材料，\n继续复核。另：合成材料，继续复核",
+            "text-1",
+        ),
+        ("transcript", "合成材料，\n\n继续复核", "text-2"),
+        ("transcript", "其他片段", "text-2"),
+        ("frame_text", "合成材料，\n继续复核", "text-2"),
     ] {
         let (mut draft, mut snapshot, generation) = text_only();
         snapshot.texts[0].kind = kind.into();
@@ -946,11 +985,18 @@ fn transcript_wrap_repair_cannot_change_punctuation_or_guess_a_segment() {
         snapshot.texts.push(other);
         snapshot.included_kinds = vec![kind.into()];
         draft["evidenceCandidates"]["text"][0]["quote"] = json!(quote);
+        let result = accept(draft, &snapshot, &generation).unwrap();
+        let evidence = &result["card"]["evidence"][0];
         assert_eq!(
-            accept(draft, &snapshot, &generation).unwrap_err(),
-            "invalid_text_quote",
-            "{kind}: {cited_text}",
+            evidence["inputCitationId"], anchored,
+            "{kind}: {cited_text}"
         );
+        let source = snapshot
+            .texts
+            .iter()
+            .find(|t| t.citation_id == anchored)
+            .unwrap();
+        assert!(source.text.contains(evidence["quote"].as_str().unwrap()));
     }
 }
 
@@ -971,27 +1017,30 @@ fn draft_metadata_and_unsupported_optional_label_recover_without_changing_core()
 }
 
 #[test]
-fn draft_recovery_requires_empty_metadata_and_valid_label_references() {
-    let (mut draft, snapshot, generation) = fixture();
-    draft["core"]["candidateLabels"][0]["dimension"] = json!("author_position");
-    draft["core"]["candidateLabels"][0]["unitIds"] = json!(["missing"]);
-    assert_eq!(
-        accept(draft, &snapshot, &generation).unwrap_err(),
-        "invalid_reference"
-    );
-
-    let (mut draft, snapshot, generation) = fixture();
-    draft["core"]["knowledgeUnits_note"] = json!("额外主张");
-    assert_eq!(
-        accept(draft, &snapshot, &generation).unwrap_err(),
-        "invalid_draft"
-    );
-    let (mut draft, snapshot, generation) = fixture();
-    draft["type"] = json!("unsupported");
-    assert_eq!(
-        accept(draft, &snapshot, &generation).unwrap_err(),
-        "invalid_draft"
-    );
+fn draft_metadata_and_unlinked_labels_do_not_block_the_core() {
+    let (draft, snapshot, generation) = fixture();
+    let units =
+        accept(draft.clone(), &snapshot, &generation).unwrap()["card"]["core"]["knowledgeUnits"]
+            .clone();
+    for (pointer, key, value) in [
+        ("/core", "knowledgeUnits_note", json!("额外主张")),
+        ("", "type", json!("unsupported")),
+    ] {
+        let mut v = draft.clone();
+        v.pointer_mut(pointer)
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .insert(key.into(), value);
+        let result = accept(v, &snapshot, &generation).unwrap();
+        assert_eq!(result["card"]["core"]["knowledgeUnits"], units);
+    }
+    let mut v = draft;
+    v["core"]["candidateLabels"][0]["dimension"] = json!("author_position");
+    v["core"]["candidateLabels"][0]["unitIds"] = json!(["missing"]);
+    let result = accept(v, &snapshot, &generation).unwrap();
+    assert_eq!(result["card"]["core"]["candidateLabels"], json!([]));
+    assert!(has_note(&result, "invalid_label"));
 }
 
 #[test]
@@ -1023,10 +1072,16 @@ fn transcript_layout_recovery_keeps_the_source_line_break_and_unique_position() 
 }
 
 #[test]
-fn transcript_layout_recovery_rejects_ambiguity_and_content_changes() {
+fn transcript_layout_recovery_keeps_first_repeat_and_rejects_content_changes() {
+    for source in ["材料\n核对。另：材料,\n核对", "材料\n核对。另：材料\n核对"]
+    {
+        assert_eq!(
+            quote_in_source(source, "材料,\n核对", true),
+            Some((0, "材料\n核对", true)),
+            "{source:?}"
+        );
+    }
     for (source, quote, wrap) in [
-        ("材料\n核对。另：材料,\n核对", "材料,\n核对", true),
-        ("材料\n核对。另：材料\n核对", "材料,\n核对", true),
         ("材料\n核对", "材料,\n核对", false),
         ("材料\n核对", "材料,核对", true),
         ("材料\n核对", "材料。\n核对", true),
@@ -1037,7 +1092,7 @@ fn transcript_layout_recovery_rejects_ambiguity_and_content_changes() {
     ] {
         assert_eq!(
             quote_in_source(source, quote, wrap),
-            Err("invalid_text_quote"),
+            None,
             "{source:?} {quote:?}"
         );
     }
@@ -1064,10 +1119,18 @@ fn model_draft_keeps_canonical_source_and_requires_direct_book_title_support() {
         unit["evidenceRefs"] = json!(["ev1"]);
     }
     draft["core"]["knowledgeUnits"][2]["statement"] = json!("作者使用《教材全练》。");
-    draft["core"]["summary"]["text"] = json!("作者介绍《教材全练》。");
     let verify = |draft: Value| model_draft::accept_model_draft(draft, &snapshot, &generation);
-    assert_eq!(verify(draft.clone()), Err("unsupported_literal"));
+    // A unit naming a book its evidence does not show is dropped; the rest stays.
+    let result = verify(draft.clone()).unwrap();
+    assert_eq!(unit_ids(&result), ["u1", "u2"]);
+    assert!(has_note(&result, "unsupported_literal"));
+    // The summary has no fallback: an unsupported title there fails the answer.
+    let mut summary = draft.clone();
+    summary["core"]["summary"]["text"] = json!("作者介绍《教材全练》。");
+    summary["core"]["summary"]["unitIds"] = json!(["u2"]);
+    assert_eq!(verify(summary), Err("unsupported_literal"));
     draft["core"]["knowledgeUnits"][2]["evidenceRefs"] = json!(["ev1", "ev2"]);
+    draft["core"]["summary"]["text"] = json!("作者介绍《教材全练》。");
 
     let material = model_draft::material(&snapshot);
     assert_eq!(material["texts"][0]["citationId"], "s1");
@@ -1088,20 +1151,32 @@ fn model_draft_keeps_canonical_source_and_requires_direct_book_title_support() {
 
     let mut wrong_channel = draft.clone();
     wrong_channel["core"]["knowledgeUnits"][2]["statement"] = json!("口播原话「教材全练」。");
-    assert_eq!(verify(wrong_channel), Err("unsupported_literal"));
+    wrong_channel["core"]["summary"]["text"] = json!("作者介绍教辅。");
+    let result = verify(wrong_channel).unwrap();
+    assert_eq!(unit_ids(&result), ["u1", "u2"]);
     let mut literal_from_frame = draft.clone();
     literal_from_frame["core"]["knowledgeUnits"][2]["statement"] = json!("画面原文「教材全练」。");
-    assert!(verify(literal_from_frame).is_ok());
+    assert_eq!(
+        unit_ids(&verify(literal_from_frame).unwrap()),
+        ["u1", "u2", "u3"]
+    );
 
+    // Citing the canonical id, the wrong segment, or the segment itself still
+    // resolves to the frame text that literally holds the quote.
     let mut original_id = draft.clone();
     original_id["evidenceCandidates"]["text"][1]["inputCitationId"] = json!("canonical-frame");
-    assert_eq!(verify(original_id), Err("invalid_evidence_source"));
     let mut wrong_source = draft.clone();
     wrong_source["evidenceCandidates"]["text"][1]["inputCitationId"] = json!("s1");
-    assert_eq!(verify(wrong_source), Err("invalid_text_quote"));
-    let mut mixed_id = draft;
-    mixed_id["core"]["knowledgeUnits"][2]["evidenceRefs"] = json!(["s2"]);
-    assert_eq!(verify(mixed_id), Err("invalid_reference"));
+    let mut segment_ref = draft;
+    segment_ref["core"]["knowledgeUnits"][2]["evidenceRefs"] = json!(["ev1", "s2"]);
+    for variant in [original_id, wrong_source, segment_ref] {
+        let result = verify(variant).unwrap();
+        assert_eq!(
+            result["card"]["evidence"][1]["inputCitationId"],
+            "canonical-frame"
+        );
+        assert_eq!(unit_ids(&result), ["u1", "u2", "u3"]);
+    }
 }
 
 #[test]
@@ -1121,10 +1196,12 @@ fn model_draft_keeps_image_reads_distinct_from_literal_transcriptions() {
     draft["imageContributions"][0]["evidenceRefs"] = json!(["ev2"]);
     let verify =
         |draft: Value, snap: &Snapshot| model_draft::accept_model_draft(draft, snap, &generation);
-    assert_eq!(verify(draft.clone(), &snapshot), Err("unsupported_literal"));
+    let kept = |draft: Value, snap: &Snapshot| unit_ids(&verify(draft, snap).unwrap());
+    assert_eq!(kept(draft.clone(), &snapshot), ["u1", "u2"]);
     draft["evidenceCandidates"]["vision"][0]["modelQuote"] = json!("合成步骤");
     let result = verify(draft.clone(), &snapshot).unwrap();
     assert_eq!(result["card"]["evidence"][1]["verification"], "model_read");
+    assert_eq!(unit_ids(&result), ["u1", "u2", "u3"]);
 
     for unsupported in [
         "画面原文：「合成步骤」。",
@@ -1136,11 +1213,7 @@ fn model_draft_keeps_image_reads_distinct_from_literal_transcriptions() {
     ] {
         let mut variant = draft.clone();
         variant["core"]["knowledgeUnits"][2]["statement"] = json!(unsupported);
-        assert_eq!(
-            verify(variant, &snapshot),
-            Err("unsupported_literal"),
-            "{unsupported}"
-        );
+        assert_eq!(kept(variant, &snapshot), ["u1", "u2"], "{unsupported}");
     }
 
     let mut frame = snapshot.texts[0].clone();
@@ -1149,13 +1222,13 @@ fn model_draft_keeps_image_reads_distinct_from_literal_transcriptions() {
     frame.text = "合成步骤".into();
     snapshot.texts.push(frame);
     snapshot.included_kinds.push("frame_text".into());
-    assert!(verify(draft.clone(), &snapshot).is_ok());
+    assert_eq!(kept(draft.clone(), &snapshot), ["u1", "u2", "u3"]);
     let mut wrong_source = draft.clone();
     wrong_source["core"]["knowledgeUnits"][2]["statement"] = json!("图片 原文：「合成材料」。");
     wrong_source["core"]["knowledgeUnits"][2]["evidenceRefs"] = json!(["ev1"]);
-    assert_eq!(verify(wrong_source, &snapshot), Err("unsupported_literal"));
+    assert_eq!(kept(wrong_source, &snapshot), ["u1", "u2"]);
 
     let mut unqualified = draft;
     unqualified["core"]["knowledgeUnits"][2]["statement"] = json!("原文「合成步骤」。");
-    assert_eq!(verify(unqualified, &snapshot), Err("unsupported_literal"));
+    assert_eq!(kept(unqualified, &snapshot), ["u1", "u2"]);
 }
