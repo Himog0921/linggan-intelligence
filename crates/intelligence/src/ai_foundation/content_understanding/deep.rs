@@ -2,7 +2,7 @@ use super::{Command, Database, FoundationError, METHOD, Uuid, Value, source};
 use crate::ai_foundation::store::valid_reason;
 use crate::content_understanding::local_id;
 use serde::{Deserialize, Serialize};
-use sqlx::{Postgres, Transaction};
+use sqlx::{Postgres, Row, Transaction};
 use std::collections::BTreeSet;
 
 const MANUAL_METHOD: &str = "content-understanding.l2.manual.v1";
@@ -125,6 +125,41 @@ pub(super) async fn lock_core(
         .execute(&mut **tx)
         .await?;
     Ok(())
+}
+
+/// The card L2 must research plus the identity of the Core version it came from.
+/// A revision published before the cutoff supersedes the base card without
+/// changing the base receipt.
+pub(super) async fn current_card_basis_in(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    core: Uuid,
+    material_identity: &str,
+) -> Result<Option<(Value, Value)>, FoundationError> {
+    let row = sqlx::query(
+        "SELECT COALESCE(review.result,saved.result)->'card' AS card,review.revision_ref
+         FROM linggan_content_understanding_saved_core saved
+         LEFT JOIN LATERAL(SELECT revision_ref,result
+           FROM linggan_content_understanding_core_revision
+           WHERE base_request_ref=saved.request_ref AND created_at<=scope_001_now()
+           ORDER BY created_at DESC,revision_ref DESC LIMIT 1)review ON true
+         WHERE saved.request_ref=$1 AND saved.work_ref=$2
+           AND saved.material_snapshot_identity=$3 AND saved.method_version=$4
+           AND saved.result IS NOT NULL",
+    )
+    .bind(core)
+    .bind(work)
+    .bind(material_identity)
+    .bind(METHOD)
+    .fetch_optional(&mut **tx)
+    .await?;
+    Ok(row.map(|row| {
+        let basis = match row.get::<Option<Uuid>, _>("revision_ref") {
+            Some(revision_ref) => json!({"kind":"revision","revisionRef":revision_ref}),
+            None => json!({"kind":"base"}),
+        };
+        (row.get::<Value, _>("card"), basis)
+    }))
 }
 
 pub(super) async fn current_card_in(

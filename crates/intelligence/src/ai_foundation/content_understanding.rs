@@ -4,6 +4,7 @@ mod coverage;
 pub(crate) use coverage::scope_coverage;
 mod deep;
 mod deep_grounding;
+mod deep_manifest;
 pub(crate) mod generate_deep;
 mod offline_recovery;
 mod source;
