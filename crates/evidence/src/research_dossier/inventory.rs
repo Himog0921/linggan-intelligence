@@ -1,5 +1,6 @@
 //! One source inventory shared by full reading, coverage and explicit local rebuilding.
 use crate::work_resource_current::WorkResourceCurrent;
+use serde::Serialize;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Row, Transaction};
 use std::collections::BTreeMap;
@@ -18,13 +19,26 @@ pub(super) async fn read_in(
     as_of: &str,
 ) -> Result<BTreeMap<Uuid, Inventory>, sqlx::Error> {
     let works: Vec<_> = currents.iter().map(|work| work.public_ref).collect();
+    let versions = read_image_versions(tx, &works, as_of).await?;
     let mut result = BTreeMap::<Uuid, Inventory>::new();
+    for version in &versions {
+        if let Some(manifest) = &version.manifest {
+            result.entry(version.work_ref).or_default().manifest = Some(manifest.clone());
+        }
+    }
     let rows = sqlx::query(r#"
-WITH origins AS (
+WITH image_versions AS (
+ SELECT work_ref, package_ref, legacy_cutoff
+ FROM jsonb_to_recordset($3) AS version(work_ref uuid, package_ref uuid, legacy_cutoff timestamptz)
+), origins AS (
  SELECT DISTINCT ON (o.slot_key) o.*
  FROM linggan_material_media_origin o JOIN linggan_runtime_capture_package p USING(package_ref)
+ JOIN linggan_runtime_record_disposition d ON d.package_ref=o.package_ref AND d.record_ordinal=o.record_ordinal
+ LEFT JOIN image_versions v ON v.work_ref=o.content_public_ref AND o.purpose IN ('body_image','live_photo')
  WHERE o.content_public_ref=ANY($1) AND o.created_at<=$2::timestamptz AND p.accepted_at<=$2::timestamptz
  AND o.purpose NOT IN ('comment_image','author_avatar')
+ AND d.disposition='accepted_for_media_identity'
+ AND (v.work_ref IS NULL OR o.package_ref=v.package_ref OR p.accepted_at<v.legacy_cutoff)
  ORDER BY o.slot_key,o.source_generation DESC
 )
 SELECT o.content_public_ref,o.slot_key,o.purpose,o.display_ordinal,o.producer_ordinal,o.display_order_state,component.kind AS component_kind,
@@ -54,9 +68,9 @@ FROM origins o CROSS JOIN LATERAL (
  AND ((component.kind='image' AND b.mime_type LIKE 'image/%') OR
  (component.kind='motion' AND (b.mime_type LIKE 'video/%' OR (o.purpose<>'live_photo' AND b.mime_type LIKE 'audio/%'))))
  ORDER BY m.verified_at DESC,m.materialization_ref DESC LIMIT 1
-) m ON true WHERE linggan_dossier_slot_active(o.content_public_ref,o.slot_key,$2::timestamptz)
+) m ON true
 ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NULLS LAST,o.slot_key,component.kind
-"#).bind(&works).bind(as_of).fetch_all(&mut **tx).await?;
+"#).bind(&works).bind(as_of).bind(sqlx::types::Json(&versions)).fetch_all(&mut **tx).await?;
     for row in rows {
         let work: Uuid = row.get("content_public_ref");
         let source: Option<Uuid> = row.get("materialization_ref");
@@ -88,7 +102,6 @@ ORDER BY o.content_public_ref,o.display_ordinal NULLS LAST,o.producer_ordinal NU
             "sourceState":if restricted {"restricted"} else if source.is_some() {"present"} else {"not_acquired"}
         }));
     }
-    read_manifests(tx, &works, as_of, &mut result).await?;
     read_historical_manifests(tx, currents, as_of, &mut result).await?;
     read_tags(tx, &works, as_of, &mut result).await?;
     Ok(result)
@@ -123,32 +136,93 @@ fn local_readable(storage: Option<&str>, size: Option<i64>) -> bool {
         })
 }
 
-async fn read_manifests(
+#[derive(Serialize)]
+struct ImageVersion {
+    work_ref: Uuid,
+    package_ref: Option<Uuid>,
+    legacy_cutoff: Option<String>,
+    #[serde(skip)]
+    manifest: Option<Value>,
+}
+
+async fn read_image_versions(
     tx: &mut Transaction<'_, Postgres>,
     works: &[Uuid],
     as_of: &str,
-    result: &mut BTreeMap<Uuid, Inventory>,
-) -> Result<(), sqlx::Error> {
-    let rows=sqlx::query(r#"
-SELECT DISTINCT ON (lane.content_public_ref) lane.content_public_ref,package.package_ref,
- package.payload #> '{coverage,target,imageInventory}' AS manifest
-FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package package USING(package_ref)
-WHERE lane.content_public_ref=ANY($1) AND lane.lane='media_slots'
- AND lane.created_at<=$2::timestamptz AND package.accepted_at<=$2::timestamptz
- AND package.payload #>> '{coverage,target,imageInventory,state}'='complete'
- AND package.payload #>> '{coverage,target,imageInventory,source}'='platform_image_list'
- AND jsonb_typeof(package.payload #> '{coverage,target,imageInventory,expectedPages}')='number'
-ORDER BY lane.content_public_ref,package.accepted_at DESC,lane.created_at DESC,package.package_ref DESC
-"#).bind(works).bind(as_of).fetch_all(&mut **tx).await?;
-    for row in rows {
-        let work: Uuid = row.get("content_public_ref");
-        let manifest: Option<Value> = row.get("manifest");
-        if let Some(mut manifest) = manifest.filter(|m| m.is_object()) {
-            manifest["packageRef"] = json!(row.get::<Uuid, _>("package_ref"));
-            result.entry(work).or_default().manifest = Some(manifest);
-        }
-    }
-    Ok(())
+) -> Result<Vec<ImageVersion>, sqlx::Error> {
+    // A verified receipt is created only after byte integrity admission. Select
+    // one complete package so observations from unfinished captures cannot be
+    // mixed into the displayed image set. Dispositions still apply at read time.
+    sqlx::query(
+        r#"
+WITH manifests AS MATERIALIZED (
+ SELECT lane.content_public_ref AS work_ref,p.package_ref,p.accepted_at,lane.created_at,
+        p.payload #> '{coverage,target,imageInventory}' AS inventory,
+        (p.payload #>> '{coverage,target,imageInventory,expectedPages}')::numeric AS expected_pages
+ FROM linggan_material_lane_observation lane JOIN linggan_runtime_capture_package p USING(package_ref)
+ WHERE lane.content_public_ref=ANY($1) AND lane.lane='media_slots'
+ AND lane.created_at<=$2::timestamptz AND p.accepted_at<=$2::timestamptz
+ AND p.payload #>> '{coverage,target,imageInventory,state}'='complete'
+ AND p.payload #>> '{coverage,target,imageInventory,source}'='platform_image_list'
+ AND jsonb_typeof(p.payload #> '{coverage,target,imageInventory,expectedPages}')='number'
+), ready AS (
+ SELECT DISTINCT ON (m.work_ref) m.*
+ FROM manifests m
+ WHERE (
+   SELECT count(*)=m.expected_pages AND count(DISTINCT o.display_ordinal)=m.expected_pages
+      AND count(*) FILTER (WHERE o.display_ordinal BETWEEN 1 AND m.expected_pages AND EXISTS (
+          SELECT 1 FROM linggan_media_download_attempt a
+          JOIN linggan_media_materialization f USING(download_attempt_ref)
+          JOIN linggan_media_blob b ON b.sha256=f.blob_sha256
+          WHERE a.media_observation_ref=o.observation_ref AND a.terminal_reason='acquired'
+          AND f.verified_at<=$2::timestamptz AND b.mime_type LIKE 'image/%' AND b.byte_size>0
+      ))=m.expected_pages
+   FROM linggan_material_media_origin o
+   JOIN linggan_runtime_record_disposition d ON d.package_ref=o.package_ref AND d.record_ordinal=o.record_ordinal
+   WHERE o.content_public_ref=m.work_ref AND o.package_ref=m.package_ref
+   AND o.created_at<=$2::timestamptz AND o.purpose IN ('body_image','live_photo')
+   AND d.disposition='accepted_for_media_identity'
+ )
+ ORDER BY m.work_ref,m.accepted_at DESC,m.created_at DESC,m.package_ref DESC
+), first_manifest AS (
+ SELECT DISTINCT ON (work_ref) * FROM manifests
+ ORDER BY work_ref,accepted_at,created_at,package_ref
+), selected AS (
+ SELECT first.work_ref,
+        COALESCE(ready.package_ref,CASE WHEN NOT legacy.exists THEN first.package_ref END) AS package_ref,
+        CASE WHEN ready.package_ref IS NULL AND legacy.exists THEN first.accepted_at::text END AS legacy_cutoff,
+        COALESCE(ready.inventory,CASE WHEN NOT legacy.exists THEN first.inventory END) AS inventory
+ FROM first_manifest first LEFT JOIN ready USING(work_ref)
+ CROSS JOIN LATERAL (
+   SELECT EXISTS (
+     SELECT 1 FROM linggan_material_media_origin o
+     JOIN linggan_runtime_capture_package p USING(package_ref)
+     JOIN linggan_media_download_attempt a ON a.media_observation_ref=o.observation_ref
+     JOIN linggan_media_materialization f USING(download_attempt_ref)
+     JOIN linggan_media_blob b ON b.sha256=f.blob_sha256
+     WHERE o.content_public_ref=first.work_ref AND o.purpose IN ('body_image','live_photo')
+     AND p.accepted_at<first.accepted_at AND o.created_at<=$2::timestamptz AND f.verified_at<=$2::timestamptz
+     AND a.terminal_reason='acquired' AND b.mime_type LIKE 'image/%' AND b.byte_size>0
+   ) AS exists
+ ) legacy
+)
+SELECT work_ref,package_ref,legacy_cutoff,
+       inventory || jsonb_build_object('packageRef',package_ref) AS manifest
+FROM selected
+"#,
+    )
+    .bind(works)
+    .bind(as_of)
+    .try_map(|row| {
+        Ok(ImageVersion {
+            work_ref: row.try_get("work_ref")?,
+            package_ref: row.try_get("package_ref")?,
+            legacy_cutoff: row.try_get("legacy_cutoff")?,
+            manifest: row.try_get("manifest")?,
+        })
+    })
+    .fetch_all(&mut **tx)
+    .await
 }
 
 async fn read_historical_manifests(

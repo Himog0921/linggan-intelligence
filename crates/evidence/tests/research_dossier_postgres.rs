@@ -198,7 +198,12 @@ async fn empty_native_source_unknown_inventory_and_numeric_titles_are_distinct()
     }
 }
 
-async fn images(db: &Database, id: &str, total: u32, slots: &[(&str, u32, char)]) -> Vec<Uuid> {
+async fn observe_images(
+    db: &Database,
+    id: &str,
+    total: u32,
+    slots: &[(&str, u32, char)],
+) -> Vec<Uuid> {
     let target = json!({"contentExternalId":id,"imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":total}});
     let observations: Vec<_> = slots.iter().map(|_| Uuid::new_v4()).collect();
     let records=slots.iter().zip(&observations).map(|((role,page,_),observation)|{
@@ -208,24 +213,71 @@ async fn images(db: &Database, id: &str, total: u32, slots: &[(&str, u32, char)]
         json!({"kind":"media_slot","slotKey":format!("xhs:{id}:{role}:{page}"),"observationRef":observation,"slot":slot,"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},"sourceObject":{"platform":"xhs","type":"content","externalId":id}})
     }).collect();
     fixture::submit_custom_package(db,"xhs",&["media_slots"],json!({"contentExternalId":id}),"media_slots","xhs",json!({"target":target,"layers":[fixture::coverage_layer("media_slots",slots.len() as i64)]}),records).await;
+    observations
+}
+
+async fn store_image(db: &Database, observation: Uuid, hash: char) -> Uuid {
+    let hash = hash.to_string().repeat(64);
+    admit_media_blob(
+        db,
+        observation,
+        &hash,
+        "image/jpeg",
+        12,
+        &format!("blobs/{hash}.jpg"),
+    )
+    .await
+    .unwrap()
+    .materialization_ref
+}
+
+async fn images(db: &Database, id: &str, total: u32, slots: &[(&str, u32, char)]) -> Vec<Uuid> {
+    let observations = observe_images(db, id, total, slots).await;
     let mut sources = vec![];
     for ((_, _, hash), observation) in slots.iter().zip(observations) {
-        let hash = hash.to_string().repeat(64);
-        sources.push(
-            admit_media_blob(
-                db,
-                observation,
-                &hash,
-                "image/jpeg",
-                12,
-                &format!("blobs/{hash}.jpg"),
-            )
-            .await
-            .unwrap()
-            .materialization_ref,
-        );
+        sources.push(store_image(db, observation, *hash).await);
     }
     sources
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
+async fn replacement_image_manifest_waits_for_every_page_receipt() {
+    let db = fixture::proof_database("dossier_image_version_cutover").await;
+    let id = "image-cutover";
+    let work = detail(&db, id, json!({"bodyText":""})).await;
+    let previous = images(&db, id, 2, &[("image", 1, 'a'), ("image", 2, 'b')]).await;
+    let new = observe_images(
+        &db,
+        id,
+        3,
+        &[("image", 1, 'c'), ("image", 2, 'd'), ("image", 3, 'e')],
+    )
+    .await;
+    let page_one = store_image(&db, new[0], 'c').await;
+    let page_three = store_image(&db, new[2], 'e').await;
+    let staged = dossier::read(&db, work).await.unwrap().unwrap();
+    let sources = |read: &dossier::ResearchDossier| {
+        read.materials
+            .iter()
+            .filter(|material| material["purpose"] == "body_image")
+            .map(|material| serde_json::from_value::<Uuid>(material["sourceRef"].clone()).unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(sources(&staged), previous);
+    assert_eq!(staged.coverage["imageInventory"]["expectedPages"], 2);
+    assert_eq!(staged.coverage["imageInventory"]["acquiredPages"], 2);
+
+    let page_two = store_image(&db, new[1], 'd').await;
+    let current = dossier::read(&db, work).await.unwrap().unwrap();
+    assert_eq!(sources(&current), vec![page_one, page_two, page_three]);
+    assert_eq!(current.coverage["imageInventory"]["expectedPages"], 3);
+    assert_eq!(current.coverage["imageInventory"]["acquiredPages"], 3);
+    let before_final_receipt = dossier::read_at(&db, work, Some(&staged.as_of))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(sources(&before_final_receipt), previous);
 }
 
 #[tokio::test]
