@@ -1,11 +1,13 @@
 use super::*;
 
+type ImageSources<'a> = BTreeMap<(Uuid, &'a str), (&'a str, &'a str)>;
+
 pub async fn read_current_in(
     conn: &mut PgConnection,
     works: &[Uuid],
     as_of: &str,
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
-    read_rows(conn, works, as_of, None, None).await
+    read_rows(conn, works, as_of, None, None, None).await
 }
 
 /// Reuse the canonical body source from the caller's same-transaction Current.
@@ -14,13 +16,22 @@ pub(crate) async fn read_current_from_currents_in(
     conn: &mut PgConnection,
     currents: &[&crate::work_resource_current::WorkResourceCurrent],
     as_of: &str,
+    image_sources: &ImageSources<'_>,
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
     let works: Vec<_> = currents.iter().map(|current| current.public_ref).collect();
     let bodies: BTreeMap<_, _> = currents
         .iter()
         .map(|current| (current.public_ref, current.body_source.material_ref))
         .collect();
-    read_rows(conn, &works, as_of, None, Some(&bodies)).await
+    read_rows(
+        conn,
+        &works,
+        as_of,
+        None,
+        Some(&bodies),
+        Some(image_sources),
+    )
+    .await
 }
 
 /// Exact immutable versions are resolved without substituting a newer current reading.
@@ -30,7 +41,7 @@ pub async fn read_versions_in(
     as_of: &str,
     readings: &[Uuid],
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
-    read_rows(conn, works, as_of, Some(readings), None).await
+    read_rows(conn, works, as_of, Some(readings), None, None).await
 }
 
 /// A current pointer requires the same source eligibility as the canonical current reader.
@@ -69,6 +80,7 @@ async fn read_rows(
     as_of: &str,
     readings: Option<&[Uuid]>,
     bodies: Option<&BTreeMap<Uuid, Option<Uuid>>>,
+    image_sources: Option<&ImageSources<'_>>,
 ) -> Result<BTreeMap<Uuid, Vec<Value>>, sqlx::Error> {
     if works.is_empty() {
         return Ok(BTreeMap::new());
@@ -116,6 +128,18 @@ async fn read_rows(
             && let Some(bodies) = bodies
         {
             source::body_current(bodies.get(&unit.work).copied().flatten(), &unit.source)
+        } else if unit.kind == "image"
+            && let Some(images) = image_sources
+        {
+            match unit
+                .slot
+                .as_deref()
+                .and_then(|slot| images.get(&(unit.work, slot)))
+            {
+                Some((version, _)) if *version == unit.source => true,
+                Some((_, sha)) => source::has_image_blob(conn, &unit.source, sha, as_of).await?,
+                None => false,
+            }
         } else {
             source::current(
                 conn,

@@ -39,6 +39,27 @@ pub(super) async fn current(
         .fetch_one(conn).await
 }
 
+// A new receipt for identical bytes can retain the selected reading of the same slot.
+pub(super) async fn has_image_blob(
+    conn: &mut PgConnection,
+    version: &str,
+    sha: &str,
+    as_of: &str,
+) -> Result<bool, sqlx::Error> {
+    let Ok(materialization) = Uuid::parse_str(version) else {
+        return Ok(false);
+    };
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_media_materialization
+         WHERE materialization_ref=$1 AND blob_sha256=$2 AND verified_at<=$3::text::timestamptz)",
+    )
+    .bind(materialization)
+    .bind(sha)
+    .bind(as_of)
+    .fetch_one(conn)
+    .await
+}
+
 pub(super) async fn unrestricted(
     conn: &mut PgConnection,
     unit: &Unit,

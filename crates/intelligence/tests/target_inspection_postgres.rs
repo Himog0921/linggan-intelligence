@@ -64,6 +64,10 @@ async fn db(name: &str) -> Database {
             "0149_target_inspector_comparison",
             include_str!("../../../database/migrations/0149_target_inspector_comparison.sql"),
         ),
+        (
+            "0222_historical_image_inventory",
+            include_str!("../../../database/migrations/0222_historical_image_inventory.sql"),
+        ),
     ] {
         if let Some(recorded) = sqlx::query_scalar::<_, String>(
             "SELECT migration_sha256 FROM linggan_local_schema_migration WHERE migration_id=$1",
