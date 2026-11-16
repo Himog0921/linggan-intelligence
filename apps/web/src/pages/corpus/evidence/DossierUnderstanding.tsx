@@ -7,7 +7,8 @@ import type { MaterialReadiness } from './evidenceTypes';
 import styles from './DossierDocument.module.css';
 
 type Unit = { id: string; unitType: string; statement: string };
-type DeepFinding = { id: string; statement: string; evidenceRefs: string[] };
+type DeepSupport = { excerpt?: string; observation?: string };
+type DeepFinding = { id: string; statement: string; evidenceRefs?: string[]; support?: DeepSupport[] };
 type Deep = { question: string; findings: DeepFinding[]; evidence: Record<string, string[]> };
 type Understanding = {
   materialReadiness: MaterialReadiness;
@@ -26,9 +27,17 @@ function readDeep(card: Record<string, unknown>, question: unknown): Deep | unde
       || !Array.isArray(card.evidence)) return;
   const findings: DeepFinding[] = [];
   for (const finding of card.deep.findings) {
-    if (!isRecord(finding) || typeof finding.id !== 'string' || typeof finding.statement !== 'string'
-        || !Array.isArray(finding.evidenceRefs) || !finding.evidenceRefs.every(ref => typeof ref === 'string')) return;
-    findings.push({ id: finding.id, statement: finding.statement, evidenceRefs: finding.evidenceRefs });
+    if (!isRecord(finding) || typeof finding.id !== 'string' || typeof finding.statement !== 'string') return;
+    const refs = finding.evidenceRefs;
+    const evidenceRefs = Array.isArray(refs) && refs.every((ref): ref is string => typeof ref === 'string')
+      ? refs : undefined;
+    const items = finding.support;
+    const support = Array.isArray(items)
+      ? items.filter((item): item is DeepSupport => isRecord(item)
+        && (typeof item.excerpt === 'string' || typeof item.observation === 'string'))
+      : undefined;
+    if (!evidenceRefs && !support) return;
+    findings.push({ id: finding.id, statement: finding.statement, ...(evidenceRefs ? { evidenceRefs } : {}), ...(support ? { support } : {}) });
   }
   const evidence = Object.fromEntries(card.evidence.flatMap(item => {
     if (!isRecord(item) || typeof item.id !== 'string') return [];
@@ -88,9 +97,13 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
           <ul className={styles.list}>{deep.findings.map(finding => <li key={finding.id}>
             {finding.statement}
             <details><summary>引用依据</summary><ul className={styles.list}>
-              {finding.evidenceRefs.flatMap(ref => (deep.evidence[ref] ?? []).map(excerpt => (
-                <li key={JSON.stringify([ref, excerpt])}>{excerpt}</li>
-              )))}
+              {finding.support
+                ? finding.support.map((item, index) => (
+                  <li key={`${finding.id}:support:${index}`}>{item.excerpt ?? item.observation}</li>
+                ))
+                : (finding.evidenceRefs ?? []).flatMap(ref => (deep.evidence[ref] ?? []).map(excerpt => (
+                  <li key={JSON.stringify([ref, excerpt])}>{excerpt}</li>
+                )))}
             </ul></details>
           </li>)}</ul>
         </div> : null}

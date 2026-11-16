@@ -82,7 +82,7 @@ impl Endpoint {
                                             "basisUnitIds":["u3"],"basisFindingIds":[],
                                             "support":[{
                                                 "materialRef":reference,
-                                                "excerpt":"先摆出材料，再按步骤核对"
+                                                "excerpt":body["text"]
                                             }]
                                         }]
                                     })

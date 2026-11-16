@@ -595,20 +595,29 @@ mod tests {
         assert_eq!(statuses[0]["status"], json!("answered"));
     }
 
+    fn good(id: &str) -> Value {
+        let mut value = finding();
+        value["id"] = json!(id);
+        value
+    }
+    fn wrap(bad: Value) -> String {
+        draft(vec![good("F1"), good("F2"), bad])
+    }
+
     #[test]
     fn rejects_each_rule_with_its_code() {
         let cases: Vec<(Value, &'static str)> = vec![
-            (json!({"id":"F1","answers":"Q9","findingType":"structure","assertionKind":"observation","statement":"甲","support":[{"materialRef":"M1","excerpt":"先摆材料"}]}), "answers_unknown"),
-            (json!({"id":"F1","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"甲","support":[{"materialRef":"MX","excerpt":"先摆材料"}]}), "unknown_material"),
-            (json!({"id":"F1","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"甲","support":[{"materialRef":"M1","excerpt":"不存在的句子"}]}), "excerpt_not_found"),
-            (json!({"id":"F1","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"甲","support":[{"materialRef":"M1","excerpt":"先摆"}]}), "excerpt_too_short"),
-            (json!({"id":"F1","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"作者写了「没有的话」。","support":[{"materialRef":"M1","excerpt":"先摆材料"}]}), "quote_mark_misuse"),
-            (json!({"id":"F1","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"先摆材料导致读者照做。","support":[{"materialRef":"M1","excerpt":"先摆材料"}]}), "causal_language"),
-            (json!({"id":"F1","answers":"Q1","findingType":"transferable_method","assertionKind":"observation","statement":"先把材料摆出来。","support":[{"materialRef":"M1","excerpt":"先摆材料"}]}), "application_incomplete"),
+            (json!({"id":"FB","answers":"Q9","findingType":"structure","assertionKind":"observation","statement":"甲","support":[{"materialRef":"M1","excerpt":"先摆材料"}]}), "answers_unknown"),
+            (json!({"id":"FB","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"甲","support":[{"materialRef":"MX","excerpt":"先摆材料"}]}), "unknown_material"),
+            (json!({"id":"FB","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"甲","support":[{"materialRef":"M1","excerpt":"不存在的句子"}]}), "excerpt_not_found"),
+            (json!({"id":"FB","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"甲","support":[{"materialRef":"M1","excerpt":"先摆"}]}), "excerpt_too_short"),
+            (json!({"id":"FB","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"作者写了「没有的话」。","support":[{"materialRef":"M1","excerpt":"先摆材料"}]}), "quote_mark_misuse"),
+            (json!({"id":"FB","answers":"Q1","findingType":"structure","assertionKind":"observation","statement":"先摆材料导致读者照做。","support":[{"materialRef":"M1","excerpt":"先摆材料"}]}), "causal_language"),
+            (json!({"id":"FB","answers":"Q1","findingType":"transferable_method","assertionKind":"observation","statement":"先把材料摆出来。","support":[{"materialRef":"M1","excerpt":"先摆材料"}]}), "application_incomplete"),
         ];
         for (finding, expected) in cases {
-            let error = accept(&draft(vec![finding]), &card(), &manifest(), &questions()).unwrap_err();
-            assert_eq!(error, expected);
+            let (_, rejected, _) = accept(&wrap(finding), &card(), &manifest(), &questions()).unwrap();
+            assert_eq!(rejected[0]["rejectCode"], json!(expected));
         }
     }
 
@@ -621,15 +630,33 @@ mod tests {
             "application":{"originalUse":"正文开头","method":"拆动作","steps":["列出第一步"],"whenToUse":"卡住时","adaptation":"换场景","avoidWhen":"不知道做什么时"}
         });
         let (published, _, _) =
-            accept(&draft(vec![finding(), method.clone()]), &card(), &manifest(), &questions()).unwrap();
+            accept(&draft(vec![good("F1"), method.clone()]), &card(), &manifest(), &questions()).unwrap();
         assert_eq!(published.as_array().unwrap().len(), 2);
-        let alone = accept(&draft(vec![method.clone()]), &card(), &manifest(), &questions()).unwrap_err();
-        assert_eq!(alone, "method_without_basis");
-        let mut later = method.clone();
-        later["id"] = json!("F1");
-        later["basisFindingIds"] = json!(["F1"]);
-        let cycle = accept(&draft(vec![later]), &card(), &manifest(), &questions()).unwrap_err();
-        assert_eq!(cycle, "basis_cycle");
+
+        let mut no_basis = method.clone();
+        no_basis["basisFindingIds"] = json!([]);
+        let (_, rejected, _) = accept(&wrap(no_basis), &card(), &manifest(), &questions()).unwrap();
+        assert_eq!(rejected[0]["rejectCode"], json!("method_without_basis"));
+
+        let mut self_cycle = method.clone();
+        self_cycle["id"] = json!("F1");
+        self_cycle["basisFindingIds"] = json!(["F1"]);
+        let (_, rejected, _) = accept(&wrap(self_cycle), &card(), &manifest(), &questions()).unwrap();
+        assert_eq!(rejected[0]["rejectCode"], json!("basis_cycle"));
+
+        let mut later = method;
+        later["id"] = json!("F3");
+        later["basisFindingIds"] = json!(["F9"]);
+        let mut tail = good("F9");
+        tail["support"] = json!([{"materialRef":"M1","excerpt":"先摆材料"}]);
+        let (_, rejected, _) = accept(
+            &draft(vec![good("F1"), good("F2"), later, good("F9")]),
+            &card(),
+            &manifest(),
+            &questions(),
+        )
+        .unwrap();
+        assert_eq!(rejected[0]["rejectCode"], json!("basis_cycle"));
     }
 
     #[test]
