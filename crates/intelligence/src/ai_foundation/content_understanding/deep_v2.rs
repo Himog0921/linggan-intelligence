@@ -504,11 +504,17 @@ pub(crate) fn payload(
         .into_iter()
         .flatten()
         .map(|material| {
-            json!({
+            let mut value = json!({
                 "id":material["id"],"materialKind":material["materialKind"],
                 "text":material["text"],"timeStartMs":material["timeStartMs"],
                 "timeEndMs":material["timeEndMs"]
-            })
+            });
+            // The Skill tells the model to treat model_read evidence as a description,
+            // not source text; it can only do that if the marker is sent.
+            if let Some(kind) = material["evidenceKind"].as_str() {
+                value["evidenceKind"] = json!(kind);
+            }
+            value
         })
         .collect();
     json!({
@@ -746,6 +752,20 @@ mod tests {
                 .iter()
                 .all(|item| item["rejectCode"] == json!("over_limit"))
         );
+    }
+
+    #[test]
+    fn payload_marks_model_read_evidence_only_where_present() {
+        let sent = payload(
+            "问题",
+            "content_design",
+            None,
+            &questions(),
+            &card(),
+            &manifest(),
+        );
+        assert_eq!(sent["materials"][1]["evidenceKind"], json!("model_read"));
+        assert!(sent["materials"][0].get("evidenceKind").is_none());
     }
 
     #[test]
