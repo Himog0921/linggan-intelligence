@@ -108,10 +108,22 @@ describe('机会卡页面', () => {
     slow = true; let refresh: Promise<void> | undefined;
     await act(async () => { refresh = client.invalidateQueries({ queryKey: ['opportunity', 'evidence', DOMAIN, PROBLEM] }); });
     await waitFor(() => expect(within(panel).queryByText('SYNTHETIC 原声 c-work-0-2')).not.toBeInTheDocument());
+    expect(screen.queryByText('SYNTHETIC 原声 c-work-0-2')).not.toBeInTheDocument();
     expect(within(panel).getByRole('status')).toHaveTextContent('正在读取依据');
     const card = fixture();
     await act(async () => { finish(reply({ kind: 'comments', cardAsOf: card.asOf, items: card.demand.sampleVoices, excluded: {}, page: { nextCursor: null, hasMore: false, asOf: card.asOf } })); await refresh; });
     expect(await within(panel).findByText('SYNTHETIC 原声 c-work-0-2')).toBeVisible();
+  });
+  it('首次读取依据尚未返回时隐藏卡片原声', async () => {
+    let finish: (value: Response) => void = () => {};
+    const pending = new Promise<Response>(resolve => { finish = resolve; });
+    setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => url.pathname.endsWith('/evidence') ? pending : undefined);
+    await screen.findByText('SYNTHETIC 原声 c-work-0-2');
+    await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
+    expect(screen.queryByText('SYNTHETIC 原声 c-work-0-2')).not.toBeInTheDocument();
+    expect(screen.getByText('正在核对来源，原声暂不展示。')).toBeVisible();
+    await act(async () => { finish(reply({ code: 'opportunity_card_source_unavailable' }, 503)); });
+    expect(await screen.findByRole('alert')).toHaveTextContent('依据未能确认，已隐藏原声');
   });
   it('依据读取失败时也隐藏卡片原声，成功重读卡片后恢复', async () => {
     let failure = true;
@@ -129,10 +141,13 @@ describe('机会卡页面', () => {
     await screen.findByRole('heading', { name: '合成的用户问题' });
     await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('卡片已更新');
+    expect(screen.queryByText('SYNTHETIC 原声 c-work-0-2')).not.toBeInTheDocument();
   });
   it('卡片和依据版本交错时可重新读取并恢复', async () => {
-    let reads = 0; const card = fixture();
+    let reads = 0; let slowCard = false; let finishCard: (value: Response) => void = () => {}; const card = fixture();
+    const pending = new Promise<Response>(resolve => { finishCard = resolve; });
     setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => {
+      if (url.pathname.endsWith('/card') && slowCard) return pending;
       if (!url.pathname.endsWith('/evidence')) return undefined;
       reads += 1;
       const asOf = reads === 1 ? '2026-11-11T00:00:00Z' : card.asOf;
@@ -141,7 +156,10 @@ describe('机会卡页面', () => {
     await screen.findByRole('heading', { name: '合成的用户问题' });
     await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('卡片已更新');
+    slowCard = true;
     await userEvent.click(screen.getByRole('button', { name: '重新读取卡片' }));
+    expect(screen.queryByText('SYNTHETIC 原声 c-work-0-2')).not.toBeInTheDocument();
+    await act(async () => { finishCard(reply(card)); });
     await screen.findByRole('heading', { name: '合成的用户问题' });
     await userEvent.click(screen.getByRole('button', { name: '评论依据' }));
     expect(await screen.findByText(/依据读取于/)).toBeVisible();

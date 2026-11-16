@@ -482,3 +482,7 @@
 - `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-api --locked opportunity_entry_remains_available_when_disabled -- --test-threads=1` → `1 passed; 0 failed`。审阅增量 Rust 文件 `rustfmt --edition 2024 --config skip_children=true --check` → exit 0。
 - `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-reviewed CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`；P1/P2/P3、三类依据及隔离清理再次通过；私有截图已更新为审阅后页面。
 - 后续状态：需对本次修正做独立增量复核，并核实最终提交的远端 CI；尚未合并、部署或进行真实业务验收。
+
+- 对 `39a90f4f..19d918cf` 的独立增量复核确认人数标签、关闭开关直达和版本恢复已解决；同时指出首次读取依据挂起时，父级代表原声仍可能可见。现将依据状态提升为整张卡片共用：首次读取、重读、依据与卡片时点不一致时均隐藏代表原声；依据失败仍要求重新读取卡片。
+- `cd apps/web && npm run typecheck && npm run lint && npm test -- --run src/pages/opportunity/OpportunityPage.test.tsx` → `10 passed; 0 failed`。`cd apps/web && npm test` → `Test Files 172 passed (172); Tests 1794 passed (1794)`。
+- `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-final-head CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`，P1/P2/P3 和三类依据读取通过，隔离容器和卷已清理；私有截图已更新。最终增量复核及远端 CI 待确认。

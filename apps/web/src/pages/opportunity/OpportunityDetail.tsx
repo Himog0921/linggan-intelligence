@@ -33,7 +33,7 @@ function ChannelGroup({ group, flags }: { group: CreatorGroup; flags: readonly s
   </section>;
 }
 
-function EvidencePanel({ card, domain, refreshCard, onEvidenceFailure }: { card: Card; domain: string; refreshCard: () => void; onEvidenceFailure: () => void }) {
+function useEvidence(card: Card, domain: string, refreshCard: () => void, onEvidenceFailure: () => void) {
   const queryClient = useQueryClient();
   const [kind, setKind] = useState<EvidenceKind | null>(null);
   const [cursors, setCursors] = useState<(string | null)[]>([null]);
@@ -47,10 +47,16 @@ function EvidencePanel({ card, domain, refreshCard, onEvidenceFailure }: { card:
   const changeKind = (next: EvidenceKind) => { setKind(next); setCursors([null]); };
   const restart = () => { if (cursor === null) void query.refetch(); else setCursors([null]); };
   const refreshMismatchedCard = () => {
+    onEvidenceFailure();
     setKind(null); setCursors([null]);
     queryClient.removeQueries({ queryKey: ['opportunity', 'evidence', domain, card.problem.id] });
     refreshCard();
   };
+  return { kind, cursors, setCursors, query, changeKind, restart, refreshMismatchedCard };
+}
+
+function EvidencePanel({ card, domain, evidence }: { card: Card; domain: string; evidence: ReturnType<typeof useEvidence> }) {
+  const { kind, cursors, setCursors, query, changeKind, restart, refreshMismatchedCard } = evidence;
   return <section className={styles.section} aria-labelledby="evidence-title"><h2 id="evidence-title">判断与依据</h2>
     <p>供给尚未评估。可查看这张卡片关联的评论、作品和作者依据。</p>
     <div className={styles.evidenceTabs} role="group" aria-label="依据类型">{([['comments', '评论依据'], ['works', '作品依据'], ['creators', '作者依据']] as const).map(([value, label]) => <button type="button" key={value} aria-pressed={kind === value} onClick={() => changeKind(value)}>{label}</button>)}</div>
@@ -68,6 +74,8 @@ function EvidencePanel({ card, domain, refreshCard, onEvidenceFailure }: { card:
 }
 
 function CardContent({ card, domain, home, refreshCard, onEvidenceFailure }: { card: Card; domain: string; home: string; refreshCard: () => void; onEvidenceFailure: () => void }) {
+  const evidence = useEvidence(card, domain, refreshCard, onEvidenceFailure);
+  const voicesVisible = evidence.kind === null || (!evidence.query.isPending && !evidence.query.isFetching && !evidence.query.isError && evidence.query.data?.cardAsOf === card.asOf);
   return <>
     <header className={styles.header}><div><Link to={home}>← 返回机会首页</Link><h1>{card.problem.statement}</h1><p>卡片计算于 {card.asOf}（UTC） · 分类版本 {card.versions.taxonomy} · 指标版本 {card.versions.metricDef}</p></div></header>
     {card.problem.redirectedFrom ? <p className={styles.notice}>原问题已合并，当前显示合并后的问题。</p> : null}
@@ -81,13 +89,13 @@ function CardContent({ card, domain, home, refreshCard, onEvidenceFailure }: { c
     <div className={styles.columns}>
       <section className={styles.column}><h2>需求</h2><p className={styles.notice}>{card.demand.importance.status === 'not_calibrated' ? '重要性未校准' : '重要性已校准'}</p>
         {card.demand.groups.map(group => <section className={styles.protocol} key={group.protocolVersion ?? 'unknown'}><h3>{protocolLabel(group.protocolVersion)} · {tierLabel(group.evidenceTier)}</h3><QualityFlags flags={group.flags} /><div className={styles.tableScroll}><table className={styles.series}><thead><tr><th scope="col">周期开始</th><th scope="col">提及人数</th><th scope="col">有效评论数</th><th scope="col">提及率 / 千</th></tr></thead><tbody>{group.series.map(point => <tr key={point.periodStart}><th scope="row">{point.periodStart}</th><td><Metric value={point.k} flags={group.flags} /></td><td><Metric value={point.n} flags={group.flags} /></td><td><Metric value={point.ratePer1k} flags={group.flags} /></td></tr>)}</tbody></table></div><p className={styles.muted}>基线提及率 / 千：<Metric value={group.baseline.ratePer1k} flags={group.flags} /></p></section>)}
-        <h3>代表原声</h3>{card.demand.sampleVoices.length ? <ul className={styles.evidenceList}>{card.demand.sampleVoices.map(voice => <VoiceItem key={`${voice.commentRef.contentRef}:${voice.commentRef.commentExternalId}`} voice={voice} domain={domain} flags={card.flags} />)}</ul> : <p className={styles.muted}>当前没有可展示的代表原声。</p>}
+        <h3>代表原声</h3>{!voicesVisible ? <p className={styles.muted}>正在核对来源，原声暂不展示。</p> : card.demand.sampleVoices.length ? <ul className={styles.evidenceList}>{card.demand.sampleVoices.map(voice => <VoiceItem key={`${voice.commentRef.contentRef}:${voice.commentRef.commentExternalId}`} voice={voice} domain={domain} flags={card.flags} />)}</ul> : <p className={styles.muted}>当前没有可展示的代表原声。</p>}
         <h3>用户办法</h3>{card.demand.userMethods.status === 'unavailable' ? <p className={styles.muted}>暂不可用：目前无法证明办法与该问题的归属。</p> : <ul>{card.demand.userMethods.items.map(item => <li key={item.label}>{item.label} · 提及人数 <Metric value={item.mentioners} flags={card.flags} /></li>)}</ul>}
       </section>
       <section className={styles.column}><h2>供给</h2><p className={styles.supply}>{supplyLabel(card.supply.state)}</p>{card.supply.state === 'not_evaluated' ? <p className={styles.muted}>尚未开展作品供给判断。</p> : <p className={styles.muted}>{card.supply.judgmentStatus === 'ai_suggested' ? 'AI 建议' : card.supply.judgmentStatus === 'verified' ? '已复核' : '判断状态未知'}</p>}</section>
       <section className={styles.column}><h2>渠道</h2><p className={styles.muted}>作者窗口 <Metric value={card.channel.windowDays} flags={card.flags} /> 天 · 排序最少样本 <Metric value={card.channel.minN} flags={card.flags} /></p><p className={styles.muted}>条形为点估计，线段为区间；协议组内排序。</p>{card.channel.groups.map(group => <ChannelGroup key={group.protocolVersion ?? 'unknown'} group={group} flags={card.flags} />)}</section>
     </div>
-    <EvidencePanel card={card} domain={domain} refreshCard={refreshCard} onEvidenceFailure={onEvidenceFailure} />
+    <EvidencePanel card={card} domain={domain} evidence={evidence} />
     <section className={styles.section}><h2>依据与局限</h2><ul>{card.limitations.map(text => <li key={text}>{text}</li>)}</ul>{card.exclusions.length ? <details><summary>查看资格排除</summary><ul>{card.exclusions.map(item => <li key={item.reason}>{item.reason}：<Metric value={item.comments} flags={card.flags} /> 条评论</li>)}</ul></details> : null}</section>
   </>;
 }
