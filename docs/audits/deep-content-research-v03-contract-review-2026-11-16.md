@@ -11,7 +11,7 @@
 1. **规范的 18 条事实里 17 条在 `main@c57e16b1` 上仍成立，1 条漂移。** 唯一不一致是“最新迁移编号是 0216”：当前 `main` 已到 `0221`（`0217`–`0221` 是机会卡工作包）。其余事实的 `文件:行` 见第 2 节。
 2. **迁移方案基本可行，但 M1 写的激活路径已经不存在。** `0169` 把 `linggan_skill_binding` 的守卫改成只接受 `trial` 和 `manual`（`database/migrations/0169_ai_manual_skill_activation.sql:19-24`），`first_version` 会直接抛 `skill_activation_source_invalid`。首个 Skill 版本只能走手动激活；`0200` 又不允许 L2 建 trial 批次，所以平台内 trial 对比对 L2 不可用，评测只能离线做（与第 9 节一致）。
 3. **Core 版本绑定可做，但现有“有修订就隐藏 Deep”是有意的临时处理，且两处发布用的是不同的 advisory lock。** `docs/data-contracts/content-card.md:27` 写明“已有 L2 发现仍关联原 Core，后续 L2 的修订版接入单独处理”，代码里 `review.revision_ref IS NULL` 是同一提交 `fec06361` 加的。要真正实现 7.1，除了改读取与保存，还要给 `publish_reviewed_core` 补 `lock_core`（现在是 `lock_work_snapshot`，键 `196`，Deep 发布用键 `197`）。
-4. **材料清单的字段都能拿到，但不在 `Snapshot.images` 里。** 图片顺序、用途、SHA256 要从 `Packet.inventory` 取；完整正文要按 `start` 合并多个 body block；口播与画面文字的时间在 `Fragment.structure.time`。位置一律用**字符**偏移（与 L1 一致），不能用字节。
+4. **材料清单的字段都能拿到，但不在 `Snapshot.images` 里。** 图片顺序、用途、SHA256 要从 `Packet.inventory` 取；完整正文要按生产端 block 顺序拼接并自行累计字符偏移（每个 block 的 `start` 都是 0，不能拿来排序）；口播与画面文字的时间在 `Fragment.structure.time`。位置一律用**字符**偏移（与 L1 一致），不能用字节。
 5. **部分接受不需要改执行器通用逻辑。** 新增失败码只要进 `linggan_ai_failure_code`，`counts_as_failure` 的现有表达式就会把它按失败计（`executor/service/content_understanding_deep.rs:170-183`）。要改的是 `accept()` 的返回结构、`payload()`、去重查询和读取投影。
 
 ## 2. 事实核对表
@@ -65,7 +65,7 @@
 | K11 | `content_understanding/deep.rs:22-29`（`Finding` `deny_unknown_fields` + 必填 `evidenceRefs`）对比第 5.5 节 | 人工发布入口若接收 v2 发现会整条拒绝；读取路径目前不受影响 | 人工入口保持 `manual.v1`，v2 走执行器；读取不做强类型反序列化，或按 `method_version` 分支 |
 | K12 | `content_understanding.rs:389-392`（L1 歧义引文直接拒）对比第 5.4-2（首次出现，仅限制顺序） | 同一摘录在 L1 被拒、在 L2 可作普通 support，口径不一致 | 明确写“L2 只在顺序证明上受歧义限制”，`order_ambiguous` 与 `excerpt_not_found` 分开 |
 | K13 | `0199:36-44` 对比 `0196` 的 L1 请求表同名列 `input_manifest`（`content_understanding.rs:219-220`） | 两张表同名列语义不同，易在读取/导出时混用 | 合同写明“L2 `input_manifest` 存材料清单，L1 存 Packet”；代码注释同步 |
-| K14 | `ai_foundation/content_understanding.rs:89-108`（L1 有 token 估算）对比 L2 派发路径（`content_understanding_deep.rs:26-72`） | Skill 正文 + 材料 + 图片可能超模型输入上限，到供应商侧才失败并计费 | 把 L1 的估算复制到 L2；超限走 `skip_unattempted`/`defer`，不计费失败 |
+| K14 | `ai_foundation/content_understanding.rs:89-108`（L1 有 token 估算）对比 L2 派发路径（`content_understanding_deep.rs:26-72`） | Rust 准入没有估算；但 adapter 在调用前拦 `model_input_limit`（`adapter.mjs:169-172`），`not_dispatched` 使 `counts_as_failure=false`（`executor/receipt.rs:105-107`）。**不存在供应商侧计费失败** | 把估算提前到 Rust 准入，让准入原因可见并避免创建调用记录；不要据此声称有计费漏洞 |
 | K15 | 规范 2.2-9 与第 9.3 节“Skill 版本切换” | L2 不能建 trial 批次，平台内 trial 对比不可用 | 保持离线评测 + `manual` 激活；`reason` 引用评测报告（第 4.3 节） |
 
 ## 3. PR #588 的意图与“Deep 绑定 Core 版本”的实现
@@ -148,7 +148,7 @@
 
 | 第 4.3 节字段 | 现状 | 缺口与最小补法 |
 |---|---|---|
-| 完整正文 `body.text` | `snapshot.texts` 含全部 `body` 片段，`text` 是 block 原文，`start` 是累计字符偏移（`source.rs:43-83`；`Fragment.start: usize`，`crates/evidence/src/creator_discovery.rs:31-49`） | 正文通常是多个 block，不是一条。清单生成时按 `start` 排序并拼接；拼接前检查 `end` 与下一个 `start` 连续，不连续就记 `orderState=unknown` 并在 manifest 上标覆盖缺口。L1 的 `model_draft::material` 直接下发 `texts` 数组（`content_understanding/model_draft.rs:8-19`），没有合并，不能照抄 |
+| 完整正文 `body.text` | `snapshot.texts` 含全部 `body` 片段，`text` 是单个 block 原文；每个 block 的 `start=0`、`end=chars`（`crates/evidence/src/research_dossier/projection.rs:414-420`；`crates/evidence/src/creator_discovery.rs:31-49`），**不是累计偏移** | 正文通常是多个 block，不是一条。清单生成时按 `snapshot.texts` 中 body 项的生产端顺序拼接，并由清单自行累计字符偏移；不要按 `start` 排序，也不要用“前块 end = 后块 start”推断连续性（它们永远对不上）。覆盖缺口要看 `coverage`，不要从坐标推断。L1 的 `model_draft::material` 直接下发 `texts` 数组（`content_understanding/model_draft.rs:8-19`），没有合并，不能照抄 |
 | 口播时间 `timeStartMs/timeEndMs` | 在 `Fragment.structure.time`（证据：`crates/evidence/tests/research_dossier_postgres.rs:628`、`apps/api` 侧同类 fixture `crates/evidence/tests/support/standard_dossier_fixture.rs:115`）；`source.rs:67-73` 保留了 `structure`（只删 `text`） | 清单生成从 `structure.time.startMs/endMs` 取；缺失就是 `null`，不能推断。注意 L1 的 `start/end` 是字符位置，**不是**时间 |
 | 画面文字时间 | 同上（`frame_text` 片段带 `structure.time`） | 同上；`frame_text` 若来自 OCR 且无时间，只能 `null`，且不得用于 5.4-4 的顺序证明 |
 | 图片展示顺序 | `packet.inventory` 有 `displayOrderState`、`page`(=display_ordinal)、`producerOrdinal`（`content_understanding/source.rs:84-90`；生产见 `crates/evidence/src/research_dossier/inventory.rs:68-84`） | `Snapshot.images` **没有**顺序与用途字段（`:105-113` 只有 `citation_id/source_ref/source_version/blob_sha256`）。清单必须从 `inventory` 生成，用 `blobSha256` 或 `sourceRef` 回连 `snapshot.images` 的下标。`displayOrderState=UNKNOWN` 时按 4.3-2 写 `unknown`，不编号 |
@@ -168,7 +168,12 @@ let start = source.start.checked_add(source.text[..byte].chars().count())…;
 let end = start.checked_add(quote.chars().count())…;
 ```
 
-`Fragment.start/end` 也是字符计数（`creator_discovery.rs:36-37`），而 `deep_grounding.rs:11-19` 的 `text_position` 直接复用证据里的 `start/end`。因此 5.4 必须写“**字符**偏移”，实现时用 `chars().count()` 转换 `match_indices` 的字节位置；直接比较字节会在大段中文里提前判定先后。
+**注意坐标系的粒度：`start` 是“块内”字符偏移，不是全文偏移。** `crates/evidence/src/research_dossier/projection.rs:414-420` 为每个 block 生成的 `Fragment` 都是 `start: 0, end: text.chars().count()`，`source.rs` 原样复制。L1 的 `inputCitationId` 标识 block，`start/end` 相对该 block 的 `text`，所以：
+
+- 同 block 内的先后（`deep_grounding.rs:72-90` 的 `textPosition.block` 比较）用块内偏移是对的；
+- 跨 block 的先后不能拿两个 `start` 比较——它们都会是 0。5.4-2 若要覆盖“合并后的完整正文”，必须在 manifest 生成时按**生产端 block 顺序**自行累计字符偏移，并把 L1 证据的 `(inputCitationId, start, end)` 映射到合并坐标。
+
+因此 5.4 必须写“**字符**偏移”，实现时用 `chars().count()` 转换 `match_indices` 的字节位置；直接比较字节会在大段中文里提前判定先后。
 
 **摘录多次出现：**
 
@@ -306,7 +311,7 @@ counts_as_failure: !success && allowed && !receipt::not_dispatched(response)
 
 - 拼接后约 10 KB 字节，**远低于**包上限（单文件 256 KiB、合计 1 MiB，`ai_limits.json`），也低于 prompt 表 24,000 字节约束（虽然 Skill 不入 prompt 表）。
 - Token 数：**推测** 约 2.3k–4.6k tokens（中文 1 字约 0.5–1 token，加上少量 ASCII），与规范 9.5 的“3–4k”同量级。**必须以实际供应商 tokenizer 首次实测为准**，本报告不把它当作已验证数字。
-- **风险（已证实）：L2 派发前没有 token 估算。** L1 在 `ai_foundation/content_understanding.rs:89-108` 用 `estimate_input_tokens(system+body) + images*1024` 与 `input_token_limit` 比较；L2 的 `prepare` 与 admission 都没有这一步（`content_understanding_deep.rs:26-72`、`admission/base.rs`）。Skill 正文追加在 system 里（`research_call.rs:64-69`），所以 L2 可能到供应商侧才因超限失败，且失败被记为 `ai_provider_failed`。建议在 G2 第 5 步把 L1 的估算复制到 L2，失败时用 `defer`/`skip_unattempted` 而不是计费失败。
+- **风险（已修订）：Rust 准入没有 token 估算，但 adapter 有外发前检查。** L1 在 `ai_foundation/content_understanding.rs:89-108` 用 `estimate_input_tokens(system+body) + images*1024` 与 `input_token_limit` 比较；L2 的 `prepare` 与 admission 都没有这一步（`content_understanding_deep.rs:26-72`、`admission/base.rs`）。但请求带 `execution`（`transport_store.rs:93-108`），进入 adapter 的 qualified 分支后，`adapter.mjs:169-172` 会在**调用模型之前**用同一 1024/图 的保守估算拦下并返回 `model_input_limit`；`rejected(observation)` 置 `requestSent=false`（`adapter.mjs:227-231`、`diagnostic.mjs:32-34`），Rust 侧 `receipt::not_dispatched`（`executor/receipt.rs:105-107`）因此把 `counts_as_failure` 置为假，`observe_in` 把 `dispatch_state` 记为 `not_dispatched`。**所以不会产生供应商调用，也不会计为失败。** 仍建议把估算提前到 Rust 准入：可以避免创建调用记录与 `ai_provider_failed` 这类误导性的失败码，并让准入原因在任务状态里可见；这不是“缺少外发前保护”，不要把实施计划建立在不存在计费漏洞上。
 
 ## 13. 测试方案
 
@@ -324,7 +329,7 @@ counts_as_failure: !success && allowed && !receipt::not_dispatched(response)
 | 发布前指纹重算不一致 → `content_understanding_publication_withheld` | 同上 | 构造材料快照变化 |
 | Core 修订：生成用修订版、发布前出现新修订 → 不发布、读取按版本显示 | 同上 | 先写一份修订（`publish_reviewed_core`），再生成/发布 |
 | 迁移：新增列/约束/失败码/索引、旧行导出、fixture 摘要 | `crates/intelligence/tests/*_postgres.rs`（新建或并入现有） | 参考 `comment_like_library_postgres.rs:31-52` 的摘要测试；隔离库跑迁移 |
-| 端到端（HTTP + 队列 + 合成供应商）：多张 Deep、`asOf`、`deepAnalyses` 顺序、图片发送 | `apps/api/src/local_web/content_understanding_browser_tests.rs` | 现有 `configure_deep` 需改成 `thinking_level: "high"` 并绑定 Skill；合成端点返回固定 JSON |
+| 端到端（HTTP + 队列 + 合成供应商）：多张 Deep、`asOf`、`deepAnalyses` 顺序、图片发送 | `apps/api/src/local_web/content_understanding_browser_tests.rs`；入口 `bash scripts/test-research-dossier-postgres.sh --dossier-ui`（`--ai-readonly`/`--ai-service` 不跑这个用例） | 现有 `configure_deep` 需改成 `thinking_level: "high"` 并绑定 Skill；合成端点返回固定 JSON |
 | 前端：`deepAnalyses[]` 渲染、两种 `coreBasis` 徽标、`insufficient` 子问题、无“分析/生成”按钮 | `apps/web/src/pages/corpus/evidence/DossierUnderstanding.test.tsx` | 新增带 `deepAnalyses` 的 payload 夹具（现在完全没有） |
 | 路由：新迁移/新文件命中正确 proof | `scripts/ci-select.test.mjs` | 若改 `ci-select.mjs` 则同步 |
 | 文档：索引、链接、状态头 | `node scripts/check-document-governance.mjs` | 本报告 PR 自查 |
@@ -344,8 +349,8 @@ counts_as_failure: !success && allowed && !receipt::not_dispatched(response)
 |---|---|---|---|
 | **PR-1 迁移与注册** | 新迁移（4.1 全部）+ 三处装配 + `ai_failure_code` + `skill_allowed` + `requires_skill`（按 Mog 决定）+ prompt v2 + fixture 摘要测试 + `ci-select`（如需要） | 无 | `node scripts/check-document-governance.mjs`；`bash scripts/ci-preflight.sh origin/main`；隔离库迁移与摘要测试（`bash scripts/test-research-dossier-postgres.sh --ai-foundation` 或对应新建脚本） |
 | **PR-2 请求 v2 与材料清单** | `deep_manifest.rs`（新文件）、`generate_deep.rs` 的模式/子问题/Core 版本/manifest/指纹/去重 | PR-1 | `cargo test -p linggan-intelligence --lib`；`bash scripts/test-research-dossier-postgres.sh --ai-service`（含 `content_understanding_executor_postgres`）；`bash scripts/ci-preflight.sh origin/main` |
-| **PR-3 校验与执行器 v2** | `deep_grounding.rs` 的 payload v2 / accept v2 / 逐条判定 / 整次判定；执行器传图、High 强制、发布前指纹与 Core 版本重算；Skill 绑定后的真实准入 | PR-1、PR-2 | 同上 + `cargo test -p linggan-intelligence --test content_understanding_executor_postgres`；`bash scripts/test-research-dossier-postgres.sh --ai-service`；`--ai-readonly`（浏览器链路，若可用） |
-| **PR-4 读取与前端** | `analysis.deepAnalyses[]`、`materials` 投影、`/deep/modes`、Core 版本徽标、前端类型与展示 | PR-1（数据形状）、PR-3（v2 记录） | `npm --prefix apps/web run lint` + 单元/组件测试；`bash scripts/test-research-dossier-postgres.sh --ai-service`；`bash scripts/ci-preflight.sh origin/main` |
+| **PR-3 校验与执行器 v2** | `deep_grounding.rs` 的 payload v2 / accept v2 / 逐条判定 / 整次判定；执行器传图、High 强制、发布前指纹与 Core 版本重算；Skill 绑定后的真实准入 | PR-1、PR-2 | 同上 + `cargo test -p linggan-intelligence --test content_understanding_executor_postgres`；`bash scripts/test-research-dossier-postgres.sh --ai-service`（执行器隔离链路）；`bash scripts/test-research-dossier-postgres.sh --dossier-ui`（`content_understanding_real_browser_chain`，High/Skill 归属的真实准入与 HTTP 链路） |
+| **PR-4 读取与前端** | `analysis.deepAnalyses[]`、`materials` 投影、`/deep/modes`、Core 版本徽标、前端类型与展示 | PR-1（数据形状）、PR-3（v2 记录） | `npm --prefix apps/web run lint` + 单元/组件测试；`bash scripts/test-research-dossier-postgres.sh --dossier-ui`（含浏览器链路）；`bash scripts/ci-preflight.sh origin/main` |
 
 合并纪律：每个 PR 必须先跑预检与受影响 proof；PR-1 的迁移编号在合入时取（当前 `0222` 起）；不合并任何会改 `linggan_ai_task_setting`、Skill 绑定或 prompt 激活的迁移。
 
