@@ -69,7 +69,7 @@ async fn paged_unjudged_creators_expand_only_visible_dossiers_without_losing_cou
         .await
         .unwrap();
     let _ = load_list(&db, &q).await.unwrap();
-    let inventory_batches: i64 = sqlx::query_scalar("SELECT coalesce(sum(calls),0)::bigint FROM public.pg_stat_statements WHERE query LIKE '%WITH origins AS (%SELECT DISTINCT ON (o.slot_key)%'")
+    let inventory_batches: i64 = sqlx::query_scalar("SELECT coalesce(sum(calls),0)::bigint FROM public.pg_stat_statements WHERE query LIKE '%origins AS (%SELECT DISTINCT ON (o.slot_key)%'")
         .fetch_one(db.pool()).await.unwrap();
     assert_eq!(
         inventory_batches, 1,
