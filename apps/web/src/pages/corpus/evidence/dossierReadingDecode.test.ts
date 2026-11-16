@@ -9,11 +9,11 @@ function fixture(materials: unknown[], groups: ReadingGroup[], kind: ReadingSect
   return dossierJson(1, { materials, readingView: { mainBlockRefs: groups.flatMap(value => value.blockRefs), supplementBlockRefs: [], sections: [{ ref: `section:${kind}`, kind, groups, gaps: [] }] } });
 }
 it('sections 固定章节顺序，主补数组保留来源角色，所有阅读表面使用章节次序', () => {
-  const materials = [dossierMaterialJson(1, { kind: 'audio', blocks: [{ ref: 'audio', kind: 'paragraph', text: '音频' }] }), dossierMaterialJson(2, { kind: 'video_frame', blocks: [{ ref: 'frame', kind: 'paragraph', text: '画面' }] }), dossierMaterialJson(3, { blocks: [{ ref: 'image', kind: 'paragraph', text: '图片' }] })];
-  const raw = dossierJson(1, { materials, readingView: { mainBlockRefs: ['audio', 'frame', 'image'], supplementBlockRefs: [] } });
+  const materials = [dossierMaterialJson(1, { kind: 'audio', blocks: [{ ref: 'audio', kind: 'paragraph', text: '音频' }] }), dossierMaterialJson(3, { blocks: [{ ref: 'image', kind: 'paragraph', text: '图片' }] })];
+  const raw = dossierJson(1, { materials, readingView: { mainBlockRefs: ['audio', 'image'], supplementBlockRefs: [] } });
   const parsed = parseDossierPayload(raw).dossier;
-  expect(parsed.readingView.mainBlockRefs).toEqual(['audio', 'frame', 'image']);
-  expect(parsed.readingView.sections.map(section => section.kind)).toEqual(['images', 'audio', 'frames']);
+  expect(parsed.readingView.mainBlockRefs).toEqual(['audio', 'image']);
+  expect(parsed.readingView.sections.map(section => section.kind)).toEqual(['images', 'audio']);
   const invalid = structuredClone(raw); invalid.dossier.readingView.sections.reverse();
   expect(() => parseDossierPayload(invalid)).toThrow();
 });

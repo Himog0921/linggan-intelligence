@@ -398,7 +398,7 @@ struct OcrReadProjection {
 /// OCR status follows the exact same current/source/empty/page owner as dossier reading.
 /// Only references and status leave this adapter; OCR text is never copied into media resources.
 fn canonical_ocr_projection(materials: &[Value]) -> OcrReadProjection {
-    canonical_reading_projection(materials, &["image", "video_frame"])
+    canonical_reading_projection(materials, &["image"])
 }
 
 fn canonical_reading_projection(materials: &[Value], kinds: &[&str]) -> OcrReadProjection {
@@ -831,7 +831,7 @@ async fn read_derivative_rows(
          LEFT JOIN restricted_blobs restricted_blob ON restricted_blob.blob_sha256=job.blob_sha256 \
          LEFT JOIN restricted_derivatives restricted_derivative ON restricted_derivative.derivative_ref=derivative.derivative_ref \
          {retirement_join} \
-         WHERE job.processor_kind IN ('image_ocr','video_frame_ocr','thumbnail','audio_extract','asr') AND job.created_at <= $2::timestamptz \
+         WHERE job.processor_kind IN ('image_ocr','thumbnail','audio_extract','asr') AND job.created_at <= $2::timestamptz \
          ) SELECT * FROM derivative_rows WHERE row_ordinal > $3 AND row_ordinal <= $3 + $4 \
          ORDER BY content_public_ref,row_ordinal"
     )))
@@ -892,7 +892,7 @@ fn project_derivative_rows(
                 false,
                 false,
                 Some("succeeded"),
-                Some("no_text_observed" | "no_speech_observed" | "no_frame_text_observed"),
+                Some("no_text_observed" | "no_speech_observed"),
                 false,
             ) => "KNOWN_EMPTY",
             (false, false, Some("succeeded"), _, false) => "UNKNOWN",

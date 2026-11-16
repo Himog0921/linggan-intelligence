@@ -18,16 +18,18 @@ it('按后端规范章节引用顺序读取，不按材料数组重新排序；�
   expect(screen.queryByText('封面整理标题')).not.toBeInTheDocument();
   expect(screen.getAllByText('真实重复')).toHaveLength(2);
 });
-it('视频口播与画面采用规范章节，保持实际时间定位', () => {
+it('视频口播采用规范章节，保持实际时间定位，不再显示画面文字', () => {
   const dossier = parseDossierPayload(dossierJson(1, { materials: [
-    dossierMaterialJson(1, { kind: 'video_frame', page: null, blocks: [{ ref: 'frame', kind: 'paragraph', text: '画面文字', time: { startMs: 1250, endMs: 1250 } }] }),
     dossierMaterialJson(2, { kind: 'audio', page: null, blocks: [{ ref: 'speech', kind: 'paragraph', text: '完整口播', time: { startMs: 1000, endMs: 3000 } }] }),
-  ], readingView: { mainBlockRefs: ['speech'], supplementBlockRefs: ['frame'] } })).dossier;
+  ], readingView: { mainBlockRefs: ['speech'], supplementBlockRefs: [] } })).dossier;
   render(<DossierReading dossier={dossier} titleRendered />);
   expect(within(screen.getByRole('region', { name: '视频口播' })).getByText('完整口播')).toBeVisible();
-  expect(within(screen.getByRole('region', { name: '画面文字节选' })).getByText('画面文字')).toBeVisible();
+  expect(screen.queryByRole('region', { name: '画面文字节选' })).not.toBeInTheDocument();
   expect(screen.getByText('00:01')).toBeVisible();
-  expect(screen.getByText('00:01.250')).toBeVisible();
+});
+it('已下线的 video_frame 材料不再被接受', () => {
+  const raw = dossierJson(1, { materials: [dossierMaterialJson(1, { kind: 'video_frame', page: null, blocks: [] })] });
+  expect(() => parseDossierPayload(raw)).toThrow();
 });
 it('研究底稿只读打开保留局部失败，不默认加载候选或提交准备', async () => {
   const kit = createFetchMock(); kit.install();
@@ -87,7 +89,7 @@ it('只有附件时研究底稿直接说明正文未取得，不再需要展开�
   kit.route('GET', path, ok(dossierJson(1, { note: { platformTitle: null, displayTitle: null, displayTitleBasis: 'missing' }, materials: [
     dossierMaterialJson(2, { kind: 'body', sourceState: 'not_acquired', blocks: [], reading: null, currentRevisionRef: null, originalUrl: null }),
     dossierMaterialJson(1, { blocks: [], reading: null, currentRevisionRef: null }),
-  ], coverage: { sources: { body: { state: 'not_acquired', units: 1, readings: 0 }, images: { state: 'not_processed', units: 1, readings: 0 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } } } })));
+  ], coverage: { sources: { body: { state: 'not_acquired', units: 1, readings: 0 }, images: { state: 'not_processed', units: 1, readings: 0 }, audio: { state: 'not_applicable', units: 0, readings: 0 } } } })));
   try {
     renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active />);
     expect(await screen.findByText('来源尚未取得。')).toBeVisible();
@@ -118,9 +120,9 @@ it.each([
   if (hasText) expect(screen.getByText('已经识别的真实文字')).toBeVisible();
 });
 
-it.each(['image', 'video_frame'] as const)('%s 的机器处理说明保留在来源，不逐项填充正文', kind => {
+it.each(['image'] as const)('%s 的机器处理说明保留在来源，不逐项填充正文', kind => {
   const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind, sourceState: 'known_empty', blocks: [], reading: null, currentRevisionRef: null,
-    processing: { state: 'completed', reason: kind === 'image' ? 'no_text_observed' : 'no_frame_text_observed' } })] })).dossier;
+    processing: { state: 'completed', reason: 'no_text_observed' } })] })).dossier;
   render(<DossierReading dossier={dossier} titleRendered />);
   expect(screen.queryByText('处理完成，未检出文字。')).not.toBeInTheDocument();
   expect(screen.queryByText('处理完成，尚无当前读本。')).not.toBeInTheDocument();
@@ -172,13 +174,12 @@ it.each(['works', 'dossier'] as const)('%s 只显示规范有效内容，封面�
       { ref: 'step-b', kind: 'heading', text: '只留一科。' },
     ] }),
     dossierMaterialJson(2, { kind: 'audio', page: null, sourceState: 'present', reading: null, currentRevisionRef: null, blocks: [], processing: { state: 'pending', reason: null } }),
-    dossierMaterialJson(3, { kind: 'video_frame', page: null, sourceState: 'present', reading: null, currentRevisionRef: null, blocks: [] }),
   ], readingView: { mainBlockRefs: ['cover-a', 'cover-b', 'step-a', 'step-b'], supplementBlockRefs: [], sections: [{ ref: 'images', kind: 'images', gaps: [], groups: [
     { ref: 'cover', mode: 'heading', blockRefs: ['cover-a', 'cover-b'], joiners: ['，'], continuation: { fromPrevious: false, toNext: false } },
     { ref: 'step', mode: 'paragraph', blockRefs: ['step-a', 'step-b'], joiners: [''], continuation: { fromPrevious: false, toNext: false } },
   ] }] }, coverage: {
     imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 1, processedPages: 1, missingPages: [], unknownOrder: true },
-    sources: { body: { state: 'not_acquired', units: 0, readings: 0 }, images: { state: 'available', units: 1, readings: 1 }, audio: { state: 'not_processed', units: 1, readings: 0 }, videoFrames: { state: 'not_processed', units: 1, readings: 0 } },
+    sources: { body: { state: 'not_acquired', units: 0, readings: 0 }, images: { state: 'available', units: 1, readings: 1 }, audio: { state: 'not_processed', units: 1, readings: 0 } },
   } }));
   const view = renderWithProviders(surface === 'works' ? <DossierReading dossier={payload.dossier} titleRendered/> : <DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.getByRole('heading', { name: '智商 133 但专注力差，除了用药家庭中做好这几点' })).toBeVisible();
@@ -197,7 +198,7 @@ it.each([false, true])('未知页码的全 gap 不冒充完成；含有效文字
   const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { page: null, blocks, processing: { state: 'completed', reason: null } })],
     readingView: { mainBlockRefs: hasText ? ['effective'] : [], supplementBlockRefs: [] }, coverage: {
       imageInventory: { basis: 'observed_set', expectedPages: null, acquiredPages: 1, processedPages: 1, missingPages: [], unknownOrder: true },
-      sources: { body: { state: 'not_applicable', units: 0, readings: 0 }, images: { state: 'available', units: 1, readings: 1 }, audio: { state: 'not_applicable', units: 0, readings: 0 }, videoFrames: { state: 'not_applicable', units: 0, readings: 0 } },
+      sources: { body: { state: 'not_applicable', units: 0, readings: 0 }, images: { state: 'available', units: 1, readings: 1 }, audio: { state: 'not_applicable', units: 0, readings: 0 } },
     } }));
   renderWithProviders(<DossierDocument payload={payload} domain={DOMAIN} active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
   expect(screen.queryByText(/此处文字识别不可靠/)).not.toBeInTheDocument();

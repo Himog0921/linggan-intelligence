@@ -211,6 +211,8 @@ fn hash(value: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
 }
+// `frame_text` is no longer produced (video frame text retired 2026-11-16); it stays
+// valid so historical frozen snapshots can still be read.
 const TEXT_KINDS: &[&str] = &["title", "body", "tags", "ocr", "transcript", "frame_text"];
 
 fn validate_snapshot(snapshot: &Snapshot) -> Result<(), &'static str> {

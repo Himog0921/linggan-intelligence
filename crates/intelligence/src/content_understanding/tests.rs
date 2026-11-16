@@ -1102,15 +1102,15 @@ fn transcript_layout_recovery_keeps_first_repeat_and_rejects_content_changes() {
 fn model_draft_keeps_canonical_source_and_requires_direct_book_title_support() {
     let (mut draft, mut snapshot, generation) = text_only();
     snapshot.texts[0].text = "课程使用两本教辅。\n步骤要先对版本。".into();
-    let mut frame = snapshot.texts[0].clone();
-    frame.citation_id = "canonical-frame".into();
-    frame.kind = "frame_text".into();
-    frame.start = 11;
-    frame.text = "🙂教材全练 题例".into();
-    frame.speaker = "unknown".into();
-    frame.structure = json!({"ref":"canonical-frame","time":{"startMs":120000,"endMs":120000}});
-    snapshot.texts.push(frame);
-    snapshot.included_kinds.push("frame_text".into());
+    let mut segment = snapshot.texts[0].clone();
+    segment.citation_id = "canonical-segment".into();
+    segment.kind = "transcript".into();
+    segment.start = 11;
+    segment.text = "🙂教材全练 题例".into();
+    segment.speaker = "unknown".into();
+    segment.structure = json!({"ref":"canonical-segment","time":{"startMs":120000,"endMs":120000}});
+    snapshot.texts.push(segment);
+    snapshot.included_kinds.push("transcript".into());
     draft["evidenceCandidates"]["text"] = json!([
         {"id":"ev1","inputCitationId":"s1","quote":"课程使用两本教辅"},
         {"id":"ev2","inputCitationId":"s2","quote":"教材全练"}
@@ -1135,7 +1135,7 @@ fn model_draft_keeps_canonical_source_and_requires_direct_book_title_support() {
     let material = model_draft::material(&snapshot);
     assert_eq!(material["texts"][0]["citationId"], "s1");
     assert_eq!(material["texts"][1]["citationId"], "s2");
-    assert_eq!(snapshot.texts[1].citation_id, "canonical-frame");
+    assert_eq!(snapshot.texts[1].citation_id, "canonical-segment");
     assert!(material["texts"][1]["structure"].get("ref").is_none());
     assert_eq!(
         material["texts"][1]["structure"]["time"],
@@ -1144,27 +1144,27 @@ fn model_draft_keeps_canonical_source_and_requires_direct_book_title_support() {
 
     let result = verify(draft.clone()).unwrap();
     let bound = &result["card"]["evidence"][1];
-    assert_eq!(bound["inputCitationId"], "canonical-frame");
+    assert_eq!(bound["inputCitationId"], "canonical-segment");
     assert_eq!(bound["start"], 12);
     assert_eq!(bound["end"], 16);
     assert_eq!(bound["quote"], "教材全练");
 
     let mut wrong_channel = draft.clone();
-    wrong_channel["core"]["knowledgeUnits"][2]["statement"] = json!("口播原话「教材全练」。");
+    wrong_channel["core"]["knowledgeUnits"][2]["statement"] = json!("画面原文「教材全练」。");
     wrong_channel["core"]["summary"]["text"] = json!("作者介绍教辅。");
     let result = verify(wrong_channel).unwrap();
     assert_eq!(unit_ids(&result), ["u1", "u2"]);
-    let mut literal_from_frame = draft.clone();
-    literal_from_frame["core"]["knowledgeUnits"][2]["statement"] = json!("画面原文「教材全练」。");
+    let mut literal_from_speech = draft.clone();
+    literal_from_speech["core"]["knowledgeUnits"][2]["statement"] = json!("口播原话「教材全练」。");
     assert_eq!(
-        unit_ids(&verify(literal_from_frame).unwrap()),
+        unit_ids(&verify(literal_from_speech).unwrap()),
         ["u1", "u2", "u3"]
     );
 
     // Citing the canonical id, the wrong segment, or the segment itself still
-    // resolves to the frame text that literally holds the quote.
+    // resolves to the transcript segment that literally holds the quote.
     let mut original_id = draft.clone();
-    original_id["evidenceCandidates"]["text"][1]["inputCitationId"] = json!("canonical-frame");
+    original_id["evidenceCandidates"]["text"][1]["inputCitationId"] = json!("canonical-segment");
     let mut wrong_source = draft.clone();
     wrong_source["evidenceCandidates"]["text"][1]["inputCitationId"] = json!("s1");
     let mut segment_ref = draft;
@@ -1173,7 +1173,7 @@ fn model_draft_keeps_canonical_source_and_requires_direct_book_title_support() {
         let result = verify(variant).unwrap();
         assert_eq!(
             result["card"]["evidence"][1]["inputCitationId"],
-            "canonical-frame"
+            "canonical-segment"
         );
         assert_eq!(unit_ids(&result), ["u1", "u2", "u3"]);
     }
@@ -1203,8 +1203,11 @@ fn model_draft_keeps_image_reads_distinct_from_literal_transcriptions() {
     assert_eq!(result["card"]["evidence"][1]["verification"], "model_read");
     assert_eq!(unit_ids(&result), ["u1", "u2", "u3"]);
 
+    // On-screen quotes are image reads now that video frame text is retired.
+    let mut on_screen = draft.clone();
+    on_screen["core"]["knowledgeUnits"][2]["statement"] = json!("画面原文：「合成步骤」。");
+    assert_eq!(kept(on_screen, &snapshot), ["u1", "u2", "u3"]);
     for unsupported in [
-        "画面原文：「合成步骤」。",
         "口播原话: “合成步骤”。",
         "图片原文「合成步骤",
         "图片原文「 」",
@@ -1216,13 +1219,6 @@ fn model_draft_keeps_image_reads_distinct_from_literal_transcriptions() {
         assert_eq!(kept(variant, &snapshot), ["u1", "u2"], "{unsupported}");
     }
 
-    let mut frame = snapshot.texts[0].clone();
-    frame.kind = "frame_text".into();
-    frame.citation_id = "frozen-frame".into();
-    frame.text = "合成步骤".into();
-    snapshot.texts.push(frame);
-    snapshot.included_kinds.push("frame_text".into());
-    assert_eq!(kept(draft.clone(), &snapshot), ["u1", "u2", "u3"]);
     let mut wrong_source = draft.clone();
     wrong_source["core"]["knowledgeUnits"][2]["statement"] = json!("图片 原文：「合成材料」。");
     wrong_source["core"]["knowledgeUnits"][2]["evidenceRefs"] = json!(["ev1"]);
@@ -1230,5 +1226,5 @@ fn model_draft_keeps_image_reads_distinct_from_literal_transcriptions() {
 
     let mut unqualified = draft;
     unqualified["core"]["knowledgeUnits"][2]["statement"] = json!("原文「合成步骤」。");
-    assert_eq!(kept(unqualified, &snapshot), ["u1", "u2"]);
+    assert_eq!(kept(unqualified, &snapshot), ["u1", "u2", "u3"]);
 }

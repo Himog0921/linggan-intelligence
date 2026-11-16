@@ -180,9 +180,9 @@ try {
   await checkResult();
   report.steps.push('人为模拟读取失败时原文可读、不展示旧理解；重试只读取、不重新生成。');
   if (!fixture.live) {
-    const scopeNote = '本次依据口播与已提取的画面文字，未覆盖整段视频的全部画面。';
+    const scopeNote = '本次依据口播，不包含视频画面内容。';
     for (const [state, label, message] of [
-      ['preparing', '材料准备中', '正在处理画面文字。'],
+      ['preparing', '材料准备中', '正在处理口播。'],
       ['blocked', '材料待补齐', '原视频本地副本暂不可读取。'],
     ]) {
       await page.route('**/api/local/content-understanding/latest?**', route => route.fulfill({

@@ -1,14 +1,14 @@
 # Paddle OCR 本机运行时
 
-> 状态: 权威当前
-> 最后核对: 2026-10-26
+> 状态: 历史归档
+> 最后核对: 2026-11-16
 > 适用范围: `linggan-media-worker` 的本地 PaddleOCR 依赖、启动前检查与安全边界
 > 事实来源: OCR-CONTENT-LAYERING-001、`paddle_ocr.py` bridge、`prepare-paddle-ocr.sh`
-> 冲突时以谁为准: 用户最新授权、AGENTS.md、当前 worker 源码与真实运行回执
+> 冲突时以谁为准: [DEC-0013](../../decisions/0013-retire-video-frame-text.md)。2026-11-16 视频画面文字下线，本手册描述的 PaddleOCR 桥接与准备脚本已从代码删除，仅作专项重建时的参考
 
 ## 目的与边界
 
-> 2026-11-08 图片识图切换候选将本机 PaddleOCR 限定在视频抽帧链路。下文涉及静态图片及本地 OCR-VL 的执行说明记录切换前行为。当前切换范围见[研究底稿合同](../data-contracts/research-dossier.md#开发期图片识图切换2026-11-08)。
+> 2026-11-08 图片识图切换候选将本机 PaddleOCR 限定在视频抽帧链路。下文涉及静态图片及本地 OCR-VL 的执行说明记录切换前行为。当前切换范围见[研究底稿合同](../../data-contracts/research-dossier.md#开发期图片识图切换2026-11-08)。
 
 当前保留本机 PaddleOCR v4 日常路径、已有本地 OCR-VL 路径，以及单独受控的 DeepSeek-v4-flash 图片 OCR 接口。安装步骤不会执行数据库 migration、重排历史作业、重启 worker、访问平台或调用视觉模型。
 

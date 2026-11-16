@@ -19,6 +19,7 @@ pub enum MaterialColumn {
     Tags,
     Ocr,
     Transcript,
+    /// Historical column kept so stored configurations still deserialize; no longer produced.
     FrameText,
 }
 

@@ -73,7 +73,7 @@ async fn dossier_v2_browser_proof() {
         }
     }
     // Saved-result replay includes a completed lifecycle; no recognizer is invoked.
-    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) SELECT gen_random_uuid(),j.job_ref,'succeeded','offline_saved_result_replay' FROM linggan_media_processing_job j JOIN linggan_material_unit u ON u.slot_key=j.slot_key AND u.current_reading_ref IS NOT NULL AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' WHEN 'video_frame_ocr' THEN 'video_frame' ELSE '' END").execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_media_processing_job_event(event_ref,job_ref,state,reason) SELECT gen_random_uuid(),j.job_ref,'succeeded','offline_saved_result_replay' FROM linggan_media_processing_job j JOIN linggan_material_unit u ON u.slot_key=j.slot_key AND u.current_reading_ref IS NOT NULL AND u.kind=CASE j.processor_kind WHEN 'image_ocr' THEN 'image' WHEN 'asr' THEN 'audio' ELSE '' END").execute(db.pool()).await.unwrap();
     let before = counts(&db).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let fixture = json!({"origin":format!("http://{}",listener.local_addr().unwrap()),"domain":dossier_fixture::DOMAIN,"work":work,

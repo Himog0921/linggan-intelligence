@@ -51,8 +51,6 @@ pub(super) fn from_dossier(
                 "tags",
                 "transcript",
                 "asr_text",
-                "frame_text",
-                "frame_ocr_text",
             ]
             .contains(&f.field.as_str())
                 && !f.text.trim().is_empty()
@@ -75,7 +73,6 @@ pub(super) fn from_dossier(
             kind: match f.field.as_str() {
                 "native_title" => "title",
                 "asr_text" => "transcript",
-                "frame_ocr_text" => "frame_text",
                 v => v,
             }
             .into(),
@@ -130,7 +127,7 @@ pub(super) fn from_dossier(
             .iter()
             .filter(|m| m["kind"] != "image")
             .all(|m| {
-                if m["kind"] == "audio" || m["kind"] == "video_frame" {
+                if m["kind"] == "audio" {
                     m["sourceState"] == "not_applicable"
                         || m["sourceState"] == "known_empty"
                         || (m["sourceState"] == "present" && m["currentRevisionRef"].is_string())

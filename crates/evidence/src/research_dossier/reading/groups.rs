@@ -64,7 +64,6 @@ fn section_kind(material: &Value) -> &'static str {
     match material["kind"].as_str() {
         Some("image") => "images",
         Some("audio") => "audio",
-        Some("video_frame") => "frames",
         _ => "publication",
     }
 }

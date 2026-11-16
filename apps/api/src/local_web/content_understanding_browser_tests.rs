@@ -426,9 +426,7 @@ async fn content_understanding_authorized_single_live_chain() {
         .unwrap();
     for material in input["dossier"]["materials"].as_array().unwrap() {
         let kind = material["kind"].as_str().unwrap();
-        if !["body", "audio", "video_frame"].contains(&kind)
-            || material["currentRevisionRef"].is_null()
-        {
+        if !["body", "audio"].contains(&kind) || material["currentRevisionRef"].is_null() {
             continue;
         }
         let unit = before
@@ -500,7 +498,7 @@ async fn content_understanding_authorized_single_live_chain() {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|m| m["kind"] == "audio" || m["kind"] == "video_frame")
+        .filter(|m| m["kind"] == "audio")
     {
         let replay = imported
             .materials

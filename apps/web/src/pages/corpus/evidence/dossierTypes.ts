@@ -1,8 +1,8 @@
 /** The only research reading contract. Raw is held in memory for explicit JSON export. */
-export type MaterialKind = 'body' | 'tags' | 'image' | 'audio' | 'video_frame';
+export type MaterialKind = 'body' | 'tags' | 'image' | 'audio';
 export type SourceState = 'present' | 'known_empty' | 'not_acquired' | 'not_applicable' | 'restricted';
 export type Speaker = 'author' | 'other' | 'unconfirmed';
-export type ReadingProducer = 'platform' | 'ordinary_ocr' | 'local_vision' | 'cloud_vision' | 'asr' | 'frame_ocr' | 'human_edit';
+export type ReadingProducer = 'platform' | 'ordinary_ocr' | 'local_vision' | 'cloud_vision' | 'asr' | 'human_edit';
 export type Adoption = 'automatic' | 'human_adopted' | 'human_edited';
 export type Verification = 'unchecked' | 'verified';
 export type ReadingReviewAction = 'edit';
@@ -47,14 +47,14 @@ export interface DossierNote {
 }
 export interface DossierCoverage {
   imageInventory: { basis: 'platform_image_list' | 'observed_set'; expectedPages: number | null; acquiredPages: number; processedPages: number; missingPages: number[]; unknownOrder: boolean };
-  sources: Record<'body' | 'images' | 'audio' | 'videoFrames', { state: 'available' | 'known_empty' | 'not_acquired' | 'not_applicable' | 'restricted' | 'partial' | 'not_processed'; units: number; readings: number }>;
+  sources: Record<'body' | 'images' | 'audio', { state: 'available' | 'known_empty' | 'not_acquired' | 'not_applicable' | 'restricted' | 'partial' | 'not_processed'; units: number; readings: number }>;
   issues: DossierIssue[];
 }
 export interface DossierSelection {
   mode: 'full' | 'explicit'; kinds: MaterialKind[]; unitRefs: string[]; blockRefs: string[]; imagePages: number[];
   omittedUnits: number; completeRevision: string;
 }
-export type ReadingSectionKind = 'publication' | 'images' | 'audio' | 'frames';
+export type ReadingSectionKind = 'publication' | 'images' | 'audio';
 interface ReadingGroupBase {
   ref: string;
   blockRefs: string[];

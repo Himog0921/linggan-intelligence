@@ -53,7 +53,7 @@ pub struct MaterialLibraryItem {
 #[serde(rename_all = "camelCase")]
 pub struct MaterialEvidenceFragment {
     pub text: String,
-    /// `detail_body` | `ocr_text` | `image_substantive_text` | `frame_ocr_text` | `asr_text` |
+    /// `detail_body` | `ocr_text` | `image_substantive_text` | `asr_text` |
     /// `comment_body`. The reader
     /// must be able to tell the author's own sentence from a comment or from machine-read text,
     /// so this is never collapsed into a single "content" label in the UI.

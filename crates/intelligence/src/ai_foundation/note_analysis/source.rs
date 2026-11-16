@@ -25,7 +25,6 @@ pub(super) async fn load(
             "native_title" => "title",
             "image_substantive_text" => "ocr",
             "asr_text" => "transcript",
-            "frame_ocr_text" => "frame_text",
             v => v,
         };
         if !columns.iter().any(|x| x == field) || f.text.trim().is_empty() {
@@ -159,7 +158,6 @@ fn source_origin(
         "title" => "platform_title",
         "ocr" => "image",
         "transcript" => "audio",
-        "frame_text" => "video_frame",
         other => other,
     };
     let timing = fragment.structure.get("time").map(|time| {

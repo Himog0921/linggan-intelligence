@@ -100,7 +100,7 @@ pub async fn scenario(
             continue;
         }
         let kinds: &[&str] = if *role == "video" {
-            &["audio", "video_frame"]
+            &["audio"]
         } else {
             &["image"]
         };
@@ -112,7 +112,7 @@ pub async fn scenario(
                 ]
             } else {
                 vec![
-                    json!({"ref":"timed","kind":"paragraph","text":if *kind=="audio"{"合成口播：先看条件，再做决定。"}else{"合成画面文字：补充图示。"},"speaker":"unconfirmed","time":{"startMs":1000,"endMs":if *kind=="audio"{3000}else{1000}}}),
+                    json!({"ref":"timed","kind":"paragraph","text":"合成口播：先看条件，再做决定。","speaker":"unconfirmed","time":{"startMs":1000,"endMs":3000}}),
                 ]
             };
             let mut tx = db.pool().begin().await.unwrap();
@@ -134,7 +134,6 @@ pub async fn scenario(
                     producer_ref: Some(Uuid::new_v4()),
                     generated_by: match *kind {
                         "audio" => "asr",
-                        "video_frame" => "frame_ocr",
                         _ => "cloud_vision",
                     }
                     .into(),

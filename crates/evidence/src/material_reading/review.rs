@@ -25,7 +25,7 @@ pub async fn review_work_reading(
             .strip_prefix(&format!("{work}."))
             .ok_or(ReadingError::NotFound)?;
         let (kind, slot) = rest.split_once('.').ok_or(ReadingError::NotFound)?;
-        if !["body", "image", "audio", "video_frame"].contains(&kind) {
+        if !["body", "image", "audio"].contains(&kind) {
             return Err(ReadingError::NotFound);
         }
         let key = if kind == "body" && slot == "native" {

@@ -179,10 +179,10 @@ describe('AI 设置正式四视图', () => {
     expect(calls.find(call => call.method === 'POST')).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'ocr_recognition', budget: { mode: 'unlimited' }, model: { modelRef: 'second-model', limits: { attempts: 1, thinkingLevel: 'off' } } } });
   });
 
-  it('材料范围沿用底稿六类字段，视频画面可显式选入后保存', async () => {
+  it('材料范围沿用底稿五类字段，旧配置里的视频画面文字在保存时移除', async () => {
     const base = settingsFixture();
     const capability = { capabilityRef: 'cap-text', source: 'manual', sourceVersion: 'synthetic-only', probeInvocationRef: null, contextTokens: 8192, maxOutputTokens: 2048, maxTimeoutSeconds: 60, thinkingLevels: ['off'], compat: {}, thinkingLevelMap: { off: null }, outputMode: 'json_object', strictSchema: false };
-    const config = { ...base.tasks[0]!.configuration, taskKey: 'note_interpretation', materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript'],
+    const config = { ...base.tasks[0]!.configuration, taskKey: 'note_interpretation', materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript', 'frame_text'],
       model: { modelConfigRef: 'model-config', modelRef: 'old-model-ref', identityRef: 'identity-1', modelId: 'synthetic-model',
         connectionRef: 'connection-1', connectionVersionRef: 'version-1', capabilityRef: 'cap-text',
         limits: { inputTokens: 2048, outputTokens: 512, timeoutSeconds: 30, attempts: 1, thinkingLevel: 'off' } } };
@@ -195,14 +195,14 @@ describe('AI 设置正式四视图', () => {
     await user.click(await screen.findByRole('button', { name: /笔记解读/ }));
     await user.click(screen.getByRole('link', { name: '查看工作配置' }));
     expect(screen.queryByRole('checkbox', { name: '封面文字' })).not.toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: '视频画面文字' })).not.toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: '视频画面文字' })).not.toBeInTheDocument();
+    expect(screen.getByRole('checkbox', { name: '音频转录' })).toBeChecked();
     expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
-    await user.click(screen.getByRole('checkbox', { name: '视频画面文字' }));
     await user.click(screen.getByRole('button', { name: '保存配置' }));
     await screen.findByText(/配置已保存，用于后续批次/);
     const writes = calls.filter(call => call.method === 'POST');
     expect(writes).toHaveLength(1);
-    expect(writes[0]).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'note_interpretation', expectedRevision: 0, materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript', 'frame_text'] } });
+    expect(writes[0]).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'note_interpretation', expectedRevision: 0, materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript'] } });
   });
 
   it('单篇分析可补齐 DeepSeek 思考能力，再开启思考、选择高并读回', async () => {

@@ -620,14 +620,15 @@ async fn standard_partial_results_and_video_keep_the_shared_complete_input() {
             .as_array()
             .unwrap()
             .len(),
-        3
+        2
     );
     assert!(
         read.fragments
             .iter()
             .any(|f| f.field == "transcript" && f.structure["time"]["startMs"] == 1000)
     );
-    assert_eq!(dossier::context_sources(&read).len(), 4);
+    assert!(read.materials.iter().all(|m| m["kind"] != "video_frame"));
+    assert_eq!(dossier::context_sources(&read).len(), 3);
 }
 
 #[tokio::test]
@@ -690,20 +691,8 @@ async fn standard_audio_silence_absence_and_failure_are_distinct_without_fake_te
                     .all(|f| !f.text.contains("识别未返回文字"))
             );
             assert!(
-                read.reading_view["mainBlockRefs"]
-                    .as_array()
-                    .unwrap()
-                    .iter()
-                    .any(|r| read
-                        .materials
-                        .iter()
-                        .filter(|m| m["kind"] == "video_frame")
-                        .any(|m| m["blocks"]
-                            .as_array()
-                            .unwrap()
-                            .iter()
-                            .any(|b| b["ref"] == *r))),
-                "frame text is usable while no speech exists"
+                read.materials.iter().all(|m| m["kind"] != "video_frame"),
+                "retired frame text never stands in for missing speech"
             );
         }
     }

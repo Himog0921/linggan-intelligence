@@ -200,7 +200,9 @@ OCR/ASR 文本不是原始 Evidence 的替代物。它属于有血缘的 Materia
 - 本地模型默认离线；`BUSY` 只表示背压，不消耗执行重试次数；
 - 当前 Rust 只创建 `provider_not_enabled` 的 pending 事件，不能显示为处理运行或成功。
 
-### 4.4 显式补齐缺失视频帧任务（2026-11-10 候选，未执行真实补排）
+### 4.4 显式补齐缺失视频帧任务（2026-11-10 候选，未执行真实补排；已删除）
+
+2026-11-16 视频画面文字下线（[DEC-0013](../decisions/0013-retire-video-frame-text.md)），`video_frame_ocr` 处理器与本节的 `--missing-video-frames` 模式、`enqueue_missing_video_frame_jobs` 均已从代码删除；以下为历史记录。
 
 既有 `linggan-media-requeue --kinds` 仅升级已有旧任务；完全没有帧任务的原视频使用同一工具的 `--missing-video-frames <作品UUID,逗号分隔> [--dry-run]` 模式。两种模式互斥，必须明确作品范围；空范围、非法 UUID 在连接数据库前拒绝。
 

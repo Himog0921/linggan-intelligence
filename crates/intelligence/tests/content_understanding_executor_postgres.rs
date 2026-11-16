@@ -163,7 +163,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         video_ready["materialReadiness"]["scopeNote"]
             .as_str()
             .unwrap()
-            .contains("未覆盖")
+            .contains("不包含视频画面")
     );
     let stopped = owner::start(&db, &start_from(&video_ready, work))
         .await
@@ -844,30 +844,6 @@ async fn saved_video_and_cover(db: &Database, work: Uuid, image: &[u8], image_sh
         issues:vec![], source_location:json!({"synthetic":true}),
         publication:material_reading::Publication::Automatic { expected_current:None },
     }).await.unwrap();
-    material_reading::publish_in(
-        &mut tx,
-        material_reading::NewReading {
-            content_public_ref: work,
-            unit_key: "video_frame:xhs:dossier-note:video:1".into(),
-            kind: "video_frame".into(),
-            slot_key: Some("xhs:dossier-note:video:1".into()),
-            page: None,
-            source_version: source.to_string(),
-            source_state: "known_empty".into(),
-            derivative_ref: None,
-            producer_ref: Some(Uuid::new_v4()),
-            generated_by: "frame_ocr".into(),
-            rule_version: "synthetic-saved-video-replay.v1".into(),
-            blocks: vec![json!({"kind":"gap","text":"合成视频未检出画面文字"})],
-            issues: vec![],
-            source_location: json!({"synthetic":true}),
-            publication: material_reading::Publication::Automatic {
-                expected_current: None,
-            },
-        },
-    )
-    .await
-    .unwrap();
     tx.commit().await.unwrap();
 }
 

@@ -9,6 +9,7 @@ pub enum SourceKind {
     Comment,
     Ocr,
     Transcript,
+    /// Historical; video frame text is no longer produced.
     FrameText,
     OpsPublication,
 }

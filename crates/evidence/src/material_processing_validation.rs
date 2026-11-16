@@ -5,7 +5,6 @@ pub(crate) fn derivative_matches_processor(processor: &str, derivative: &str) ->
             | ("image_ocr", "ocr_text")
             | ("audio_extract", "audio")
             | ("asr", "asr_text")
-            | ("video_frame_ocr", "frame_ocr_text")
     )
 }
 

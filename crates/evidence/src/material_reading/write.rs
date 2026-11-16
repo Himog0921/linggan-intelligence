@@ -82,7 +82,7 @@ fn validate_input(input: &NewReading) -> Result<(), sqlx::Error> {
     let identity_valid = if input.kind == "body" {
         input.slot_key.is_none() && input.unit_key == "body"
     } else {
-        ["image", "audio", "video_frame"].contains(&input.kind.as_str())
+        ["image", "audio"].contains(&input.kind.as_str())
             && input
                 .slot_key
                 .as_ref()
@@ -107,7 +107,6 @@ fn validate_input(input: &NewReading) -> Result<(), sqlx::Error> {
             "local_vision",
             "cloud_vision",
             "asr",
-            "frame_ocr",
         ]
         .contains(&input.generated_by.as_str())
         || input.issues.iter().any(|i| !i.is_object())
