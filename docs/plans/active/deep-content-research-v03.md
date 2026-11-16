@@ -394,6 +394,8 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 
 被拒原因代码（初始）：`unknown_material`、`excerpt_not_found`、`excerpt_too_short`、`quote_mark_misuse`、`answers_unknown`、`assertion_rule`、`causal_language`、`banned_pattern`、`method_without_basis`、`application_incomplete`、`hypothesis_incomplete`、`basis_cycle`；另有 `over_limit`（超出 8 条，只记录、不计入判定）。
 
+未发布的结果（扣下、输出无效、证据不足）的模型原文与逐条被拒列表写入 `linggan_content_understanding_deep_outcome`（迁移 0225），仅供评测，读取接口不返回。
+
 ------------------------------------------------------------------------
 
 # 6. 质量规则
@@ -502,6 +504,7 @@ PR #588 引入了人工修订的 Core。建议（M6）：
 - **评分：** 每条发现按 V0.2 第 9.2 节的六个维度打 0–2 分，硬性拒绝项不变。
 - **两人评分：** 至少 5 次 Deep 由两人独立评分，先算“通过/不通过”的一致率。
 - **数据：** 存放在 `artifacts/private/deep-eval-<日期>/`，不进版本库；汇总报告只写聚合结果，不写作品标题和作者。
+- **汇总：** token 与被拒原因用 `scripts/sql/l2-calibration-usage.sql`、`scripts/sql/l2-calibration-rejects.sql` 只读汇总；Skill 长度的离线估算见 `apps/pi-adapter/test/content-deep-research-skill.test.mjs` 的输出。
 
 ## 9.2 指标与门槛
 
@@ -591,7 +594,7 @@ G1、G2 审查通过，Mog 授权后执行。
 |---|---|---|
 | L2 当前运行配置 | 本地开关关闭，无记录 | 实验前只读核对 |
 | 图片能否通过当前 L2 模型配置发送 | L1 已有图片链路；L2 模型配置是否支持图片未核对 | G2 第 5 步前只读核对模型能力 |
-| Skill 正文进入系统提示词后的长度 | 约 3–4k tokens（估算） | 首轮实测 |
+| Skill 正文进入系统提示词后的长度 | 离线估算约 4,665 tokens（prompt v2 system_text + Skill 调用正文；按 `transport.rs` 的估算公式，2026-11-16） | 首轮以 `cached_input_tokens` 与 `input_tokens` 实测为准 |
 | 缓存命中 | 未知 | 以调用记录的 `cached_input_tokens` 为准 |
 | 部分接受掩盖系统性编造 | 有风险 | 1/3 阈值 + 被拒原因统计；首轮后复核阈值 |
 | Core 修订后 Deep 的显示逻辑 | 2026-11-16 D3 已确认 | 旧 Deep 照常显示并标 `coreBasis`；详见第 7.1 节 |
