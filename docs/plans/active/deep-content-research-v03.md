@@ -54,6 +54,8 @@ V0.3 不改变这些诊断，也不改变第 1.1 节的产品决策。改动集�
 
 **2026-11-16 修订：** 按 Mog 授权删除无价值的门槛。先后顺序不再做程序证明（C05）；材料清单只发送文字、类型和口播时间，不发送 bbox、识读问题列表等元数据。L1 的教训同样适用于 L2：整篇拒收的门槛大多拦下的是格式问题而不是编造，L1 已改为逐项接纳（见 [Content Card 合同](../../data-contracts/content-card.md)第 6 节）。L2 沿用第 5.6 节的逐条判定，不新增整篇拒收条件。
 
+**2026-11-16 实施后补记：** 核对 PR #599–#602 后，又去掉三处会让整次失败的格式门槛。多余字段一律忽略，单条子问题状态不合格只丢这一条；摘录只差标点或空格时，按 L1 的宽松匹配找回，保存材料原文中的连续片段；超过 8 条的发现记为 `over_limit` 留作评测，不计入 1/3 判定。见第 5.3、5.6 节。
+
 ## 0.2 本轮仍不做
 
 V0.2 §1.1 的第 1、3–8 条不变。第 2 条改为：**不建立独立爆款 Skill，也不建立多个 L2 Skill；L2 只有一个 Skill 包。**
@@ -345,7 +347,7 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 | `answers` | 必须 | 子问题 id；对应子问题的状态必须是 `answered` |
 | `findingType` | 必须 | 六种之一 |
 | `assertionKind` | 必须 | 四种之一 |
-| `statement` | 必须 | ≤ 400 字（v1 为 600）；直接回答；`「」` 内文字必须逐字出现在某条文本 support 中。v2 只把 `「」` 当作引文标记，`“”` 可用于一般表述（v1 校验两者，见 `deep_grounding.rs` 的 `quoted_statements_supported`） |
+| `statement` | 必须 | ≤ 400 字（v1 为 600）；直接回答；`「」` 内文字必须出现在某条文本 support 中（只差标点或空格可以）。v2 只把 `「」` 当作引文标记，`“”` 可用于一般表述（v1 校验两者，见 `deep_grounding.rs` 的 `quoted_statements_supported`） |
 | `basisUnitIds` | 可空 | Core 知识单元 id |
 | `basisFindingIds` | 可空；方法类必须非空 | 同次输出中先出现的发现 id，不能自指，不能成环 |
 | `support` | 必须，1–6 条 | 见第 5.3 节 |
@@ -358,7 +360,7 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 
 | 材料 | 模型填写 | 程序判定 `supportType` | 校验 |
 |---|---|---|---|
-| `title`、`body`、`tag`、`asr` | `excerpt` | `verbatim_text` | `excerpt` 必须是该材料 `text` 的连续子串，非空，至少 4 个字 |
+| `title`、`body`、`tag`、`asr` | `excerpt` | `verbatim_text` | `excerpt` 必须能在该材料 `text` 中找到，非空，至少 4 个字。只差标点或空格时按 L1 的宽松匹配找回（只比较文字和数字，至少 4 个），保存的是材料原文中的连续片段 |
 | `cover`、`image` | `observation` | `visual_observation` | 绑定材料 id 与 SHA256；内容由人工评审；不得出现 `「」` |
 | `core_evidence` 中的 `model_read` | `excerpt` | `model_read` | 必须是 L1 观察文本的子串；`statement` 中不得用 `「」` 引用它 |
 | `core_evidence` 中的原文引句 | `excerpt` | `verbatim_text` | 同文本材料 |
@@ -383,13 +385,14 @@ Core 用于定位，原始材料用于支持判断。L2 不只读 Core，也不�
 
 | 情况 | 结果 |
 |---|---|
-| JSON 不合法，或不符合 schema | `ai_output_invalid`（不变） |
+| JSON 不合法 | `ai_output_invalid`（不变）。多余字段忽略；单条子问题状态或单条发现结构不合格，只丢该条，不判整次无效 |
+| 发现超过 8 条 | 前 8 条照常判定；其余记为 `over_limit` 写入 `rejected`，不计入 1/3 判定 |
 | 合格发现 ≥ 1，且被拒条数 ≤ 总条数的 1/3 | 发布合格发现；被拒发现与原因写入 `rejected` |
 | 被拒条数 > 总条数的 1/3 | 不发布，失败代码 `content_understanding_deep_rejected_excess`（新增），计为失败 |
 | 没有发现，且全部子问题为 `insufficient` | `content_understanding_deep_insufficient_evidence`（不变，不计为失败） |
 | 有子问题标为 `answered`，却没有任何合格发现指向它 | 该子问题在保存时改记为 `unsupported`，不影响发布 |
 
-被拒原因代码（初始）：`unknown_material`、`excerpt_not_found`、`excerpt_too_short`、`quote_mark_misuse`、`answers_unknown`、`assertion_rule`、`causal_language`、`banned_pattern`、`method_without_basis`、`application_incomplete`、`hypothesis_incomplete`、`basis_cycle`。
+被拒原因代码（初始）：`unknown_material`、`excerpt_not_found`、`excerpt_too_short`、`quote_mark_misuse`、`answers_unknown`、`assertion_rule`、`causal_language`、`banned_pattern`、`method_without_basis`、`application_incomplete`、`hypothesis_incomplete`、`basis_cycle`；另有 `over_limit`（超出 8 条，只记录、不计入判定）。
 
 ------------------------------------------------------------------------
 
