@@ -9,10 +9,16 @@ import styles from './DossierDocument.module.css';
 type Unit = { id: string; unitType: string; statement: string };
 type DeepSupport = { excerpt?: string; observation?: string };
 type DeepFinding = { id: string; statement: string; evidenceRefs?: string[]; support?: DeepSupport[] };
-type Deep = { question: string; findings: DeepFinding[]; evidence: Record<string, string[]> };
+type DeepMaterial = { id: string; materialKind: string };
+type DeepAnalysis = {
+  analysisRef: string; researchMode: string | null; baseMode: string | null;
+  coreBasis: null | { kind?: string }; question: string; methodVersion: string;
+  findings: DeepFinding[]; materials: DeepMaterial[];
+};
 type Understanding = {
   materialReadiness: MaterialReadiness;
-  deep?: Deep;
+  deepAnalyses?: DeepAnalysis[];
+  deepEvidence?: Record<string, string[]>;
   analysis: null | { state: string; failureCode: string | null; result: null | {
     card: { core: { summary: { text: string }; knowledgeUnits: Unit[] } };
   } };
@@ -22,30 +28,40 @@ const GROUPS = [
   ['provision', '具体内容与方法'], ['reader_value', '读者收获'], ['answer_form', '内容形式'],
   ['expression', '表达方式'], ['participation', '参与方式'],
 ] as const;
-function readDeep(card: Record<string, unknown>, question: unknown): Deep | undefined {
-  if (typeof question !== 'string' || !isRecord(card.deep) || !Array.isArray(card.deep.findings)
-      || !Array.isArray(card.evidence)) return;
-  const findings: DeepFinding[] = [];
-  for (const finding of card.deep.findings) {
-    if (!isRecord(finding) || typeof finding.id !== 'string' || typeof finding.statement !== 'string') return;
-    const refs = finding.evidenceRefs;
-    const evidenceRefs = Array.isArray(refs) && refs.every((ref): ref is string => typeof ref === 'string')
-      ? refs : undefined;
-    const items = finding.support;
-    const support = Array.isArray(items)
-      ? items.filter((item): item is DeepSupport => isRecord(item)
-        && (typeof item.excerpt === 'string' || typeof item.observation === 'string'))
-      : undefined;
-    if (!evidenceRefs && !support) return;
-    findings.push({ id: finding.id, statement: finding.statement, ...(evidenceRefs ? { evidenceRefs } : {}), ...(support ? { support } : {}) });
+function readDeep(entries: unknown): DeepAnalysis[] | undefined {
+  if (!Array.isArray(entries)) return;
+  const analyses: DeepAnalysis[] = [];
+  for (const entry of entries) {
+    if (!isRecord(entry) || typeof entry.analysisRef !== 'string' || typeof entry.question !== 'string'
+        || typeof entry.methodVersion !== 'string' || !Array.isArray(entry.findings)) return;
+    const findings: DeepFinding[] = [];
+    for (const finding of entry.findings) {
+      if (!isRecord(finding) || typeof finding.id !== 'string' || typeof finding.statement !== 'string') return;
+      const refs = finding.evidenceRefs;
+      const evidenceRefs = Array.isArray(refs) && refs.every((ref): ref is string => typeof ref === 'string')
+        ? refs : undefined;
+      const items = finding.support;
+      const support = Array.isArray(items)
+        ? items.filter((item): item is DeepSupport => isRecord(item)
+          && (typeof item.excerpt === 'string' || typeof item.observation === 'string'))
+        : undefined;
+      if (!evidenceRefs && !support) return;
+      findings.push({ id: finding.id, statement: finding.statement, ...(evidenceRefs ? { evidenceRefs } : {}), ...(support ? { support } : {}) });
+    }
+    const materials = Array.isArray(entry.materials)
+      ? entry.materials.filter((material): material is DeepMaterial => isRecord(material)
+        && typeof material.id === 'string' && typeof material.materialKind === 'string')
+      : [];
+    const basis = entry.coreBasis;
+    const coreBasis = isRecord(basis) && typeof basis.kind === 'string' ? { kind: basis.kind } : null;
+    analyses.push({
+      analysisRef: entry.analysisRef, question: entry.question, methodVersion: entry.methodVersion,
+      researchMode: typeof entry.researchMode === 'string' ? entry.researchMode : null,
+      baseMode: typeof entry.baseMode === 'string' ? entry.baseMode : null,
+      coreBasis, findings, materials,
+    });
   }
-  const evidence = Object.fromEntries(card.evidence.flatMap(item => {
-    if (!isRecord(item) || typeof item.id !== 'string') return [];
-    const excerpts = [...new Set([item.quote, item.modelQuote, item.observation]
-      .filter((text): text is string => typeof text === 'string' && text.trim() !== ''))];
-    return excerpts.length ? [[item.id, excerpts]] : [];
-  }));
-  return { question, findings, evidence };
+  return analyses;
 }
 async function read(domain: string, work: string, asOf: string, signal: AbortSignal): Promise<Understanding> {
   const value = await requestJson(`/api/local/content-understanding/latest?${new URLSearchParams({ domainRef: domain, workRef: work, asOf })}`, { signal });
@@ -54,13 +70,21 @@ async function read(domain: string, work: string, asOf: string, signal: AbortSig
   const analysis = value.analysis;
   if (analysis === null) return { analysis: null, materialReadiness };
   if (!isRecord(analysis) || !['pending', 'running', 'succeeded', 'failed', 'skipped', 'cancelled'].includes(String(analysis.state))) throw new Error('理解状态无法读取');
-  let deep: Deep | undefined;
+  let deepAnalyses: DeepAnalysis[] | undefined;
+  let deepEvidence: Record<string, string[]> | undefined;
   if (analysis.result !== null) {
     const result = analysis.result;
     if (analysis.state !== 'succeeded' || !isRecord(result) || !isRecord(result.card) || result.card.workRef !== work || result.card.schemaVersion !== 'content-card.v0.2' || !isRecord(result.card.core) || !isRecord(result.card.core.summary) || typeof result.card.core.summary.text !== 'string' || !Array.isArray(result.card.core.knowledgeUnits) || !result.card.core.knowledgeUnits.every(u => isRecord(u) && typeof u.id === 'string' && typeof u.unitType === 'string' && typeof u.statement === 'string')) throw new Error('理解内容无法读取');
-    deep = readDeep(result.card, analysis.deepQuestion);
+    deepAnalyses = readDeep(analysis.deepAnalyses);
+    const evidenceItems = Array.isArray(result.card.evidence) ? result.card.evidence : [];
+    deepEvidence = Object.fromEntries(evidenceItems.flatMap(item => {
+      if (!isRecord(item) || typeof item.id !== 'string') return [];
+      const excerpts = [...new Set([item.quote, item.modelQuote, item.observation]
+        .filter((text): text is string => typeof text === 'string' && text.trim() !== ''))];
+      return excerpts.length ? [[item.id, excerpts]] : [];
+    }));
   } else if (analysis.state === 'succeeded') throw new Error('理解内容缺失');
-  return { analysis: analysis as Understanding['analysis'], materialReadiness, deep };
+  return { analysis: analysis as Understanding['analysis'], materialReadiness, deepAnalyses, deepEvidence };
 }
 export function DossierUnderstanding({ domain, work, revision, asOf, active }: { domain: string; work: string; revision: string; asOf: string; active: boolean }) {
   const query = useQuery({
@@ -71,7 +95,8 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
   });
   const analysis = query.isError ? null : query.data?.analysis;
   const result = analysis?.result;
-  const deep = query.isError ? undefined : query.data?.deep;
+  const deepAnalyses = query.isError ? undefined : query.data?.deepAnalyses;
+  const deepEvidence = query.isError ? undefined : query.data?.deepEvidence;
   const materialReadiness = query.isError ? null : query.data?.materialReadiness;
   const readiness = materialReadinessCopy(materialReadiness);
   return <section className={styles.section} aria-label="整篇内容理解">
@@ -91,21 +116,26 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
           const units = result.card.core.knowledgeUnits.filter(u => u.unitType === type);
           return units.length ? <div key={type}><h3 className={styles.heading}>{title}</h3><ul className={styles.list}>{units.map(unit => <li key={unit.id}>{unit.statement}</li>)}</ul></div> : null;
         })}
-        {deep ? <div>
+        {deepAnalyses?.length ? <div>
           <h3 className={styles.heading}>研究发现</h3>
-          <p className={styles.paragraph}>{deep.question}</p>
-          <ul className={styles.list}>{deep.findings.map(finding => <li key={finding.id}>
-            {finding.statement}
-            <details><summary>引用依据</summary><ul className={styles.list}>
-              {finding.support
-                ? finding.support.map((item, index) => (
-                  <li key={`${finding.id}:support:${index}`}>{item.excerpt ?? item.observation}</li>
-                ))
-                : (finding.evidenceRefs ?? []).flatMap(ref => (deep.evidence[ref] ?? []).map(excerpt => (
-                  <li key={JSON.stringify([ref, excerpt])}>{excerpt}</li>
-                )))}
-            </ul></details>
-          </li>)}</ul>
+          {deepAnalyses.map(analysis => <div key={analysis.analysisRef}>
+            <p className={styles.paragraph}>{analysis.question}</p>
+            {analysis.coreBasis ? <p className={styles.paragraph}>
+              {analysis.coreBasis.kind === 'revision' ? '基于某次修订' : '基于原始 Core'}
+            </p> : null}
+            <ul className={styles.list}>{analysis.findings.map(finding => <li key={`${analysis.analysisRef}:${finding.id}`}>
+              {finding.statement}
+              <details><summary>引用依据</summary><ul className={styles.list}>
+                {finding.support
+                  ? finding.support.map((item, index) => (
+                    <li key={`${analysis.analysisRef}:${finding.id}:support:${index}`}>{item.excerpt ?? item.observation}</li>
+                  ))
+                  : (finding.evidenceRefs ?? []).flatMap(ref => ((deepEvidence ?? {})[ref] ?? []).map(excerpt => (
+                    <li key={JSON.stringify([analysis.analysisRef, ref, excerpt])}>{excerpt}</li>
+                  )))}
+              </ul></details>
+            </li>)}</ul>
+          </div>)}
         </div> : null}
       </> : null}
     </div>

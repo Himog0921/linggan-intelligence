@@ -14,6 +14,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/api/local/content-understanding/preview", get(preview))
         .route("/api/local/content-understanding/latest", get(latest))
+        .route(
+            "/api/local/content-understanding/deep/modes",
+            get(deep_modes),
+        )
         .route("/api/local/content-understanding", post(start))
         .route("/api/local/content-understanding/deep", post(publish_deep))
         .route(
@@ -33,6 +37,9 @@ async fn publish_deep(
         return unavailable();
     };
     super::ai_settings::respond(owner::publish_deep(db, &request).await)
+}
+async fn deep_modes() -> Json<serde_json::Value> {
+    Json(owner::deep_modes())
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
