@@ -50,7 +50,7 @@ fn full_schema_fixtures_record_the_actual_deep_v2_migration_digest() {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    let ledger_entry = format!("('0224_content_understanding_deep_v2', '{digest}')");
+    let ledger_entry = format!("('0224_content_understanding_deep_v2','{digest}')");
     let fixture = include_str!("../../../apps/api/src/local_web/full_schema_fixture.rs");
     assert!(
         fixture.contains(&ledger_entry),
