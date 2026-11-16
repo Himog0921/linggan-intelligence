@@ -119,13 +119,11 @@ async fn period_filter_keeps_unchanged_cards_after_incremental_metrics() {
     ));
     sqlx::query("UPDATE linggan_opportunity_opportunity_card SET payload=$2,input_fingerprint=$3 WHERE problem_ref=$1")
         .bind(problem).bind(original_payload).bind(original_fingerprint).execute(db.pool()).await.unwrap();
-    sqlx::query(
-        "UPDATE linggan_opportunity_opportunity_card SET period_index=NULL WHERE problem_ref=$1",
-    )
-    .bind(problem)
-    .execute(db.pool())
-    .await
-    .unwrap();
+    sqlx::query("DELETE FROM linggan_opportunity_card_period_index WHERE problem_ref=$1")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
     assert!(matches!(
         read_opportunities(&db, domain, &query).await,
         Err(OpportunityReadError::PeriodSnapshotUnavailable)
@@ -135,7 +133,7 @@ async fn period_filter_keeps_unchanged_cards_after_incremental_metrics() {
             .await
             .unwrap()
     ));
-    sqlx::query("UPDATE linggan_opportunity_opportunity_card SET period_index='[{\"periodStart\":\"2026-02-30\",\"protocolVersion\":null,\"evidenceTier\":\"candidate\"}]'::jsonb WHERE problem_ref=$1")
+    sqlx::query("INSERT INTO linggan_opportunity_card_period_index(problem_ref,taxonomy_version,metric_def_version,card_fingerprint,period_index) SELECT problem_ref,taxonomy_version,metric_def_version,input_fingerprint,'[{\"periodStart\":\"2026-02-30\",\"protocolVersion\":null,\"evidenceTier\":\"candidate\"}]'::jsonb FROM linggan_opportunity_opportunity_card WHERE problem_ref=$1")
         .bind(problem).execute(db.pool()).await.unwrap();
     assert!(matches!(
         read_opportunities(&db, domain, &query).await,
@@ -148,11 +146,11 @@ async fn period_filter_keeps_unchanged_cards_after_incremental_metrics() {
 async fn period_index_upgrade_preserves_cards_and_queues_rebuilds() {
     let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("disposable proof URL");
     let migration =
-        include_str!("../../../../database/migrations/0222_opportunity_card_period_index.sql");
+        include_str!("../../../../database/migrations/0223_opportunity_card_period_index.sql");
     let baseline = super::full_schema_fixture::FULL_MIGRATIONS.replace(migration, "");
     let baseline = baseline
         .lines()
-        .filter(|line| !line.contains("VALUES ('0222_opportunity_card_period_index'"))
+        .filter(|line| !line.contains("VALUES ('0223_opportunity_card_period_index'"))
         .collect::<Vec<_>>()
         .join("\n");
     let db = linggan_storage_postgres::testing::isolated_proof_schema(
@@ -173,11 +171,68 @@ async fn period_index_upgrade_preserves_cards_and_queues_rebuilds() {
         .await
         .unwrap();
     sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
-    let row: (Value, Option<Value>, bool) = sqlx::query_as("SELECT payload,period_index,EXISTS(SELECT 1 FROM linggan_opportunity_card_change WHERE problem_ref=$1) FROM linggan_opportunity_opportunity_card WHERE problem_ref=$1")
+    let row: (Value, Option<Value>, bool) = sqlx::query_as("SELECT c.payload,i.period_index,EXISTS(SELECT 1 FROM linggan_opportunity_card_change WHERE problem_ref=$1) FROM linggan_opportunity_opportunity_card c LEFT JOIN linggan_opportunity_card_period_index i USING(problem_ref) WHERE c.problem_ref=$1")
         .bind(problem).fetch_one(db.pool()).await.unwrap();
     assert_eq!(row.0, serde_json::json!({}));
     assert!(row.1.is_none());
     assert!(row.2);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn period_index_recovers_after_legacy_executor_consumes_change() {
+    use linggan_intelligence::opportunity::{
+        OpportunityListQuery, OpportunityReadError, read_opportunities,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let query = OpportunityListQuery {
+        period: Some("2026-11-09".to_owned()),
+        ..Default::default()
+    };
+    // Simulate the old executor writing only the card and consuming its queue row.
+    sqlx::query("UPDATE linggan_opportunity_opportunity_card SET input_fingerprint=repeat('e',64) WHERE problem_ref=$1")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    sqlx::query("DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &query).await,
+        Err(OpportunityReadError::PeriodSnapshotUnavailable)
+    ));
+    let first = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+        .await
+        .unwrap();
+    assert!(first.changes_deferred >= 1);
+    let queued: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_opportunity_card_change WHERE problem_ref=$1)",
+    )
+    .bind(problem)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(
+        queued,
+        "the new executor must rediscover a missing or stale index"
+    );
+    sqlx::query("UPDATE linggan_opportunity_card_change SET changed_at=clock_timestamp()-interval '301 seconds' WHERE problem_ref=$1")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    let second = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+        .await
+        .unwrap();
+    assert!(second.cards_built >= 1);
+    let matching: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_opportunity_opportunity_card c JOIN linggan_opportunity_card_period_index i USING(problem_ref) WHERE c.problem_ref=$1 AND i.card_fingerprint=c.input_fingerprint)")
+        .bind(problem).fetch_one(db.pool()).await.unwrap();
+    assert!(matching);
+    assert!(read_opportunities(&db, domain, &query).await.is_ok());
 }
 
 #[tokio::test]

@@ -43,6 +43,7 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_model_entry",
     "linggan_model_invocation",
     "linggan_opportunity_card_change",
+    "linggan_opportunity_card_period_index",
     "linggan_opportunity_card_source_guard",
     "linggan_opportunity_card_voice_ref",
     "linggan_opportunity_comment_mention",
@@ -68,7 +69,12 @@ pub(super) fn evidence_read_tables() -> Vec<&'static str> {
     SOURCE_TABLES
         .iter()
         .copied()
-        .filter(|table| *table != "linggan_model_invocation")
+        .filter(|table| {
+            !matches!(
+                *table,
+                "linggan_model_invocation" | "linggan_opportunity_card_period_index"
+            )
+        })
         .collect()
 }
 

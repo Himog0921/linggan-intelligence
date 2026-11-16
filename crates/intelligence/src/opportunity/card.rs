@@ -15,7 +15,7 @@ use crate::comment_study_source::StudySourceError;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-use sqlx::{Postgres, Row, Transaction};
+use sqlx::{PgConnection, Postgres, Row, Transaction};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
@@ -297,6 +297,35 @@ async fn current_definition(
     ))
 }
 
+async fn enqueue_period_index_repairs_in(
+    connection: &mut PgConnection,
+    domain: Option<Uuid>,
+    as_of: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO linggan_opportunity_card_change(problem_ref) \
+         SELECT c.problem_ref FROM linggan_opportunity_opportunity_card c \
+         JOIN linggan_opportunity_problem p USING(problem_ref) \
+         LEFT JOIN linggan_opportunity_card_period_index i ON i.problem_ref=c.problem_ref \
+           AND i.card_fingerprint=c.input_fingerprint AND i.taxonomy_version=c.taxonomy_version \
+           AND i.metric_def_version=c.metric_def_version \
+         WHERE ($1::uuid IS NULL OR p.domain_ref=$1) \
+           AND p.created_at<=COALESCE($2::timestamptz,scope_001_now()) AND i.problem_ref IS NULL \
+         ON CONFLICT(problem_ref) DO NOTHING",
+    )
+    .bind(domain)
+    .bind(as_of)
+    .execute(connection)
+    .await?;
+    Ok(())
+}
+
+/// Rediscover indexes invalidated by an older executor after its startup catch-up.
+pub(crate) async fn enqueue_period_index_repairs(database: &Database) -> Result<(), sqlx::Error> {
+    let mut connection = database.pool().acquire().await?;
+    enqueue_period_index_repairs_in(&mut connection, None, None).await
+}
+
 async fn pending_changes(
     tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,
@@ -304,6 +333,8 @@ async fn pending_changes(
     mode: CardRebuildMode,
     params: &OpportunityMetricParams,
 ) -> Result<(Vec<sqlx::postgres::PgRow>, usize), CardError> {
+    // The executor and explicit rebuilds use the same missing-index detector.
+    enqueue_period_index_repairs_in(&mut **tx, Some(domain), Some(as_of)).await?;
     if mode == CardRebuildMode::Full {
         sqlx::query(
             "INSERT INTO linggan_opportunity_card_change(problem_ref) \
@@ -490,15 +521,21 @@ async fn save(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    let result = sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint,period_index) \
-        VALUES($1,$2,$3::timestamptz,$4,$5,$6,$7) ON CONFLICT(problem_ref) DO UPDATE SET \
+    let result = sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint) \
+        VALUES($1,$2,$3::timestamptz,$4,$5,$6) ON CONFLICT(problem_ref) DO UPDATE SET \
         payload=EXCLUDED.payload,as_of=EXCLUDED.as_of,built_at=clock_timestamp(),taxonomy_version=EXCLUDED.taxonomy_version,\
-        metric_def_version=EXCLUDED.metric_def_version,input_fingerprint=EXCLUDED.input_fingerprint,period_index=EXCLUDED.period_index \
+        metric_def_version=EXCLUDED.metric_def_version,input_fingerprint=EXCLUDED.input_fingerprint \
         WHERE linggan_opportunity_opportunity_card.as_of<=EXCLUDED.as_of")
-        .bind(problem).bind(payload).bind(as_of).bind(taxonomy).bind(version).bind(fingerprint).bind(period_index)
+        .bind(problem).bind(payload).bind(as_of).bind(taxonomy).bind(version).bind(&fingerprint)
         .execute(&mut **tx).await?;
     if result.rows_affected() != 1 {
         return Err(CardError::NewerResultExists);
     }
+    sqlx::query("INSERT INTO linggan_opportunity_card_period_index(problem_ref,taxonomy_version,metric_def_version,card_fingerprint,period_index) \
+        VALUES($1,$2,$3,$4,$5) ON CONFLICT(problem_ref) DO UPDATE SET \
+        taxonomy_version=EXCLUDED.taxonomy_version,metric_def_version=EXCLUDED.metric_def_version,\
+        card_fingerprint=EXCLUDED.card_fingerprint,period_index=EXCLUDED.period_index")
+        .bind(problem).bind(taxonomy).bind(version).bind(fingerprint).bind(period_index)
+        .execute(&mut **tx).await?;
     Ok(())
 }

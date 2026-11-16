@@ -533,7 +533,7 @@ migrate() {
   apply_migration_once "0219_comment_current_safe_observation" "$project_root/database/migrations/0219_comment_current_safe_observation.sql"
   apply_migration_once "0220_opportunity_valid_work_anchor" "$project_root/database/migrations/0220_opportunity_valid_work_anchor.sql"
   apply_migration_once "0221_opportunity_restriction_trigger_owner" "$project_root/database/migrations/0221_opportunity_restriction_trigger_owner.sql"
-  apply_migration_once "0222_opportunity_card_period_index" "$project_root/database/migrations/0222_opportunity_card_period_index.sql"
+  apply_migration_once "0223_opportunity_card_period_index" "$project_root/database/migrations/0223_opportunity_card_period_index.sql"
 }
 
 case "$command_name" in

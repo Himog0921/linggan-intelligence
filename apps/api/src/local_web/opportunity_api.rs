@@ -354,8 +354,11 @@ mod tests {
                     .iter()
                     .map(|byte| format!("{byte:02x}"))
                     .collect();
-            sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint,period_index) VALUES($1,$2,$3::timestamptz,1,1,$4,$5)")
-                .bind(id).bind(&payload).bind(payload["asOf"].as_str().unwrap()).bind(fingerprint).bind(&index)
+            sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint) VALUES($1,$2,$3::timestamptz,1,1,$4)")
+                .bind(id).bind(&payload).bind(payload["asOf"].as_str().unwrap()).bind(&fingerprint)
+                .execute(db.pool()).await.unwrap();
+            sqlx::query("INSERT INTO linggan_opportunity_card_period_index(problem_ref,taxonomy_version,metric_def_version,card_fingerprint,period_index) VALUES($1,1,1,$2,$3)")
+                .bind(id).bind(&fingerprint).bind(&index)
                 .execute(db.pool()).await.unwrap();
         }
         let app = routes(true).with_state(LocalWebState {

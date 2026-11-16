@@ -18,6 +18,7 @@ const CARD_READ_TABLES: &[&str] = &[
 ];
 const LIST_READ_TABLES: &[&str] = &[
     "linggan_material_comment_restriction",
+    "linggan_opportunity_card_period_index",
     "linggan_opportunity_opportunity_card",
     "linggan_opportunity_problem",
     "linggan_opportunity_problem_lineage",
@@ -356,10 +357,13 @@ pub async fn read_card(
 }
 
 const LIST_SQL: &str = "SELECT p.problem_ref,c.input_fingerprint, \
- CASE WHEN $2::text IS NULL THEN NULL ELSE c.period_index END AS period_index, \
+ CASE WHEN $2::text IS NULL THEN NULL ELSE i.period_index END AS period_index, \
  CASE WHEN $2::text IS NULL THEN NULL ELSE c.payload END AS period_payload \
  FROM linggan_opportunity_opportunity_card c \
- JOIN linggan_opportunity_problem p USING(problem_ref) WHERE p.domain_ref=$1 \
+ JOIN linggan_opportunity_problem p USING(problem_ref) \
+ LEFT JOIN linggan_opportunity_card_period_index i ON i.problem_ref=c.problem_ref \
+ AND i.card_fingerprint=c.input_fingerprint AND i.taxonomy_version=c.taxonomy_version \
+ AND i.metric_def_version=c.metric_def_version WHERE p.domain_ref=$1 \
  AND NOT EXISTS(SELECT 1 FROM linggan_opportunity_problem_lineage l WHERE l.from_problem_ref=p.problem_ref AND l.relation IN ('merge','rename','split')) \
  AND ($4::text IS NULL OR c.payload#>>'{supply,state}'=$4) \
  AND ($2::text IS NOT NULL OR $3::text IS NULL OR EXISTS(SELECT 1 FROM jsonb_array_elements(c.payload#>'{demand,groups}') g WHERE g->>'evidenceTier'=$3)) \

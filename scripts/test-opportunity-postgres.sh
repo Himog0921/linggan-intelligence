@@ -114,6 +114,8 @@ cargo test -p linggan-intelligence --lib --locked -- --ignored \
   opportunity::card::snapshot::tests:: --test-threads=1
 cargo test -p linggan-intelligence --lib --locked -- --ignored \
   opportunity::card::groups::tests:: --test-threads=1
+cargo test -p linggan-intelligence --lib --locked -- --ignored --exact \
+  ai_foundation::executor::service::opportunity_sync::tests::scheduled_period_index_repair_discovers_legacy_writer --test-threads=1
 cargo build -p linggan-worker --bin linggan-opportunity --locked
 proof_target_dir="${CARGO_TARGET_DIR:-$project_root/target}"
 [[ "$proof_target_dir" = /* ]] || proof_target_dir="$project_root/$proof_target_dir"

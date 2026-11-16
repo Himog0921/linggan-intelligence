@@ -449,11 +449,14 @@
 
 - 负责人授权修复 PR #592 已报告的 P1 周期漏卡和 P2 分页性能、无关锁竞争、历史筛选解释问题；新发现只报告。执行者 Codex，现有工作树 `.worktrees/opportunity-t15-read-api`，分支 `codex/opportunity-t15-read-api`，起点 `78d0fb9560e9350b2968860236d3ae51cd27676e`。
 - 严格时点、撤回限制、同一评论来源资格和协议组内指标不变；先补隔离回归，再完成修复、独立 review 和最终提交的远端 CI。本地运行库、生产迁移、真实采集和模型外发不在授权内。
-- 修复：新增前向迁移 `0222_opportunity_card_period_index`，把当前指标表的周期、协议和等级作为卡片的同事务索引，列表按该索引筛选并以 `periodMatches` 说明命中组。索引与卡片 payload 共用指纹；旧程序更新卡片但未更新索引，或旧卡尚未重建时，周期筛选明确返回 `opportunity_period_snapshot_unavailable`。旧卡迁移后保留并排队重建，未重建前不伪造历史等级。
+- 修复：新增前向迁移 `0223_opportunity_card_period_index`，新建机会卡索引表，把当前指标表的周期、协议和等级作为卡片的同事务索引，列表按该索引筛选并以 `periodMatches` 说明命中组。索引与卡片 payload 共用指纹；旧程序更新卡片但未更新索引，或旧卡尚未重建时，周期筛选明确返回 `opportunity_period_snapshot_unavailable`。旧卡迁移后保留并排队重建；若旧版执行器消费队列但未写索引，新执行器会重新发现并排队。未重建前不伪造历史等级。
+- 独立复审指出首版候选 0222 对已有表执行 `ALTER`，违反 D-005；该候选只曾在已销毁的隔离测试库执行，未进入任何运行库。现从迁移清单移除该候选，以新的 0223 创建机会卡自有表，不修改既有表；旧候选仍可从提交历史审计。
+- 复审另指出旧执行器可能在新版启动追平后消费重建队列。自动执行器现于请求或指标周期到期时复用卡片重建的失配检测，重新排队后按原有防抖处理；独立审查已定点核对该调度与重建调用链，未独立运行测试。
 - 依据分页复用现有资格与来源分类，按批扫描候选计算跨页指纹，仅对当前页调用完整来源／上下文读取；作者依据及周期列表只锁自身读取的卡片来源，评论／作品依据排除无关的模型调用表，同时保留运行时来源覆盖审计和撤回限制。
-- 隔离回归：`bash /private/tmp/opportunity-t15-fix-red.sh` 在修复前输出 `period_filter` 的 `0 passed; 2 failed` 和作者锁用例的 `0 passed; 1 failed`；`bash /private/tmp/opportunity-t15-fix-smoke.sh` 修复后运行 8 组、共 `9 passed; 0 failed`，覆盖增量重算、历史等级、未知／已知协议、旧卡升级、旧写入保护、锁、分页、标准卡片快照与 HTTP API。
+- 隔离回归：`bash /private/tmp/opportunity-t15-fix-red.sh` 在修复前输出 `period_filter` 的 `0 passed; 2 failed` 和作者锁用例的 `0 passed; 1 failed`；`bash /private/tmp/opportunity-t15-fix-smoke.sh` 重跑共 `11 passed; 0 failed`，覆盖增量重算、历史等级、未知／已知协议、旧卡升级与旧执行器消费队列后的恢复、锁、分页、标准卡片快照、自动调度与 HTTP API，专用容器和卷已清理。
 - `bash /private/tmp/opportunity-t15-cross-smoke.sh` → 评论研究共享读取 `11 passed; 0 failed`；`bash scripts/test-local-runtime-schema.sh` → `Fresh and repeat runtime schema migration passed; retired tables absent.` 两者均使用专用合成 PostgreSQL 容器，容器和卷已清理。
 - `bash /private/tmp/opportunity-t15-perf-review-2c6u45a4/run.sh` → 同样的本机调试构建、单次合成样本，读取 1 条、997 条候选从审查时 7580 ms 降到 969 ms；19／98／498 条分别为 683／719／835 ms。候选摘要仍需全量扫描以校验跨页一致性，数字不是生产 SLA。
 - `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo check -p linggan-api --locked` → `Finished dev profile`，exit 0；`bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`；按用户要求仅对本次修改的 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`，exit 0。
+- 末轮标准卡片测试首次遇到 `SourcesBusy`，按短锁规则重跑后 `1 passed; 0 failed`；真实调度入口的失配发现及到期选域专项 `1 passed; 0 failed`。
 - `cargo clippy -p linggan-intelligence --lib --locked --no-deps` → exit 101，48 项既有 `too_many_lines` 错误，位置均不在本次修改的函数；本次新增长函数已拆分。追加 `-- -A clippy::too_many_lines` 后 exit 0、42 条警告；不将此结果称为严格 Clippy 通过，既有问题未修改。
 - 新迁移只在隔离测试中执行；未迁移或部署本机运行库与生产环境，未进行真实采集或模型外发。独立 review 和远端 CI 须针对 PR #592 的最终 head 核实，不沿用旧 head 的通过记录。
