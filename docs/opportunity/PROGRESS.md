@@ -458,5 +458,6 @@
 - `bash /private/tmp/opportunity-t15-perf-review-2c6u45a4/run.sh` → 同样的本机调试构建、单次合成样本，读取 1 条、997 条候选从审查时 7580 ms 降到 969 ms；19／98／498 条分别为 683／719／835 ms。候选摘要仍需全量扫描以校验跨页一致性，数字不是生产 SLA。
 - `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo check -p linggan-api --locked` → `Finished dev profile`，exit 0；`bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`；按用户要求仅对本次修改的 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`，exit 0。
 - 末轮标准卡片测试首次遇到 `SourcesBusy`，按短锁规则重跑后 `1 passed; 0 failed`；真实调度入口的失配发现及到期选域专项 `1 passed; 0 failed`。
+- 远端 Delivery `43813837722` 的机会卡 PostgreSQL 用例 `shadow_versions_avoid_existing_numbers_and_follow_current_changes` 失败：该历史升级测试主动移除 0217 卡片表，但新迁移 0223 依赖该表。测试装配已同步排除 0223，业务迁移与指标规则不变；`bash /private/tmp/opportunity-t15-shadow-compat-proof.sh` 隔离重跑 `1 passed; 0 failed`，专用容器和卷已清理。最终 CI 以最终 head 为准。
 - `cargo clippy -p linggan-intelligence --lib --locked --no-deps` → exit 101，48 项既有 `too_many_lines` 错误，位置均不在本次修改的函数；本次新增长函数已拆分。追加 `-- -A clippy::too_many_lines` 后 exit 0、42 条警告；不将此结果称为严格 Clippy 通过，既有问题未修改。
 - 新迁移只在隔离测试中执行；未迁移或部署本机运行库与生产环境，未进行真实采集或模型外发。独立 review 和远端 CI 须针对 PR #592 的最终 head 核实，不沿用旧 head 的通过记录。
