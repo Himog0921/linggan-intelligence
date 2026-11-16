@@ -21,6 +21,41 @@ pub(super) async fn select(
     tz: &str,
     basis: &str,
 ) -> Result<(Vec<model::Voice>, BTreeMap<String, usize>), CardError> {
+    select_with_limit(
+        tx,
+        domain,
+        problem,
+        taxonomy,
+        as_of,
+        tz,
+        basis,
+        Some(MAX_SAMPLE_VOICES),
+    )
+    .await
+}
+
+pub(super) async fn select_all(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    problem: Uuid,
+    taxonomy: i64,
+    as_of: &str,
+    tz: &str,
+    basis: &str,
+) -> Result<(Vec<model::Voice>, BTreeMap<String, usize>), CardError> {
+    select_with_limit(tx, domain, problem, taxonomy, as_of, tz, basis, None).await
+}
+
+async fn select_with_limit(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    problem: Uuid,
+    taxonomy: i64,
+    as_of: &str,
+    tz: &str,
+    basis: &str,
+    limit: Option<usize>,
+) -> Result<(Vec<model::Voice>, BTreeMap<String, usize>), CardError> {
     let sql = format!(
         "{}, {}, eligible AS MATERIALIZED (\
          SELECT * FROM linggan_opportunity_eligible_comments($1,$2::timestamptz,$6,$7)) \
@@ -61,7 +96,7 @@ pub(super) async fn select(
             *excluded.entry(reason).or_default() += 1;
             continue;
         }
-        if voices.len() == MAX_SAMPLE_VOICES {
+        if limit.is_some_and(|limit| voices.len() == limit) {
             continue;
         }
         if !row.try_get::<bool, _>("same_body")? {

@@ -69,6 +69,14 @@ const SOURCE_TABLES: &[&str] = &[
 pub(super) async fn capture(
     tx: &mut Transaction<'_, Postgres>,
 ) -> Result<(String, bool), CardError> {
+    capture_for(tx, SOURCE_TABLES).await
+}
+
+/// Apply the same snapshot signing rule to a narrower, explicitly audited reader.
+pub(super) async fn capture_for(
+    tx: &mut Transaction<'_, Postgres>,
+    tables: &[&str],
+) -> Result<(String, bool), CardError> {
     sqlx::query("SAVEPOINT opportunity_card_capture")
         .execute(&mut **tx)
         .await?;
@@ -79,10 +87,7 @@ pub(super) async fn capture(
     ] {
         sqlx::query(setting).execute(&mut **tx).await?;
     }
-    let statement = format!(
-        "LOCK TABLE {} IN SHARE MODE NOWAIT",
-        SOURCE_TABLES.join(",")
-    );
+    let statement = format!("LOCK TABLE {} IN SHARE MODE NOWAIT", tables.join(","));
     if let Err(error) = sqlx::query(AssertSqlSafe(statement))
         .execute(&mut **tx)
         .await
@@ -130,6 +135,13 @@ pub(super) async fn require_visible_restrictions(
 /// Verify relations actually used by the completed calculation before commit.
 /// Current card code does not retain results from rolled-back subtransactions.
 pub(super) async fn verify(tx: &mut Transaction<'_, Postgres>) -> Result<(), CardError> {
+    verify_for(tx, SOURCE_TABLES).await
+}
+
+pub(super) async fn verify_for(
+    tx: &mut Transaction<'_, Postgres>,
+    tables: &[&str],
+) -> Result<(), CardError> {
     sqlx::query("SET CONSTRAINTS ALL IMMEDIATE")
         .execute(&mut **tx)
         .await?;
@@ -143,7 +155,7 @@ pub(super) async fn verify(tx: &mut Transaction<'_, Postgres>) -> Result<(), Car
            AND (namespace.nspname<>current_schema() OR NOT relation.relname::text=ANY($1::text[])) \
          ORDER BY 1",
     )
-    .bind(SOURCE_TABLES)
+    .bind(tables)
     .fetch_all(&mut **tx).await?;
     if missing.is_empty() {
         Ok(())

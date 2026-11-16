@@ -2,6 +2,8 @@
 mod context;
 mod groups;
 mod model;
+mod read;
+mod read_model;
 mod snapshot;
 mod voices;
 
@@ -16,6 +18,11 @@ use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
 use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
+
+pub use read::{
+    EvidenceKind, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card,
+    read_evidence, read_opportunities,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CardError {

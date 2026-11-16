@@ -57,6 +57,137 @@ async fn p1(db: &linggan_storage_postgres::Database) -> Value {
 
 #[tokio::test]
 #[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn read_endpoints_share_card_sources_and_fail_closed_after_change() {
+    use linggan_intelligence::opportunity::{
+        EvidenceKind, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card,
+        read_evidence, read_opportunities,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let card = read_card(&db, problem).await.unwrap();
+    assert_eq!(card, p1(&db).await);
+
+    let mut query = EvidenceQuery {
+        kind: EvidenceKind::Comments,
+        cursor: None,
+        limit: Some(2),
+    };
+    let first = read_evidence(&db, problem, &query).await.unwrap();
+    assert_eq!(first["items"].as_array().unwrap().len(), 2);
+    assert_eq!(first["page"]["hasMore"], true);
+    let encoded = first.to_string();
+    assert!(!encoded.contains("commenterHash"));
+    assert!(!encoded.contains("authorExternalId"));
+    query.cursor = first["page"]["nextCursor"].as_str().map(str::to_owned);
+    let second = read_evidence(&db, problem, &query).await.unwrap();
+    assert!(!second["items"].as_array().unwrap().is_empty());
+    assert_eq!(first["page"]["asOf"], second["page"]["asOf"]);
+
+    let works = read_evidence(
+        &db,
+        problem,
+        &EvidenceQuery {
+            kind: EvidenceKind::Works,
+            cursor: None,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!works["items"].as_array().unwrap().is_empty());
+    assert!(
+        works["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|work| work["basis"] == "comment_mention")
+    );
+    let creators = read_evidence(
+        &db,
+        problem,
+        &EvidenceQuery {
+            kind: EvidenceKind::Creators,
+            cursor: None,
+            limit: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert!(!creators["items"].as_array().unwrap().is_empty());
+    assert!(
+        creators["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|creator| creator.get("protocolVersion").is_some())
+    );
+
+    let group = &card["demand"]["groups"][0];
+    let filtered = read_opportunities(
+        &db,
+        domain,
+        &OpportunityListQuery {
+            period: group["current"]["periodStart"].as_str().map(str::to_owned),
+            tier: group["evidenceTier"].as_str().map(str::to_owned),
+            supply_state: Some("not_evaluated".to_owned()),
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        filtered["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|item| item["problem"]["id"] == problem.to_string())
+    );
+
+    let mut list_query = OpportunityListQuery {
+        limit: Some(1),
+        ..Default::default()
+    };
+    let list = read_opportunities(&db, domain, &list_query).await.unwrap();
+    assert_eq!(list["items"].as_array().unwrap().len(), 1);
+    assert_eq!(list["page"]["hasMore"], true);
+    list_query.cursor = list["page"]["nextCursor"].as_str().map(str::to_owned);
+    sqlx::query("UPDATE linggan_opportunity_opportunity_card SET input_fingerprint=repeat('f',64) WHERE problem_ref=$1")
+        .bind(problem).execute(db.pool()).await.unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &list_query).await,
+        Err(OpportunityReadError::PageChanged)
+    ));
+
+    let old = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_opportunity_problem(problem_ref,source_ref,source_definition_ref,domain_ref,label,created_at,updated_at) \
+        SELECT $1,$1,source_definition_ref,domain_ref,'synthetic old problem',created_at,updated_at \
+        FROM linggan_opportunity_problem WHERE problem_ref=$2")
+        .bind(old).bind(problem).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_opportunity_problem_lineage(operation_ref,from_problem_ref,to_problem_ref,relation) VALUES($1,$2,$3,'merge')")
+        .bind(Uuid::new_v4()).bind(old).bind(problem).execute(db.pool()).await.unwrap();
+    let redirected = read_card(&db, old).await.unwrap();
+    assert_eq!(redirected["problem"]["id"], problem.to_string());
+    assert_eq!(redirected["problem"]["redirectedFrom"], old.to_string());
+
+    let voice = &card["demand"]["sampleVoices"][0]["commentRef"];
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,$2,'synthetic withdrawal')")
+        .bind(Uuid::parse_str(voice["contentRef"].as_str().unwrap()).unwrap())
+        .bind(voice["commentExternalId"].as_str().unwrap())
+        .execute(db.pool()).await.unwrap();
+    assert!(matches!(
+        read_card(&db, old).await,
+        Err(OpportunityReadError::NotFound)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
 async fn card_reads_a_work_with_a_selected_image_reading() {
     let (db, domain, digest) = prepare().await;
     sqlx::raw_sql(r#"

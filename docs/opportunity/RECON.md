@@ -694,3 +694,10 @@ multi_identities|28423  admitted_after_work_first_package|11643
 
 - `apps/worker/tests/ocr_cleanup_postgres.rs` 的 `baseline` 必须停在 0168 之前，以验证当时的 OCR 清理；该测试仍使用当前 producer/材料读取代码生成合成数据。
 - 当前材料读取调用 0204 的 `linggan_opportunity_observed_at(text)`。历史测试仅从 `database/migrations/0204_opportunity_comment_eligibility.sql` 的原文提取该函数，以便当前读取代码运行；不执行 0204 的其他业务迁移，也不修改历史迁移。
+
+## 15. T1.5 只读接口补充勘察（`d0f2fbc9`）
+
+- API 总路由及启动状态位于 `apps/api/src/local_web.rs:186,343,528`；`comment_study::local_comment_study_guard` 位于 `apps/api/src/local_web/comment_study.rs:19`，外层 `public_access::guard` 限制公开入口。读取错误复用 `local_read_json_error`（`local_web.rs:2379`）。
+- 现有 cursor 编解码、查询范围哈希及位置约束在 `crates/intelligence/src/comment_study_catalog/cursor.rs:67,84,106`；`Database::pool` 位于 `crates/storage-postgres/src/pool.rs:28`。
+- 当前卡片及反向原声引用分别由 `database/migrations/0217_opportunity_card_read_model.sql:2,13` 定义，撤回会同步移除引用该来源的卡片；问题注册与血缘在 `database/migrations/0205_opportunity_problem_taxonomy.sql:10,26`，`linggan_opportunity_resolve_problem_id` 位于 `:113`，拆分可能返回多个目标。
+- 卡片原声的现有资格选择位于 `crates/intelligence/src/opportunity/card/voices.rs:15`，并复用 `crates/intelligence/src/comment_study_source.rs:65`；当前快照签发、受限来源可见性与来源覆盖核对分别位于 `crates/intelligence/src/opportunity/card/snapshot.rs:69,115,132`。
