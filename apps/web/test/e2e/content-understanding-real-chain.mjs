@@ -240,8 +240,8 @@ try {
       await checkResult();
       await understanding.getByText(question, { exact: true }).waitFor();
       await understanding.getByText(statement, { exact: false }).waitFor();
-      await understanding.getByText('引用依据', { exact: true }).click();
-      await understanding.getByText(evidence.quote, { exact: true }).waitFor();
+      await understanding.getByText('引用依据', { exact: true }).first().click();
+      await understanding.getByText(evidence.quote, { exact: true }).first().waitFor();
     };
     await page.getByRole('button', { name: '刷新底稿', exact: true }).click();
     await checkDeep();
@@ -302,8 +302,8 @@ try {
       await checkResult();
       await understanding.getByText(generatedQuestion, { exact: true }).waitFor();
       await understanding.getByText(generatedStatement, { exact: false }).waitFor();
-      await understanding.getByText('引用依据', { exact: true }).click();
-      await understanding.getByText(evidence.quote, { exact: true }).waitFor();
+      await understanding.getByText('引用依据', { exact: true }).first().click();
+      await understanding.getByText(evidence.quote, { exact: true }).first().waitFor();
     };
     await page.getByRole('button', { name: '刷新底稿', exact: true }).click();
     await readGenerated();
