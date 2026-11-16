@@ -1,10 +1,10 @@
 WITH history AS (
-    SELECT content_public_ref,material_ref,package_ref,record_ordinal,observed_at::timestamptz AS observed_at,
+    SELECT content_public_ref,material_ref,package_ref,record_ordinal,linggan_opportunity_observed_at(observed_at) AS observed_at,created_at,
            'content_detail'::text AS source_kind,like_count,like_count_state,comment_count,comment_count_state,
            collect_count,collect_count_state,share_count,share_count_state
     FROM linggan_material_content_detail WHERE content_public_ref=$1
     UNION ALL
-    SELECT content_public_ref,material_ref,package_ref,record_ordinal,observed_at::timestamptz,discovery_kind,
+    SELECT content_public_ref,material_ref,package_ref,record_ordinal,linggan_opportunity_observed_at(observed_at),created_at,discovery_kind,
            like_count,like_count_state,comment_count,comment_count_state,
            collect_count,collect_count_state,share_count,share_count_state
     FROM linggan_material_discovery_finding WHERE content_public_ref=$1
@@ -29,7 +29,7 @@ CROSS JOIN LATERAL (VALUES
 WHERE receipt.material_admission='ACCEPTED'
   AND disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content')
   AND metric.state='KNOWN' AND metric.value>=0
-  AND package.accepted_at <= $2::timestamptz AND history.observed_at <= $2::timestamptz
+  AND package.accepted_at <= $2::timestamptz AND history.created_at <= $2::timestamptz AND history.observed_at <= $2::timestamptz
   AND abs(extract(epoch FROM history.observed_at)-$3::bigint/1000.0-86400)<=3600
   AND EXISTS(SELECT 1 FROM collection_work_order_domain_usage usage
       WHERE usage.work_order_ref=work_order.work_order_ref AND ($4::uuid IS NULL OR usage.domain_ref=$4))

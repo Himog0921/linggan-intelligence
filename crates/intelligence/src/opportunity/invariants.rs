@@ -138,7 +138,7 @@ const DEFINITIONS: &[Definition] = &[
         sql: "SELECT count(*) FROM linggan_opportunity_opportunity_card card
               WHERE EXISTS (
                 SELECT 1 FROM jsonb_array_elements(card.payload->'demand'->'sampleVoices') voice
-                WHERE (voice->>'tombstone')::boolean = false
+                WHERE voice->>'text' IS NOT NULL
                   AND EXISTS (
                     SELECT 1 FROM linggan_material_comment_restriction restriction
                     WHERE restriction.content_public_ref::text = voice->'commentRef'->>'contentRef'
@@ -213,6 +213,9 @@ fn as_of_sql(id: &str) -> Option<&'static str> {
         ),
         "I8" => Some(
             "WITH RECURSIVE walk(start_id,cur_id,depth) AS (SELECT lineage.from_problem_ref,lineage.to_problem_ref,1 FROM linggan_opportunity_problem_lineage lineage JOIN linggan_opportunity_problem problem ON problem.problem_ref=lineage.from_problem_ref WHERE problem.domain_ref=$2 AND lineage.relation IN ('merge','rename') AND lineage.created_at <= $1::timestamptz UNION ALL SELECT walk.start_id,lineage.to_problem_ref,walk.depth+1 FROM walk JOIN linggan_opportunity_problem_lineage lineage ON lineage.from_problem_ref=walk.cur_id AND lineage.created_at <= $1::timestamptz AND lineage.relation IN ('merge','rename') WHERE walk.depth < 100) SELECT count(*) FROM walk WHERE start_id=cur_id",
+        ),
+        "I9" => Some(
+            "SELECT count(*) FROM linggan_opportunity_opportunity_card card JOIN linggan_opportunity_problem problem USING(problem_ref) WHERE problem.domain_ref=$2 AND card.as_of<=$1::timestamptz AND EXISTS (SELECT 1 FROM jsonb_array_elements(card.payload->'demand'->'sampleVoices') voice WHERE voice->>'text' IS NOT NULL AND EXISTS (SELECT 1 FROM linggan_material_comment_restriction restriction WHERE restriction.content_public_ref::text=voice->'commentRef'->>'contentRef' AND restriction.comment_external_id=voice->'commentRef'->>'commentExternalId'))",
         ),
         "I11" => Some(
             "SELECT count(*) FROM linggan_opportunity_platform_time_at($1::timestamptz) platform JOIN linggan_opportunity_comment_fact_at($1::timestamptz) fact ON fact.content_ref=platform.content_public_ref AND fact.comment_external_id=platform.comment_external_id WHERE platform.published_at > fact.first_observed_at AND EXISTS (SELECT 1 FROM linggan_material_domain_usage usage WHERE usage.content_public_ref=platform.content_public_ref AND usage.domain_ref=$2 AND (usage.basis_kind='legacy_domain_migration' OR usage.created_at <= $1::timestamptz))",

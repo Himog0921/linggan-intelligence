@@ -70,7 +70,7 @@ pub async fn selected_source_in(
     role: StudySourceRole,
     as_of: &str,
 ) -> Result<Option<SelectedStudySource>, StudySourceError> {
-    let row = sqlx::query("SELECT c.material_ref,c.content_public_ref,c.comment_external_id,c.parent_comment_external_id,c.body_state,c.body_text,c.author_external_id,author.author_external_id AS work_author_external_id,$5::text AS observation_role,EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS source_restricted FROM linggan_material_comment c JOIN linggan_runtime_capture_package p USING(package_ref) LEFT JOIN linggan_material_content_author author ON author.content_public_ref=c.content_public_ref WHERE c.material_ref=$1 AND c.content_public_ref=$2 AND p.accepted_at<=$3::timestamptz AND c.created_at<=$3::timestamptz AND EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=c.content_public_ref AND u.domain_ref=$4 AND u.role=$5) AND c.material_ref=(SELECT newer.material_ref FROM linggan_material_comment newer JOIN linggan_runtime_capture_package np USING(package_ref) WHERE newer.content_public_ref=c.content_public_ref AND newer.comment_external_id=c.comment_external_id AND np.accepted_at<=$3::timestamptz AND newer.created_at<=$3::timestamptz ORDER BY newer.observed_at::timestamptz DESC,newer.created_at DESC,newer.material_ref DESC LIMIT 1)")
+    let row = sqlx::query("SELECT c.material_ref,c.content_public_ref,c.comment_external_id,c.parent_comment_external_id,c.body_state,c.body_text,c.author_external_id,author.author_external_id AS work_author_external_id,$5::text AS observation_role,EXISTS(SELECT 1 FROM linggan_material_comment_restriction r WHERE r.content_public_ref=c.content_public_ref AND r.comment_external_id=c.comment_external_id) AS source_restricted FROM linggan_material_comment c JOIN linggan_runtime_capture_package p USING(package_ref) LEFT JOIN LATERAL linggan_material_content_author_at(c.content_public_ref,$3::timestamptz) author ON true WHERE c.material_ref=$1 AND c.content_public_ref=$2 AND p.accepted_at<=$3::timestamptz AND c.created_at<=$3::timestamptz AND linggan_opportunity_observed_at(c.observed_at) IS NOT NULL AND EXISTS(SELECT 1 FROM linggan_material_domain_usage u WHERE u.content_public_ref=c.content_public_ref AND u.domain_ref=$4 AND u.role=$5) AND c.material_ref=(SELECT newer.material_ref FROM linggan_material_comment newer JOIN linggan_runtime_capture_package np USING(package_ref) WHERE newer.content_public_ref=c.content_public_ref AND newer.comment_external_id=c.comment_external_id AND np.accepted_at<=$3::timestamptz AND newer.created_at<=$3::timestamptz AND linggan_opportunity_observed_at(newer.observed_at) IS NOT NULL ORDER BY linggan_opportunity_observed_at(newer.observed_at) DESC,newer.created_at DESC,newer.material_ref DESC LIMIT 1)")
         .bind(source_ref).bind(work).bind(as_of).bind(domain).bind(role.as_str())
         .fetch_optional(&mut **tx).await?;
     let Some(row) = row else { return Ok(None) };
@@ -112,6 +112,8 @@ pub struct StudySourcePreview {
     pub total_comment_count: usize,
     pub eligible_comment_count: usize,
     pub unknown_author_count: usize,
+    /// Observation rows, not distinct comments; the same comment may have several bad rows.
+    pub unparseable_observation_count: usize,
     pub excluded_counts: StudySourceExcludedCounts,
     pub works: Vec<StudySourcePreviewWork>,
 }
@@ -431,6 +433,7 @@ pub async fn preview_sources_for_role(
     let mut after = (0, Uuid::nil());
     let mut total = 0;
     let mut unknown_author_count = 0;
+    let mut unparseable_observation_count = 0_usize;
     let mut counts = BTreeMap::<Uuid, usize>::new();
     let mut excluded = StudySourceExcludedCounts::default();
     loop {
@@ -439,6 +442,13 @@ pub async fn preview_sources_for_role(
         for row in &page {
             total += 1;
             after = (row.try_get("rank")?, row.try_get("content_public_ref")?);
+            let invalid: i64 = row.try_get("unparseable_observations")?;
+            unparseable_observation_count = unparseable_observation_count
+                .checked_add(
+                    usize::try_from(invalid)
+                        .map_err(|_| sqlx::Error::Protocol("invalid observation count".into()))?,
+                )
+                .ok_or_else(|| sqlx::Error::Protocol("observation count overflow".into()))?;
             let author: Option<String> = row.try_get("author_external_id")?;
             if author
                 .as_deref()
@@ -492,6 +502,7 @@ pub async fn preview_sources_for_role(
         total_comment_count: total,
         eligible_comment_count: eligible,
         unknown_author_count,
+        unparseable_observation_count,
         excluded_counts: excluded,
         works,
     })

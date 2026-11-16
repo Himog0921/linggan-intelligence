@@ -1,13 +1,13 @@
 WITH observations AS (
     SELECT material_ref,content_public_ref,package_ref,record_ordinal,
-           discovery_kind AS source_kind,observed_at::timestamptz AS observed_at,
+           discovery_kind AS source_kind,linggan_opportunity_observed_at(observed_at) AS observed_at,created_at,
            result_position::bigint AS position,
            like_count,like_count_state,comment_count,comment_count_state,
            collect_count,collect_count_state,share_count,share_count_state
     FROM linggan_material_discovery_finding WHERE content_public_ref=$3
     UNION ALL
     SELECT material_ref,content_public_ref,package_ref,record_ordinal,
-           'content_detail',observed_at::timestamptz,NULL::bigint,
+           'content_detail',linggan_opportunity_observed_at(observed_at),created_at,NULL::bigint,
            like_count,like_count_state,comment_count,comment_count_state,
            collect_count,collect_count_state,share_count,share_count_state
     FROM linggan_material_content_detail WHERE content_public_ref=$3
@@ -29,7 +29,7 @@ WITH observations AS (
     LEFT JOIN collection_monitor_rule rule ON rule.rule_ref=revision.rule_ref
     WHERE receipt.material_admission='ACCEPTED'
       AND disposition.disposition IN ('accepted_for_library_discovery','accepted_for_library_content')
-      AND package.accepted_at <= $4::timestamptz AND observation.observed_at <= $4::timestamptz
+      AND package.accepted_at <= $4::timestamptz AND observation.created_at <= $4::timestamptz AND observation.observed_at <= $4::timestamptz
       AND EXISTS(SELECT 1 FROM collection_work_order_domain_usage usage
           WHERE usage.work_order_ref=work_order.work_order_ref
             AND ($2::uuid IS NULL OR usage.domain_ref=$2))
