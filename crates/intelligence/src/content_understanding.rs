@@ -353,7 +353,7 @@ fn quote_in_source<'a>(
 
 /// Match on letters and digits only, then return the original source slice.
 /// The stored quotation therefore stays a literal copy of the material.
-fn loose_quote_in_source<'a>(source: &'a str, quote: &str) -> Option<(usize, &'a str)> {
+pub(crate) fn loose_quote_in_source<'a>(source: &'a str, quote: &str) -> Option<(usize, &'a str)> {
     let wanted: Vec<char> = quote.chars().filter(|c| c.is_alphanumeric()).collect();
     if wanted.len() < 4 {
         return None;

@@ -39,15 +39,18 @@ pub(crate) const CAUSAL_PATTERNS: [&str; 11] = [
     "让笔记",
 ];
 
+/// Extra fields are ignored and statuses are read one by one: a format slip
+/// drops that item instead of the whole run (the L1 lesson, content-card §6).
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
 struct Draft {
     #[serde(rename = "subQuestionStatus", default)]
-    sub_question_status: Vec<DraftStatus>,
+    sub_question_status: Vec<Value>,
+    #[serde(default)]
     findings: Vec<Value>,
 }
+const MAX_FINDINGS: usize = 8;
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct DraftStatus {
     id: String,
     status: String,
@@ -55,7 +58,7 @@ struct DraftStatus {
     note: Option<String>,
 }
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct DraftFinding {
     id: String,
     answers: String,
@@ -71,14 +74,14 @@ struct DraftFinding {
     hypothesis: Option<DraftHypothesis>,
 }
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct DraftSupport {
     material_ref: String,
     excerpt: Option<String>,
     observation: Option<String>,
 }
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct DraftApplication {
     original_use: String,
     method: String,
@@ -88,7 +91,7 @@ struct DraftApplication {
     avoid_when: String,
 }
 #[derive(Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 struct DraftHypothesis {
     mechanism: String,
     observable_signal: String,
@@ -155,9 +158,15 @@ fn persisted_support(
         .as_deref()
         .filter(|value| non_empty(value))
         .ok_or("excerpt_not_found")?;
-    if !text.contains(excerpt) {
-        return Err("excerpt_not_found");
-    }
+    // Punctuation and spacing slips keep the excerpt; the stored text is the
+    // material's own contiguous slice.
+    let excerpt = if text.contains(excerpt) {
+        excerpt
+    } else {
+        crate::content_understanding::loose_quote_in_source(text, excerpt)
+            .ok_or("excerpt_not_found")?
+            .1
+    };
     if kind == "verbatim_text" && excerpt.chars().count() < 4 {
         return Err("excerpt_too_short");
     }
@@ -293,9 +302,11 @@ fn admit(
     for quote in quoted(&draft.statement) {
         let supported = supports.iter().any(|support| {
             support["supportType"] == json!("verbatim_text")
-                && support["excerpt"]
-                    .as_str()
-                    .is_some_and(|excerpt| excerpt.contains(quote))
+                && support["excerpt"].as_str().is_some_and(|excerpt| {
+                    excerpt.contains(quote)
+                        || crate::content_understanding::loose_quote_in_source(excerpt, quote)
+                            .is_some()
+                })
         });
         if !supported {
             return Err("quote_mark_misuse");
@@ -388,7 +399,11 @@ pub(crate) fn accept(
         .map(|question| question.id.as_str())
         .collect();
     let mut status = BTreeMap::<String, Value>::new();
-    for entry in &draft.sub_question_status {
+    let entries = draft
+        .sub_question_status
+        .into_iter()
+        .filter_map(|entry| serde_json::from_value::<DraftStatus>(entry).ok());
+    for entry in entries {
         if !expected.contains(entry.id.as_str()) {
             continue;
         }
@@ -416,13 +431,16 @@ pub(crate) fn accept(
         .enumerate()
         .filter_map(|(index, finding)| Some((finding["id"].as_str()?.to_string(), index)))
         .collect();
-    let total = draft.findings.len();
+    // Findings past the cap are kept for evaluation but are not judged, so a
+    // long answer cannot withhold the run.
+    let total = draft.findings.len().min(MAX_FINDINGS);
     let mut published = Vec::new();
     let mut rejected = Vec::new();
+    let mut failed = 0;
     let mut earlier = BTreeMap::<String, String>::new();
     for (index, finding) in draft.findings.iter().enumerate() {
-        if index >= 8 {
-            rejected.push(json!({"finding":finding,"rejectCode":"assertion_rule"}));
+        if index >= MAX_FINDINGS {
+            rejected.push(json!({"finding":finding,"rejectCode":"over_limit"}));
             continue;
         }
         match admit(finding, index, &positions, &materials, card, &answered, &earlier) {
@@ -433,7 +451,10 @@ pub(crate) fn accept(
                 );
                 published.push(value);
             }
-            Err(code) => rejected.push(json!({"finding":finding,"rejectCode":code})),
+            Err(code) => {
+                failed += 1;
+                rejected.push(json!({"finding":finding,"rejectCode":code}));
+            }
         }
     }
     if published.is_empty() {
@@ -443,7 +464,7 @@ pub(crate) fn accept(
             Err(REJECTED_EXCESS)
         };
     }
-    if rejected.len() * 3 > total {
+    if failed * 3 > total {
         return Err(REJECTED_EXCESS);
     }
     let answered_with_finding: BTreeSet<&str> = published
@@ -677,6 +698,53 @@ mod tests {
             accept(&draft(vec![finding(), bad.clone(), bad]), &card(), &manifest(), &questions())
                 .unwrap_err(),
             REJECTED_EXCESS
+        );
+    }
+
+    #[test]
+    fn extra_fields_and_a_bad_status_entry_drop_only_that_item() {
+        let mut extra = good("F2");
+        extra["confidence"] = json!("high");
+        extra["support"][0]["note"] = json!("开头");
+        let text = json!({
+            "subQuestionStatus":[{"id":"Q1","status":"answered","confidence":1},{"status":"answered"}],
+            "findings":[finding(),extra],
+            "summary":"多余的顶层字段"
+        })
+        .to_string();
+        let (published, rejected, statuses) =
+            accept(&text, &card(), &manifest(), &questions()).unwrap();
+        assert_eq!(published.as_array().unwrap().len(), 2);
+        assert_eq!(rejected, json!([]));
+        assert_eq!(statuses[0]["status"], json!("answered"));
+    }
+
+    #[test]
+    fn excerpt_with_punctuation_slips_stores_the_material_slice() {
+        let mut slipped = finding();
+        slipped["statement"] = json!("作者写「先摆材料再按步骤」。");
+        slipped["support"] = json!([{"materialRef":"M1","excerpt":"先摆材料 再按步骤"}]);
+        let (published, _, _) =
+            accept(&draft(vec![slipped]), &card(), &manifest(), &questions()).unwrap();
+        assert_eq!(
+            published[0]["support"][0]["excerpt"],
+            json!("先摆材料，再按步骤")
+        );
+    }
+
+    #[test]
+    fn findings_past_the_cap_are_kept_but_not_judged() {
+        let findings: Vec<Value> = (1..=12).map(|n| good(&format!("F{n}"))).collect();
+        let (published, rejected, _) =
+            accept(&draft(findings), &card(), &manifest(), &questions()).unwrap();
+        assert_eq!(published.as_array().unwrap().len(), 8);
+        assert_eq!(rejected.as_array().unwrap().len(), 4);
+        assert!(
+            rejected
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|item| item["rejectCode"] == json!("over_limit"))
         );
     }
 
