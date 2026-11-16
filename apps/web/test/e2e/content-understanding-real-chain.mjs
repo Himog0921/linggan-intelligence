@@ -219,6 +219,11 @@ try {
     const evidence = card.evidence.find(item => typeof item.quote === 'string');
     assert.ok(evidence);
     const deepPath = '/api/local/content-understanding/deep';
+    const modes = await call(deepPath + '/modes');
+    assert.equal(modes.status, 200, JSON.stringify(modes.body));
+    assert.equal(modes.body.imageLimit, 9);
+    assert.equal(modes.body.methodVersion, 'content-understanding.l2.model.v2');
+    assert.equal(modes.body.modes.length, 3);
     const deep = { commandRef: crypto.randomUUID(), domainRef: domain, workRef: work,
       coreRef: card.analysisRef, question, findings: [{ id: 'f1', findingType: 'structure',
         statement, basisUnitIds: [card.core.mainTopicUnitId], evidenceRefs: [evidence.id] }] };
@@ -229,7 +234,7 @@ try {
     const published = await call(deepPath, 'POST', deep);
     assert.equal(published.status, 200, JSON.stringify(published.body));
     assert.deepEqual((await call(deepPath, 'POST', deep)).body, published.body);
-    assert.equal((await call(latest + '&asOf=' + encodeURIComponent(historicalAsOf))).body.analysis.result.card.deep, null);
+    assert.deepEqual((await call(latest + '&asOf=' + encodeURIComponent(historicalAsOf))).body.analysis.deepAnalyses, []);
 
     const checkDeep = async () => {
       await checkResult();
@@ -245,9 +250,9 @@ try {
     const refreshed = (await call(latest)).body.analysis;
     assert.deepEqual(refreshed.result.card.core, card.core);
     assert.deepEqual(refreshed.result.card.evidence, card.evidence);
-    assert.equal(refreshed.deepQuestion, question);
-    assert.equal(refreshed.result.card.deep.analysisRef, published.body.analysisRef);
-    assert.deepEqual(refreshed.result.card.deep.findings, deep.findings);
+    assert.equal(refreshed.deepAnalyses[0].question, question);
+    assert.equal(refreshed.deepAnalyses[0].analysisRef, published.body.analysisRef);
+    assert.deepEqual(refreshed.deepAnalyses[0].findings, deep.findings);
     report.steps.push('人工深化真实写入、幂等、错误作品和无效引用拒绝、历史时间读取及底稿刷新通过。');
     const generatePath = deepPath + '/generate';
     const generatedQuestion = '作者怎样安排材料和核对顺序？';
@@ -284,7 +289,7 @@ try {
     const badItem = await waitForDeep(bad.body.batchRef);
     assert.equal(badItem.state, 'failed');
     assert.equal(badItem.failureCode, 'content_understanding_deep_rejected_excess');
-    assert.deepEqual((await call(latest)).body.analysis.result.card.deep, refreshed.result.card.deep);
+    assert.deepEqual((await call(latest)).body.analysis.deepAnalyses, refreshed.deepAnalyses);
 
     const queued = await call(generatePath, 'POST', generate);
     assert.equal(queued.status, 202, JSON.stringify(queued.body));
@@ -305,10 +310,10 @@ try {
     await page.reload();
     await readGenerated();
     const generated = (await call(latest)).body.analysis;
-    assert.equal(generated.deepQuestion, generatedQuestion);
-    assert.equal(generated.result.card.deep.analysisRef, queued.body.requestRef);
-    assert.equal(generated.result.card.deep.methodVersion, 'content-understanding.l2.model.v2');
-    const [generatedFinding] = generated.result.card.deep.findings;
+    assert.equal(generated.deepAnalyses[0].question, generatedQuestion);
+    assert.equal(generated.deepAnalyses[0].analysisRef, queued.body.requestRef);
+    assert.equal(generated.deepAnalyses[0].methodVersion, 'content-understanding.l2.model.v2');
+    const [generatedFinding] = generated.deepAnalyses[0].findings;
     assert.equal(generatedFinding.id, 'F1');
     assert.equal(generatedFinding.answers, 'Q1');
     assert.equal(generatedFinding.findingType, 'structure');
@@ -322,7 +327,7 @@ try {
     assert.equal(generatedFinding.hypothesis, null);
     assert.deepEqual(generated.result.card.core, card.core);
     assert.deepEqual(generated.result.card.evidence, card.evidence);
-    report.generated = generated.result.card.deep;
+    report.generated = generated.deepAnalyses[0];
     await understanding.screenshot({ path: path.join(directory, 'understanding-deep-generated.png') });
     report.steps.push('人工问题经 L2 独立许可、真实队列和合成端点完成深化；无效引用保留原 Deep，底稿与 Card 刷新一致。');
   }
