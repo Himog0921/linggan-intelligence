@@ -181,6 +181,7 @@ if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-foundation" || "${1:-}"
     fi
   fi
   if [[ "${1:-}" == "--ai-service" ]]; then
+    cargo_proof -p linggan-intelligence --test content_understanding_executor_postgres --locked -- --exact full_schema_fixtures_record_the_actual_deep_v2_migration_digest --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test content_understanding_executor_postgres --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_foundation_postgres executor_probe:: --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_executor_service_postgres --locked -- --ignored --nocapture

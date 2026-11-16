@@ -33,7 +33,7 @@ async fn content_understanding_real_browser_chain() {
     .unwrap();
     let model = setup::prepare_with_actual_probe(&db, &endpoint.url, &session, &adapter).await;
     l1_setup::configure_high(&db, &model).await;
-    let deep_config = configure_deep(&db, &model).await;
+    let deep_config = configure_deep(&db, &model, &adapter).await;
     session.request_drain().await.unwrap();
     session.complete_drain().await.unwrap();
     drop(session);
@@ -141,17 +141,21 @@ async fn content_understanding_real_browser_chain() {
 async fn configure_deep(
     db: &linggan_storage_postgres::Database,
     model: &setup::Configured,
+    adapter: &linggan_intelligence::pi_adapter::PiAdapter,
 ) -> linggan_intelligence::ai_foundation::task_config::TaskConfigReceipt {
     use linggan_intelligence::ai_foundation::{
         TaskKey,
         capability::ModelLimits,
         control::BudgetPolicy,
         control_store::ControlScope,
+        skill_binding::{SwitchSkill, switch_skill},
+        skill_package::{Encoding, SkillPackage, UploadFile},
+        skill_store::{ImportSkill, import_skill},
         task_config::{ModelSelection, SaveTaskConfig, save_task_config},
     };
     let capability_ref = sqlx::query_scalar("SELECT capability_ref FROM linggan_model_capability WHERE identity_ref=(SELECT identity_ref FROM linggan_model_capability WHERE capability_ref=$1) AND endpoint_ref=$2 ORDER BY revision_sequence DESC LIMIT 1")
         .bind(model.capability).bind(model.endpoint).fetch_one(db.pool()).await.unwrap();
-    let config = save_task_config(
+    let seeded = save_task_config(
         db,
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
@@ -175,9 +179,46 @@ async fn configure_deep(
     )
     .await
     .unwrap();
-    assert!(config.applied);
+    // requires_skill=true: L2 dispatches only with a bound Skill. The synthetic
+    // package proves the binding path without carrying real research method text.
+    let skill = import_skill(
+        db,
+        adapter,
+        &ImportSkill {
+            command_ref: Uuid::new_v4(),
+            expected_version_ref: None,
+            package: SkillPackage {
+                directory: "deep-synthetic".into(),
+                files: vec![UploadFile {
+                    path: "SKILL.md".into(),
+                    encoding: Encoding::Utf8,
+                    content: "---\nname: deep-synthetic\ndescription: L2 合成做法，仅用于流程证明\n---\n\n只返回给定结构的 JSON。\n".into(),
+                }],
+            },
+        },
+    )
+    .await
+    .unwrap();
+    let switched = switch_skill(
+        db,
+        &SwitchSkill {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::ContentUnderstandingDeep,
+            expected_task_revision: seeded.revision,
+            expected_binding_revision: 0,
+            version_ref: skill.version_ref,
+        },
+    )
+    .await
+    .unwrap();
     setup::enable(db, ControlScope::Task(TaskKey::ContentUnderstandingDeep)).await;
-    config
+    linggan_intelligence::ai_foundation::task_config::TaskConfigReceipt {
+        task_key: TaskKey::ContentUnderstandingDeep,
+        task_config_ref: switched.task_config_ref,
+        model_config_ref: Some(model.model),
+        revision: switched.task_revision,
+        applied: true,
+    }
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
