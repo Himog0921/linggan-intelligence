@@ -372,3 +372,50 @@ counts_as_failure: !success && allowed && !receipt::not_dispatched(response)
 - 未评审附录 A 的 Skill 正文内容（由你评审）；只核对了字段名、枚举值与第 5 节合同的一致性。
 - 未修改 V0.3 正文；发现的问题都写在本报告，建议文字见各节。
 - 第 1.1、1.2 节（含 M1–M6）未重新论证。
+
+## 17. 2026-11-16 补记（原文不改，按核实结果更正）
+
+本节追加在报告末尾，正文保留当时（`main@c57e16b1`）的审查记录。以下四项是对原文的事实更正与状态更新。
+
+### 17.1 迁移的 CI 路由：只选 `ai`，不会“选全部 proof”
+
+**原文第 14 节与 K2 说“新迁移属于未知路径，会选全部 proof”，这是错的。** `scripts/ci-select.mjs:14` 把 `database/migrations/**` 明确归入 `ai` 组；`web` 组只单独列了 `0195`、`0196`、`0198`、`0199` 四个迁移（`scripts/ci-select.mjs:71-74` 一带），`web_real_chain` 没有迁移路径。因此只改一个新迁移文件时，Delivery 只会选中 `ai`，`web` 与 `web_real_chain` 不会运行。
+
+**对 PR-1 的影响（二选一，写进 PR 正文）：**
+
+1. 更新 `scripts/ci-select.mjs`：把新的 L2 迁移路径加入 `web`（读取接口与前端依赖它的列），必要时也加入 `web_real_chain`；同步更新 `scripts/ci-select.test.mjs` 的正反例。
+2. 不改选择器：在 PR-1 正文里写明“本 PR 只自动跑 `ai`；需人工补跑 `web` 与 `web_real_chain`”，并在合并前实际补跑。
+
+不要再用“未知路径会选全部”来解释覆盖。
+
+### 17.2 `content_understanding_executor_postgres` 是 `#[ignore]` 测试
+
+**原文第 12、13、14 节给的 `cargo test -p linggan-intelligence --test content_understanding_executor_postgres` 不会真正运行任何用例。** 该文件唯一的入口带有 `#[ignore = "owned PostgreSQL + AI_FOUNDATION_PROOF_NODE + owned LINGGAN_LOCAL_MEDIA_ROOT; no real models"]`（`crates/intelligence/tests/content_understanding_executor_postgres.rs:43`）。
+
+- 直接跑要加 `-- --ignored`，并准备隔离 PostgreSQL、`AI_FOUNDATION_PROOF_NODE`、`LINGGAN_LOCAL_MEDIA_ROOT`。
+- 仓库现有入口是 `bash scripts/test-research-dossier-postgres.sh --ai-service`（`scripts/test-research-dossier-postgres.sh:184`），它已经带 `--ignored`，优先用它。
+- 浏览器链路仍只用 `--dossier-ui`（`scripts/test-research-dossier-postgres.sh:232-243`），这一点原文第 17.1 轮修正后已正确。
+
+### 17.3 第 6 节与第 5 节的画面文字部分作废
+
+- **第 6 节（位置与顺序）整节作废。** #594 已删除 `order`、`displayOrder`、`orderState`、`order_unsupported`、`order_ambiguous` 与第 5.4 节的顺序证明；规范现在只要求“摘录逐字、完整正文随结果保存，评审直接看先后”。
+- **第 5 节中“画面文字时间”一行作废。** #596 已下线视频画面文字（[DEC-0013](../decisions/0013-retire-video-frame-text.md)）；`materialKind` 不再包含 `frame_text`，L2 视频只用口播转写及其时间。
+- 第 5 节其余字段（正文合并、图片顺序/用途/SHA256 从 `inventory` 取、封面区分、重复图）仍有效；其中“图片展示顺序”仅用于请求发送与展示，不再参与任何顺序校验。
+- 冲突清单 K9、K10、K12 随之作废；K9 的“图片 id 与发送顺序一致”保留为发送约定。
+
+### 17.4 第 15 节八问已被 Mog 全部定案
+
+2026-11-16 的八项决定（D1–D8，已写入规范第 1.2.1 节）与原文第 15 节一一对应：
+
+| 原问题 | 决定 |
+|---|---|
+| 1 `requires_skill` | `true`；无 Skill 不派发，返回 `skill_not_configured` |
+| 2 M1 措辞 | 首个版本以 `manual` 激活，`reason` 引用评测报告 |
+| 3 Core 版本与 Deep 显示 | 全部 `deepAnalyses[]` + `coreBasis`；旧 Deep 照常显示；`publish_reviewed_core` 补 `lock_core` |
+| 4 High 失败语义 | 保持 `defer`，AI 设置显示原因 |
+| 5 1/3 边界 | `rejected * 3 > total` 才扣下 |
+| 6 被拒发现保留 | 连同原文摘录写入 `deep.rejected`；读取不返回，仅评测导出 |
+| 7 图片上限 | 9 张，manifest 常量，`/deep/modes` 公开 |
+| 8 Skill token 实测 | 准备合成材料脚本但不运行，调用由 Mog 另行授权 |
+
+另：本次补记与后续实施都以 `main@a343ba8f` 为准；原文的 `文件:行` 可能在 #594/#596 后漂移，实施前必须重新核对。
