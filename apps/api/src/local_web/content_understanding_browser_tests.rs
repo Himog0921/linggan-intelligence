@@ -146,6 +146,17 @@ async fn content_understanding_real_browser_chain() {
         outcome, 1,
         "a withheld L2 run keeps its raw output and rejections"
     );
+    // The calibration report queries must run on the real schema.
+    for sql in [
+        include_str!("../../../../scripts/sql/l2-calibration-usage.sql"),
+        include_str!("../../../../scripts/sql/l2-calibration-rejects.sql"),
+    ] {
+        let rows = sqlx::query(sql).fetch_all(db.pool()).await.unwrap();
+        assert!(
+            !rows.is_empty(),
+            "calibration query returned no rows: {sql}"
+        );
+    }
     assert_eq!(deep_calls, 2);
     db.pool().close().await;
 }
