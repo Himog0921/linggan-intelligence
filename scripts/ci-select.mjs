@@ -17,6 +17,7 @@ const paths = {
     'apps/worker/**', 'apps/pi-adapter/**', 'database/migrations/**',
     'scripts/runtime/**', 'scripts/local-runtime.sh',
     'scripts/test-research-dossier-postgres.sh', 'scripts/test-opportunity-postgres.sh',
+    'docs/data-contracts/deep-content-research/**', 'scripts/sql/l2-calibration-*.sql',
   ],
   material_reading: [
     'crates/evidence/src/ocr_adoption*', 'crates/evidence/src/ocr_adoption/**',
@@ -62,6 +63,8 @@ const paths = {
     'database/migrations/0198_content_understanding_deep.sql',
     'database/migrations/0199_content_understanding_model_deep.sql',
     'database/migrations/0224_content_understanding_deep_v2.sql',
+    'database/migrations/0225_content_understanding_deep_outcome.sql',
+    'scripts/sql/l2-calibration-*.sql',
     'crates/intelligence/src/content_understanding*', 'crates/intelligence/src/content_understanding/**',
     'crates/intelligence/src/ai_foundation/content_understanding*',
     'crates/intelligence/src/ai_foundation/content_understanding/**',

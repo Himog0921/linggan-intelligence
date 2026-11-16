@@ -9,6 +9,13 @@ pub(crate) const INVALID: &str = "ai_output_invalid";
 pub(crate) const INSUFFICIENT: &str = "content_understanding_deep_insufficient_evidence";
 pub(crate) const REJECTED_EXCESS: &str = "content_understanding_deep_rejected_excess";
 
+/// A run that is not published. Kept with the raw output for evaluation.
+#[derive(Debug)]
+pub(crate) struct Withheld {
+    pub(crate) code: &'static str,
+    pub(crate) rejected: Value,
+}
+
 pub(crate) const BANNED_PATTERNS: [&str; 14] = [
     "标题要有吸引力",
     "内容要有情绪",
@@ -391,8 +398,11 @@ pub(crate) fn accept(
     card: &Value,
     manifest: &Value,
     sub_questions: &[SubQuestion],
-) -> Result<(Value, Value, Value), &'static str> {
-    let draft: Draft = serde_json::from_str(text).map_err(|_| INVALID)?;
+) -> Result<(Value, Value, Value), Withheld> {
+    let draft: Draft = serde_json::from_str(text).map_err(|_| Withheld {
+        code: INVALID,
+        rejected: json!([]),
+    })?;
     let materials = materials(manifest);
     let expected: BTreeSet<&str> = sub_questions
         .iter()
@@ -457,15 +467,15 @@ pub(crate) fn accept(
             }
         }
     }
-    if published.is_empty() {
-        return if total == 0 {
-            Err(INSUFFICIENT)
-        } else {
-            Err(REJECTED_EXCESS)
-        };
-    }
-    if failed * 3 > total {
-        return Err(REJECTED_EXCESS);
+    if published.is_empty() || failed * 3 > total {
+        return Err(Withheld {
+            code: if total == 0 {
+                INSUFFICIENT
+            } else {
+                REJECTED_EXCESS
+            },
+            rejected: Value::Array(rejected),
+        });
     }
     let answered_with_finding: BTreeSet<&str> = published
         .iter()
@@ -504,11 +514,17 @@ pub(crate) fn payload(
         .into_iter()
         .flatten()
         .map(|material| {
-            json!({
+            let mut value = json!({
                 "id":material["id"],"materialKind":material["materialKind"],
                 "text":material["text"],"timeStartMs":material["timeStartMs"],
                 "timeEndMs":material["timeEndMs"]
-            })
+            });
+            // The Skill tells the model to treat model_read evidence as a description,
+            // not source text; it can only do that if the marker is sent.
+            if let Some(kind) = material["evidenceKind"].as_str() {
+                value["evidenceKind"] = json!(kind);
+            }
+            value
         })
         .collect();
     json!({
@@ -694,11 +710,15 @@ mod tests {
         .unwrap();
         assert_eq!(published.as_array().unwrap().len(), 2);
         assert_eq!(rejected.as_array().unwrap().len(), 1);
-        assert_eq!(
-            accept(&draft(vec![finding(), bad.clone(), bad]), &card(), &manifest(), &questions())
-                .unwrap_err(),
-            REJECTED_EXCESS
-        );
+        let withheld = accept(
+            &draft(vec![finding(), bad.clone(), bad]),
+            &card(),
+            &manifest(),
+            &questions(),
+        )
+        .unwrap_err();
+        assert_eq!(withheld.code, REJECTED_EXCESS);
+        assert_eq!(withheld.rejected.as_array().unwrap().len(), 2);
     }
 
     #[test]
@@ -749,10 +769,26 @@ mod tests {
     }
 
     #[test]
+    fn payload_marks_model_read_evidence_only_where_present() {
+        let sent = payload(
+            "问题",
+            "content_design",
+            None,
+            &questions(),
+            &card(),
+            &manifest(),
+        );
+        assert_eq!(sent["materials"][1]["evidenceKind"], json!("model_read"));
+        assert!(sent["materials"][0].get("evidenceKind").is_none());
+    }
+
+    #[test]
     fn empty_draft_with_insufficient_status_is_not_a_failure() {
         let text = json!({"subQuestionStatus":[{"id":"Q1","status":"insufficient","reason":"no_visual_material","note":"没有图片"}],"findings":[]}).to_string();
         assert_eq!(
-            accept(&text, &card(), &manifest(), &questions()).unwrap_err(),
+            accept(&text, &card(), &manifest(), &questions())
+                .unwrap_err()
+                .code,
             INSUFFICIENT
         );
     }

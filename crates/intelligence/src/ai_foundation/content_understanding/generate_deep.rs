@@ -29,6 +29,28 @@ pub struct GenerateDeep {
     task_revision: i64,
 }
 
+/// Start-time admission, mirroring L1 `reasons()`: report a non-High model or an
+/// oversized input now instead of letting the executor defer the item.
+fn start_reasons(
+    thinking: &str,
+    limit: i32,
+    system: &str,
+    body: &Value,
+    images: usize,
+) -> Vec<String> {
+    let mut reasons = Vec::new();
+    if thinking != "high" {
+        reasons.push("content_understanding_requires_high".into());
+    }
+    if crate::ai_foundation::transport::estimate_input_tokens(system, &body.to_string())
+        + images as u64 * 1024
+        > limit as u64
+    {
+        reasons.push("input_too_large".into());
+    }
+    reasons
+}
+
 pub async fn generate_deep(db: &Database, r: &GenerateDeep) -> Result<Receipt, FoundationError> {
     let research_mode = r.research_mode.trim();
     let base_mode = r
@@ -80,6 +102,35 @@ pub async fn generate_deep(db: &Database, r: &GenerateDeep) -> Result<Receipt, F
         &core_basis,
     )
     .map_err(|_| FoundationError::Invalid)?;
+    let limits: Option<(String, i32)> = sqlx::query_as("SELECT m.thinking_level,m.input_token_limit FROM linggan_ai_task_config c JOIN linggan_model_config m ON m.config_ref=c.model_config_ref WHERE c.task_config_ref=$1")
+        .bind(config).fetch_optional(&mut *c.tx).await?;
+    if let Some((thinking, limit)) = limits {
+        let (_, mut system, instruction, skill) =
+            crate::ai_foundation::prompt::frozen_in(&mut c.tx, config, TASK).await?;
+        if let Some(skill) = skill {
+            system.push_str("\n\n");
+            system.push_str(&skill);
+        }
+        let mut body = super::deep_v2::payload(
+            &question,
+            research_mode,
+            base_mode,
+            &r.sub_questions,
+            &card,
+            &manifest,
+        );
+        body["instruction"] = json!(instruction);
+        let images = manifest
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter(|material| matches!(material["materialKind"].as_str(), Some("cover" | "image")))
+            .count();
+        let reasons = start_reasons(&thinking, limit, &system, &body, images);
+        if !reasons.is_empty() {
+            return Err(FoundationError::AdmissionDenied(reasons));
+        }
+    }
     let existing = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,c.failure_code
         FROM linggan_content_understanding_deep_request r JOIN linggan_ai_batch_item_control c USING(item_ref)
         WHERE r.core_ref=$1 AND r.domain_ref=$2 AND r.input_fingerprint=$3
@@ -226,7 +277,7 @@ impl FrozenDeep {
         &self,
         text: &str,
         card: &Value,
-    ) -> Result<(Value, Value, Value), &'static str> {
+    ) -> Result<(Value, Value, Value), super::deep_v2::Withheld> {
         super::deep_v2::accept(text, card, &self.input_manifest, &self.sub_questions)
     }
 
@@ -253,5 +304,31 @@ impl FrozenDeep {
         tx: &mut Transaction<'_, Postgres>,
     ) -> Result<(), FoundationError> {
         deep::lock_core(tx, self.core).await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn start_reasons_accept_a_high_model_within_the_limit() {
+        assert!(start_reasons("high", 100_000, "系统", &json!({"q":"问"}), 0).is_empty());
+    }
+
+    #[test]
+    fn start_reasons_report_a_non_high_model() {
+        assert_eq!(
+            start_reasons("medium", 100_000, "系统", &json!({"q":"问"}), 0),
+            vec!["content_understanding_requires_high".to_string()]
+        );
+    }
+
+    #[test]
+    fn start_reasons_reserve_each_image_against_the_limit() {
+        assert_eq!(
+            start_reasons("high", 1000, "系统", &json!({"q":"问"}), 1),
+            vec!["input_too_large".to_string()]
+        );
     }
 }

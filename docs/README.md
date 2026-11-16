@@ -39,9 +39,14 @@
 
 ## 2026-11-15 · L2 单篇深入研究 V0.3
 
-- [V0.3 研究方法与实施规范](plans/active/deep-content-research-v03.md)：三种研究模式共用一个 L2 Skill（附 Skill 正文草案）、子问题与逐条判定、材料清单与指纹、Core 版本绑定、召回与一致率评测；第 1.2 节 M1–M6 已由 Mog 确认，待工程合同审查，未实施。
-- [V0.3 合同审查报告](audits/deep-content-research-v03-contract-review-2026-11-16.md)：18 条事实核对、冲突清单、迁移/API/测试方案与 PR 拆分；`first_version` 已不可用、Core 版本绑定需补锁；待 Mog 批准实施计划。
+- [V0.3 研究方法与实施规范](plans/active/deep-content-research-v03.md)：三种研究模式共用一个 L2 Skill（附 Skill 正文草案）、子问题与逐条判定、材料清单与指纹、Core 版本绑定、召回与一致率评测；第 1.2 节 M1–M6 已由 Mog 确认；已实施（#598–#602、#604），Skill 包为草案待 Mog 评审，尚未开启 L2。
+- [V0.3 合同审查报告](audits/deep-content-research-v03-contract-review-2026-11-16.md)：18 条事实核对、冲突清单、迁移/API/测试方案与 PR 拆分；`first_version` 已不可用、Core 版本绑定需补锁；已完成，第 15 节 8 个问题已于 2026-11-16 决定。
 - [V0.2 原稿](archive/plans/deep-content-research-v02.md)：历史归档，已被 V0.3 替代。
+- [L2 Skill 方法](data-contracts/deep-content-research/skill/content-deep-research/SKILL.md)：单篇深入研究的工作顺序、断言性质、证据与自检；草案，待 Mog 评审，未导入运行库。
+- [L2 模式 content_design](data-contracts/deep-content-research/skill/content-deep-research/modes/content-design.md)：内容设计模式的观察方向与常见错误。
+- [L2 模式 content_value](data-contracts/deep-content-research/skill/content-deep-research/modes/content-value.md)：内容价值模式的观察方向与必须区分的内容。
+- [L2 模式 creation_method](data-contracts/deep-content-research/skill/content-deep-research/modes/creation-method.md)：创作方法模式的前提、application 六字段与合格标准。
+- [L2 Finding Type 定义](data-contracts/deep-content-research/skill/content-deep-research/references/finding-types.md)：六种 findingType 的定义与合成例子。
 
 ## 2026-11-10 · 统一内容理解 L1 开发
 

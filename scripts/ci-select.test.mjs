@@ -15,6 +15,15 @@ test('ordinary documentation needs only preflight, including deletions', () => {
   assert.deepEqual(selected(['docs/README.md', 'docs/current-state.md', 'docs/plans/active/example.md', 'README.md']), []);
 });
 
+test('the L2 Skill package selects the AI proof that inspects it', () => {
+  assert.deepEqual(selected(['docs/data-contracts/deep-content-research/skill/content-deep-research/SKILL.md']), ['ai']);
+});
+
+test('L2 calibration queries select the AI and browser proofs that execute them', () => {
+  const chosen = selected(['scripts/sql/l2-calibration-usage.sql']);
+  assert.ok(chosen.includes('ai') && chosen.includes('web'), chosen.join(','));
+});
+
 test('governance, delivery infrastructure and unknown paths select every proof', () => {
   for (const path of [
     'AGENTS.md', 'CLAUDE.md', 'codx.md', 'Cargo.toml', 'Cargo.lock', '.nvmrc',

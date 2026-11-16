@@ -169,7 +169,7 @@ async fn settle(
     let success = accepted.as_ref().is_some_and(Result::is_ok);
     let failure = accepted
         .as_ref()
-        .and_then(|result| result.as_ref().err().copied())
+        .and_then(|result| result.as_ref().err().map(|withheld| withheld.code))
         .or_else(|| {
             research_call::failure(
                 response,
@@ -178,6 +178,21 @@ async fn settle(
                 "content_understanding_publication_withheld",
             )
         });
+    // A judged but unpublished output keeps its raw text and rejections for
+    // evaluation; provider failures and changed material (no judgment) do not.
+    if let (Some(Err(withheld)), Some(text)) = (
+        accepted.as_ref(),
+        response.filter(|r| r.ok).and_then(|r| r.text.as_deref()),
+    ) {
+        sqlx::query("INSERT INTO linggan_content_understanding_deep_outcome(invocation_ref,request_ref,failure_code,raw_output,rejected) VALUES($1,$2,$3,$4,$5)")
+            .bind(call.invocation)
+            .bind(request)
+            .bind(withheld.code)
+            .bind(text)
+            .bind(&withheld.rejected)
+            .execute(&mut *tx)
+            .await?;
+    }
     if let Some(Ok((findings, rejected, statuses))) = accepted {
         frozen
             .publish_in(
