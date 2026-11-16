@@ -178,8 +178,9 @@ pub(crate) fn build(
         }
         images += 1;
         let id = format!("M{:02}", materials.len() + 1);
+        let material_kind = if cover { "cover" } else { "image" };
         materials.push(json!({
-            "id":id,"materialKind":if cover {"cover"} else {"image"},
+            "id":id,"materialKind":material_kind,
             "sourceRef":image.source_ref,"sourceVersion":image.source_version,
             "inputCitationId":image.citation_id,
             "text":null,"timeStartMs":null,"timeEndMs":null,"mediaSha256":image.blob_sha256
@@ -225,13 +226,17 @@ pub(crate) fn build(
         .iter()
         .map(|material| {
             let text = material["text"].as_str().unwrap_or_default();
+            let text_sha256 = if text.is_empty() {
+                Value::Null
+            } else {
+                json!(content_hash(&normalized_text(text)))
+            };
             json!({
                 "id":material["id"],"materialKind":material["materialKind"],
                 "sourceRef":material["sourceRef"],"sourceVersion":material["sourceVersion"],
                 "inputCitationId":material["inputCitationId"],
                 "timeStartMs":material["timeStartMs"],"timeEndMs":material["timeEndMs"],
-                "mediaSha256":material["mediaSha256"],
-                "textSha256":if text.is_empty() {Value::Null} else {json!(content_hash(&normalized_text(text)))}
+                "mediaSha256":material["mediaSha256"],"textSha256":text_sha256
             })
         })
         .collect();
