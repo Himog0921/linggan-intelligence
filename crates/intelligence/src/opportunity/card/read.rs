@@ -9,13 +9,18 @@ use sqlx::{Postgres, Row, Transaction};
 use std::collections::BTreeSet;
 use uuid::Uuid;
 
-// Only these relations are read when listing or returning an existing card.
+// Each reader signs only the relations it actually reads (D-061).
 const CARD_READ_TABLES: &[&str] = &[
     "linggan_material_comment_restriction",
     "linggan_opportunity_opportunity_card",
     "linggan_opportunity_problem",
     "linggan_opportunity_problem_lineage",
-    "linggan_opportunity_problem_metric_period",
+];
+const LIST_READ_TABLES: &[&str] = &[
+    "linggan_material_comment_restriction",
+    "linggan_opportunity_opportunity_card",
+    "linggan_opportunity_problem",
+    "linggan_opportunity_problem_lineage",
     "observation_domain",
 ];
 
@@ -41,6 +46,8 @@ pub enum OpportunityReadError {
     LineageConflict,
     #[error("opportunity_card_source_unavailable")]
     SourceUnavailable,
+    #[error("opportunity_period_snapshot_unavailable")]
+    PeriodSnapshotUnavailable,
     #[error("opportunity_read_model_invalid")]
     InvalidModel,
 }
@@ -225,6 +232,64 @@ struct StoredCard {
     card: read_model::Card,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PeriodMatchGroup {
+    protocol_version: Option<i32>,
+    evidence_tier: read_model::EvidenceTier,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct PeriodIndexEntry {
+    period_start: String,
+    protocol_version: Option<i32>,
+    evidence_tier: read_model::EvidenceTier,
+}
+
+fn tier_matches(tier: read_model::EvidenceTier, requested: Option<&str>) -> bool {
+    requested.is_none_or(|requested| {
+        matches!(
+            (tier, requested),
+            (read_model::EvidenceTier::Candidate, "candidate")
+                | (read_model::EvidenceTier::Established, "established")
+                | (read_model::EvidenceTier::Significant, "significant")
+        )
+    })
+}
+
+fn valid_period_date(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    if bytes.len() != 10
+        || bytes[4] != b'-'
+        || bytes[7] != b'-'
+        || !bytes
+            .iter()
+            .enumerate()
+            .all(|(i, b)| i == 4 || i == 7 || b.is_ascii_digit())
+    {
+        return false;
+    }
+    let Ok(year) = value[0..4].parse::<u32>() else {
+        return false;
+    };
+    let Ok(month) = value[5..7].parse::<u32>() else {
+        return false;
+    };
+    let Ok(day) = value[8..10].parse::<u32>() else {
+        return false;
+    };
+    let leap = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0);
+    let max_day = match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if leap => 29,
+        2 => 28,
+        _ => return false,
+    };
+    year != 0 && (1..=max_day).contains(&day)
+}
+
 async fn load_card(
     tx: &mut Transaction<'_, Postgres>,
     problem: Uuid,
@@ -290,23 +355,20 @@ pub async fn read_card(
     serde_json::to_value(stored.card).map_err(|_| OpportunityReadError::InvalidModel)
 }
 
-const LIST_SQL: &str = "SELECT p.problem_ref,c.input_fingerprint FROM linggan_opportunity_opportunity_card c \
+const LIST_SQL: &str = "SELECT p.problem_ref,c.input_fingerprint, \
+ CASE WHEN $2::text IS NULL THEN NULL ELSE c.period_index END AS period_index, \
+ CASE WHEN $2::text IS NULL THEN NULL ELSE c.payload END AS period_payload \
+ FROM linggan_opportunity_opportunity_card c \
  JOIN linggan_opportunity_problem p USING(problem_ref) WHERE p.domain_ref=$1 \
  AND NOT EXISTS(SELECT 1 FROM linggan_opportunity_problem_lineage l WHERE l.from_problem_ref=p.problem_ref AND l.relation IN ('merge','rename','split')) \
  AND ($4::text IS NULL OR c.payload#>>'{supply,state}'=$4) \
- AND (($2::text IS NULL AND ($3::text IS NULL OR EXISTS(SELECT 1 FROM jsonb_array_elements(c.payload#>'{demand,groups}') g WHERE g->>'evidenceTier'=$3))) \
-   OR ($2::text IS NOT NULL AND EXISTS(SELECT 1 FROM linggan_opportunity_problem_metric_period m \
-       WHERE m.problem_ref=p.problem_ref AND m.taxonomy_version=c.taxonomy_version AND m.metric_def_version=c.metric_def_version \
-       AND m.computed_as_of=c.as_of AND m.period_start::text=$2 AND ($3::text IS NULL OR m.evidence_tier=$3)))) \
+ AND ($2::text IS NOT NULL OR $3::text IS NULL OR EXISTS(SELECT 1 FROM jsonb_array_elements(c.payload#>'{demand,groups}') g WHERE g->>'evidenceTier'=$3)) \
  ORDER BY p.problem_ref";
 
-/// List current cards using a stable, query-bound cursor.
-pub async fn read_opportunities(
-    database: &Database,
+fn validate_list_query(
     domain: Uuid,
     query: &OpportunityListQuery,
-) -> Result<Value, OpportunityReadError> {
-    let limit = page_limit(query.limit)?;
+) -> Result<(), OpportunityReadError> {
     if domain.is_nil()
         || query
             .tier
@@ -325,25 +387,17 @@ pub async fn read_opportunities(
     {
         return Err(OpportunityReadError::InvalidQuery);
     }
-    let scope = scope(
-        json!({"domain":domain,"period":query.period,"tier":query.tier,"supplyState":query.supply_state}),
-    )?;
-    let prior = previous("opportunity-list", query.cursor.as_deref(), &scope)?;
-    let mut tx = begin(database).await?;
-    let captured = card_snapshot(&mut tx).await?;
-    let as_of = accepted_as_of(prior.as_ref(), captured)?;
-    let domain_exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)")
-            .bind(domain)
-            .fetch_one(&mut *tx)
-            .await?;
-    if !domain_exists {
-        return Err(OpportunityReadError::NotFound);
-    }
-    if let Some(period) = &query.period {
+    Ok(())
+}
+
+async fn validate_list_period(
+    tx: &mut Transaction<'_, Postgres>,
+    period: Option<&str>,
+) -> Result<(), OpportunityReadError> {
+    if let Some(period) = period {
         let valid = sqlx::query_scalar::<_, bool>("SELECT ($1::date)::text=$1")
             .bind(period)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await
             .map_err(|error| {
                 match error
@@ -359,6 +413,104 @@ pub async fn read_opportunities(
             return Err(OpportunityReadError::InvalidQuery);
         }
     }
+    Ok(())
+}
+
+fn matching_period_groups(
+    row: &sqlx::postgres::PgRow,
+    period: &str,
+    tier: Option<&str>,
+    digest: &str,
+) -> Result<Vec<PeriodMatchGroup>, OpportunityReadError> {
+    let raw: Option<Value> = row.try_get("period_index")?;
+    let raw = raw.ok_or(OpportunityReadError::PeriodSnapshotUnavailable)?;
+    let index: Vec<PeriodIndexEntry> =
+        serde_json::from_value(raw.clone()).map_err(|_| OpportunityReadError::InvalidModel)?;
+    if index.is_empty() {
+        return Err(OpportunityReadError::InvalidModel);
+    }
+    let mut keys = BTreeSet::new();
+    if index.iter().any(|entry| {
+        !valid_period_date(&entry.period_start)
+            || entry.protocol_version.is_some_and(|version| version <= 0)
+            || !keys.insert((&entry.period_start, entry.protocol_version))
+    }) {
+        return Err(OpportunityReadError::InvalidModel);
+    }
+    let payload: Value = row.try_get("period_payload")?;
+    let encoded =
+        serde_json::to_vec(&(&payload, &raw)).map_err(|_| OpportunityReadError::InvalidModel)?;
+    if fingerprint(&encoded) != digest {
+        return Err(OpportunityReadError::PeriodSnapshotUnavailable);
+    }
+    Ok(index
+        .into_iter()
+        .filter(|entry| entry.period_start == period && tier_matches(entry.evidence_tier, tier))
+        .map(|entry| PeriodMatchGroup {
+            protocol_version: entry.protocol_version,
+            evidence_tier: entry.evidence_tier,
+        })
+        .collect())
+}
+
+type ListEntry = (Uuid, Option<Vec<PeriodMatchGroup>>);
+
+fn list_entries(
+    rows: Vec<sqlx::postgres::PgRow>,
+    query: &OpportunityListQuery,
+) -> Result<(Vec<ListEntry>, String), OpportunityReadError> {
+    let mut key_data = Vec::new();
+    let mut entries = Vec::with_capacity(rows.len());
+    for row in rows {
+        let id: Uuid = row.try_get("problem_ref")?;
+        let digest: String = row.try_get("input_fingerprint")?;
+        let groups = if let Some(period) = &query.period {
+            let groups = matching_period_groups(&row, period, query.tier.as_deref(), &digest)?;
+            if groups.is_empty() {
+                continue;
+            }
+            Some(groups)
+        } else {
+            None
+        };
+        key_data.extend_from_slice(id.as_bytes());
+        key_data.extend_from_slice(digest.as_bytes());
+        let encoded =
+            serde_json::to_vec(&groups).map_err(|_| OpportunityReadError::InvalidModel)?;
+        let len = u64::try_from(encoded.len()).map_err(|_| OpportunityReadError::InvalidModel)?;
+        key_data.extend_from_slice(&len.to_be_bytes());
+        key_data.extend_from_slice(&encoded);
+        entries.push((id, groups));
+    }
+    Ok((entries, fingerprint(&key_data)))
+}
+
+/// List current cards using a stable, query-bound cursor.
+pub async fn read_opportunities(
+    database: &Database,
+    domain: Uuid,
+    query: &OpportunityListQuery,
+) -> Result<Value, OpportunityReadError> {
+    let limit = page_limit(query.limit)?;
+    validate_list_query(domain, query)?;
+    let scope = scope(
+        json!({"domain":domain,"period":query.period,"tier":query.tier,"supplyState":query.supply_state}),
+    )?;
+    let prior = previous("opportunity-list", query.cursor.as_deref(), &scope)?;
+    let mut tx = begin(database).await?;
+    let tables = LIST_READ_TABLES;
+    let (captured, _) = snapshot::capture_for(&mut tx, tables).await?;
+    snapshot::require_visible_restrictions(&mut tx).await?;
+    let as_of = accepted_as_of(prior.as_ref(), captured)?;
+    let domain_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM observation_domain WHERE domain_ref=$1)")
+            .bind(domain)
+            .fetch_one(&mut *tx)
+            .await?;
+    if !domain_exists {
+        return Err(OpportunityReadError::NotFound);
+    }
+    validate_list_period(&mut tx, query.period.as_deref()).await?;
     let rows = sqlx::query(LIST_SQL)
         .bind(domain)
         .bind(&query.period)
@@ -366,16 +518,7 @@ pub async fn read_opportunities(
         .bind(&query.supply_state)
         .fetch_all(&mut *tx)
         .await?;
-    let mut key_data = Vec::new();
-    let mut ids = Vec::with_capacity(rows.len());
-    for row in rows {
-        let id: Uuid = row.try_get("problem_ref")?;
-        let digest: String = row.try_get("input_fingerprint")?;
-        key_data.extend_from_slice(id.as_bytes());
-        key_data.extend_from_slice(digest.as_bytes());
-        ids.push(id);
-    }
-    let version = fingerprint(&key_data);
+    let (entries, version) = list_entries(rows, query)?;
     if prior
         .as_ref()
         .is_some_and(|prior| prior.last.fingerprint != version)
@@ -383,30 +526,127 @@ pub async fn read_opportunities(
         return Err(OpportunityReadError::PageChanged);
     }
     let start = prior.as_ref().map_or(0, |prior| {
-        ids.partition_point(|id| *id <= prior.last.reference)
+        entries.partition_point(|(id, _)| *id <= prior.last.reference)
     });
-    let end = start.saturating_add(limit).min(ids.len());
+    let end = start.saturating_add(limit).min(entries.len());
     let mut items = Vec::with_capacity(end - start);
-    for id in &ids[start..end] {
+    let mut matches = Vec::new();
+    for (id, groups) in &entries[start..end] {
         items.push(load_card(&mut tx, *id).await?.card);
+        if let Some(period) = &query.period {
+            let groups = groups.as_ref().ok_or(OpportunityReadError::InvalidModel)?;
+            matches.push(json!({"problemId":id,"periodStart":period,"groups":groups}));
+        }
     }
-    let next = if end < ids.len() {
+    let next = if end < entries.len() {
         Some(page_cursor(
             "opportunity-list",
             &scope,
             &as_of,
-            ids[end - 1],
+            entries[end - 1].0,
             end,
             version,
         )?)
     } else {
         None
     };
-    snapshot::verify_for(&mut tx, CARD_READ_TABLES).await?;
+    snapshot::verify_for(&mut tx, tables).await?;
     tx.commit().await?;
-    Ok(
-        json!({"domainRef":domain,"items":items,"page":{"limit":limit,"hasMore":next.is_some(),"nextCursor":next,"asOf":as_of}}),
+    let mut result = json!({"domainRef":domain,"items":items,"page":{"limit":limit,"hasMore":next.is_some(),"nextCursor":next,"asOf":as_of}});
+    if query.period.is_some() {
+        result["periodMatches"] = json!(matches);
+    }
+    Ok(result)
+}
+
+type EvidencePage = (Vec<Value>, Value, String, usize);
+
+async fn source_evidence_page(
+    tx: &mut Transaction<'_, Postgres>,
+    stored: &StoredCard,
+    problem: Uuid,
+    as_of: &str,
+    kind: EvidenceKind,
+    start: usize,
+    limit: usize,
+) -> Result<EvidencePage, OpportunityReadError> {
+    let raw: Value = sqlx::query_scalar(
+        "SELECT params FROM linggan_opportunity_metric_definition WHERE version=$1",
     )
+    .bind(stored.card.versions.metric_def)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(OpportunityReadError::InvalidModel)?;
+    let params = crate::opportunity::metric_definition::parse_params(raw)
+        .map_err(|_| OpportunityReadError::InvalidModel)?;
+    let source_kind = if matches!(kind, EvidenceKind::Comments) {
+        voices::PageKind::Comments
+    } else {
+        voices::PageKind::Works
+    };
+    let page = voices::select_page(
+        tx,
+        &voices::SourceScope {
+            domain: stored.domain,
+            problem,
+            taxonomy: stored.card.versions.taxonomy,
+            as_of,
+            tz: &params.period_tz,
+            basis: context::basis(&params),
+        },
+        start,
+        limit,
+        source_kind,
+    )
+    .await
+    .map_err(|error| match error {
+        voices::SourcePageError::Card(error) => OpportunityReadError::Snapshot(error),
+        voices::SourcePageError::SourceSelectionChanged => OpportunityReadError::SourceUnavailable,
+    })?;
+    let version = fingerprint(
+        &serde_json::to_vec(&json!({
+            "card":stored.fingerprint,"source":page.fingerprint,"kind":kind
+        }))
+        .map_err(|_| OpportunityReadError::InvalidModel)?,
+    );
+    Ok((
+        page.items,
+        serde_json::to_value(page.excluded).map_err(|_| OpportunityReadError::InvalidModel)?,
+        version,
+        page.total,
+    ))
+}
+
+fn creator_evidence_page(
+    stored: &StoredCard,
+    start: usize,
+    limit: usize,
+) -> Result<EvidencePage, OpportunityReadError> {
+    let mut items = Vec::new();
+    for group in &stored.card.channel.groups {
+        for (section, creators) in [
+            ("ranked", &group.ranked),
+            ("insufficient", &group.insufficient),
+        ] {
+            for creator in creators {
+                items.push(json!({"protocolVersion":group.protocol_version,"section":section,"creator":creator}));
+            }
+        }
+    }
+    let exclusions = json!({});
+    let version = fingerprint(
+        &serde_json::to_vec(&json!({
+            "card":stored.fingerprint,"items":items,"exclusions":exclusions
+        }))
+        .map_err(|_| OpportunityReadError::InvalidModel)?,
+    );
+    let total = items.len();
+    Ok((
+        items.into_iter().skip(start).take(limit).collect(),
+        exclusions,
+        version,
+        total,
+    ))
 }
 
 /// Return qualified comment sources, their works, or protocol-separated creator evidence.
@@ -419,87 +659,38 @@ pub async fn read_evidence(
     let scope = scope(json!({"problem":requested,"kind":query.kind}))?;
     let prior = previous("opportunity-evidence", query.cursor.as_deref(), &scope)?;
     let mut tx = begin(database).await?;
-    let (captured, _) = snapshot::capture(&mut tx).await?;
+    let evidence_tables = snapshot::evidence_read_tables();
+    let tables = if matches!(query.kind, EvidenceKind::Creators) {
+        CARD_READ_TABLES
+    } else {
+        &evidence_tables
+    };
+    let (captured, _) = snapshot::capture_for(&mut tx, tables).await?;
     snapshot::require_visible_restrictions(&mut tx).await?;
     let as_of = accepted_as_of(prior.as_ref(), captured)?;
     let problem = resolve(&mut tx, requested).await?;
     let stored = load_card(&mut tx, problem).await?;
-    let (items, exclusions) = match query.kind {
+    let start = prior.as_ref().map_or(Ok(0), |prior| {
+        usize::try_from(prior.last.offset).map_err(|_| OpportunityReadError::InvalidCursor)
+    })?;
+    let (items, exclusions, version, total) = match query.kind {
         EvidenceKind::Comments | EvidenceKind::Works => {
-            let raw: Value = sqlx::query_scalar(
-                "SELECT params FROM linggan_opportunity_metric_definition WHERE version=$1",
-            )
-            .bind(stored.card.versions.metric_def)
-            .fetch_optional(&mut *tx)
-            .await?
-            .ok_or(OpportunityReadError::InvalidModel)?;
-            let params = crate::opportunity::metric_definition::parse_params(raw)
-                .map_err(|_| OpportunityReadError::InvalidModel)?;
-            let (voices, exclusions) = voices::select_all(
-                &mut tx,
-                stored.domain,
-                problem,
-                stored.card.versions.taxonomy,
-                &as_of,
-                &params.period_tz,
-                context::basis(&params),
-            )
-            .await?;
-            let items = if matches!(query.kind, EvidenceKind::Comments) {
-                voices
-                    .into_iter()
-                    .map(|voice| {
-                        serde_json::to_value(voice).map_err(|_| OpportunityReadError::InvalidModel)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?
-            } else {
-                voices
-                    .into_iter()
-                    .map(|voice| voice.work_id)
-                    .collect::<BTreeSet<_>>()
-                    .into_iter()
-                    .map(|work| json!({"workId":work,"basis":"comment_mention"}))
-                    .collect()
-            };
-            (
-                items,
-                serde_json::to_value(exclusions).map_err(|_| OpportunityReadError::InvalidModel)?,
-            )
+            source_evidence_page(&mut tx, &stored, problem, &as_of, query.kind, start, limit)
+                .await?
         }
-        EvidenceKind::Creators => {
-            let mut items = Vec::new();
-            for group in &stored.card.channel.groups {
-                for (section, creators) in [
-                    ("ranked", &group.ranked),
-                    ("insufficient", &group.insufficient),
-                ] {
-                    for creator in creators {
-                        items.push(json!({"protocolVersion":group.protocol_version,"section":section,"creator":creator}));
-                    }
-                }
-            }
-            (items, json!({}))
-        }
+        EvidenceKind::Creators => creator_evidence_page(&stored, start, limit)?,
     };
-    let bytes = serde_json::to_vec(
-        &json!({"card":stored.fingerprint,"items":items,"exclusions":exclusions}),
-    )
-    .map_err(|_| OpportunityReadError::InvalidModel)?;
-    let version = fingerprint(&bytes);
     if prior
         .as_ref()
         .is_some_and(|prior| prior.last.reference != problem || prior.last.fingerprint != version)
     {
         return Err(OpportunityReadError::PageChanged);
     }
-    let start = prior.as_ref().map_or(Ok(0), |prior| {
-        usize::try_from(prior.last.offset).map_err(|_| OpportunityReadError::InvalidCursor)
-    })?;
-    if start > items.len() {
+    if start > total {
         return Err(OpportunityReadError::InvalidCursor);
     }
-    let end = start.saturating_add(limit).min(items.len());
-    let next = if end < items.len() {
+    let end = start.saturating_add(limit).min(total);
+    let next = if end < total {
         Some(page_cursor(
             "opportunity-evidence",
             &scope,
@@ -511,11 +702,10 @@ pub async fn read_evidence(
     } else {
         None
     };
-    let page_items = &items[start..end];
     let result = json!({"problem":{"id":problem,"redirectedFrom":(requested!=problem).then_some(requested)},
-        "kind":query.kind,"cardAsOf":stored.card.as_of,"items":page_items,"excluded":exclusions,
+        "kind":query.kind,"cardAsOf":stored.card.as_of,"items":items,"excluded":exclusions,
         "page":{"limit":limit,"hasMore":next.is_some(),"nextCursor":next,"asOf":as_of}});
-    snapshot::verify(&mut tx).await?;
+    snapshot::verify_for(&mut tx, tables).await?;
     tx.commit().await?;
     Ok(result)
 }

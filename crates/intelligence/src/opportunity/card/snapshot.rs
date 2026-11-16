@@ -63,6 +63,15 @@ const SOURCE_TABLES: &[&str] = &[
     "observation_domain_target",
 ];
 
+/// Evidence reads never inspect model invocations; keep their writers out of the lock set.
+pub(super) fn evidence_read_tables() -> Vec<&'static str> {
+    SOURCE_TABLES
+        .iter()
+        .copied()
+        .filter(|table| *table != "linggan_model_invocation")
+        .collect()
+}
+
 /// Capture the wall clock while all known card sources are locked. Rolling
 /// back only this savepoint releases the locks but preserves the outer RR
 /// snapshot, so the subsequent card calculation uses that same view.

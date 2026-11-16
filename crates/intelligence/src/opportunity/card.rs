@@ -472,16 +472,30 @@ async fn save(
     card: &model::Card,
 ) -> Result<(), CardError> {
     let payload = serde_json::to_value(card)?;
-    let fingerprint: String = Sha256::digest(serde_json::to_vec(&payload)?)
+    let period_index: Option<serde_json::Value> = sqlx::query_scalar(
+        "SELECT jsonb_agg(jsonb_build_object('periodStart',period_start::text, \
+         'protocolVersion',protocol_version,'evidenceTier',evidence_tier) \
+         ORDER BY period_start,protocol_version NULLS LAST) \
+         FROM linggan_opportunity_problem_metric_period WHERE problem_ref=$1 \
+         AND taxonomy_version=$2 AND metric_def_version=$3 AND computed_as_of=$4::timestamptz",
+    )
+    .bind(problem)
+    .bind(taxonomy)
+    .bind(version)
+    .bind(as_of)
+    .fetch_one(&mut **tx)
+    .await?;
+    let period_index = period_index.ok_or(CardError::MissingMetrics)?;
+    let fingerprint: String = Sha256::digest(serde_json::to_vec(&(&payload, &period_index))?)
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect();
-    let result = sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint) \
-        VALUES($1,$2,$3::timestamptz,$4,$5,$6) ON CONFLICT(problem_ref) DO UPDATE SET \
+    let result = sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint,period_index) \
+        VALUES($1,$2,$3::timestamptz,$4,$5,$6,$7) ON CONFLICT(problem_ref) DO UPDATE SET \
         payload=EXCLUDED.payload,as_of=EXCLUDED.as_of,built_at=clock_timestamp(),taxonomy_version=EXCLUDED.taxonomy_version,\
-        metric_def_version=EXCLUDED.metric_def_version,input_fingerprint=EXCLUDED.input_fingerprint \
+        metric_def_version=EXCLUDED.metric_def_version,input_fingerprint=EXCLUDED.input_fingerprint,period_index=EXCLUDED.period_index \
         WHERE linggan_opportunity_opportunity_card.as_of<=EXCLUDED.as_of")
-        .bind(problem).bind(payload).bind(as_of).bind(taxonomy).bind(version).bind(fingerprint)
+        .bind(problem).bind(payload).bind(as_of).bind(taxonomy).bind(version).bind(fingerprint).bind(period_index)
         .execute(&mut **tx).await?;
     if result.rows_affected() != 1 {
         return Err(CardError::NewerResultExists);

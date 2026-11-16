@@ -154,6 +154,10 @@ fn failure(error: OpportunityReadError) -> Response {
             StatusCode::SERVICE_UNAVAILABLE,
             "opportunity_card_source_unavailable",
         ),
+        OpportunityReadError::PeriodSnapshotUnavailable => (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "opportunity_period_snapshot_unavailable",
+        ),
         OpportunityReadError::Snapshot(CardError::SourcesBusy) => (
             StatusCode::SERVICE_UNAVAILABLE,
             "opportunity_card_sources_busy",
@@ -323,6 +327,7 @@ mod tests {
     #[tokio::test]
     #[ignore = "owned PostgreSQL proof; synthetic cards only"]
     async fn enabled_routes_return_cards_and_guard_changed_pages() {
+        use sha2::{Digest, Sha256};
         let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("owned proof URL");
         let db = linggan_storage_postgres::testing::isolated_proof_schema(
             &url,
@@ -339,12 +344,18 @@ mod tests {
         .unwrap();
         let first = Uuid::new_v4();
         let second = Uuid::new_v4();
+        let index = json!([{"periodStart":"2026-11-02","protocolVersion":null,"evidenceTier":"significant"}]);
         for id in [first, second] {
             sqlx::query("INSERT INTO linggan_opportunity_problem(problem_ref,source_ref,source_definition_ref,domain_ref,label) VALUES($1,$1,$2,$3,'synthetic problem')")
                 .bind(id).bind(Uuid::new_v4()).bind(domain).execute(db.pool()).await.unwrap();
             payload["problem"]["id"] = json!(id);
-            sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint) VALUES($1,$2,$3::timestamptz,1,1,repeat('a',64))")
-                .bind(id).bind(&payload).bind(payload["asOf"].as_str().unwrap())
+            let fingerprint: String =
+                Sha256::digest(serde_json::to_vec(&(&payload, &index)).unwrap())
+                    .iter()
+                    .map(|byte| format!("{byte:02x}"))
+                    .collect();
+            sqlx::query("INSERT INTO linggan_opportunity_opportunity_card(problem_ref,payload,as_of,taxonomy_version,metric_def_version,input_fingerprint,period_index) VALUES($1,$2,$3::timestamptz,1,1,$4,$5)")
+                .bind(id).bind(&payload).bind(payload["asOf"].as_str().unwrap()).bind(fingerprint).bind(&index)
                 .execute(db.pool()).await.unwrap();
         }
         let app = routes(true).with_state(LocalWebState {
@@ -366,6 +377,20 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{result}");
         assert_eq!(result["items"].as_array().unwrap().len(), 1);
 
+        let historical = format!(
+            "/api/local/opportunity/domains/{domain}/opportunities?period=2026-11-02&tier=significant&limit=1"
+        );
+        let (status, matched) = call(app.clone(), "GET", &historical).await;
+        assert_eq!(status, StatusCode::OK, "{matched}");
+        assert_eq!(
+            matched["periodMatches"][0]["groups"][0]["evidenceTier"],
+            "significant"
+        );
+        assert_eq!(
+            matched["items"][0]["demand"]["groups"][0]["evidenceTier"],
+            "established"
+        );
+
         let list = format!("/api/local/opportunity/domains/{domain}/opportunities?limit=1");
         let (status, page) = call(app.clone(), "GET", &list).await;
         assert_eq!(status, StatusCode::OK, "{page}");
@@ -380,6 +405,9 @@ mod tests {
         let (status, changed) = call(app.clone(), "GET", &format!("{list}&cursor={next}")).await;
         assert_eq!(status, StatusCode::CONFLICT, "{changed}");
         assert_eq!(changed["code"], "opportunity_page_changed");
+        let (status, stale) = call(app.clone(), "GET", &historical).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{stale}");
+        assert_eq!(stale["code"], "opportunity_period_snapshot_unavailable");
 
         sqlx::query("UPDATE linggan_opportunity_opportunity_card SET payload=jsonb_set(payload,'{demand,sampleVoices,0,commenterHash}',to_jsonb('private'::text),true) WHERE problem_ref=$1")
             .bind(first).execute(db.pool()).await.unwrap();
