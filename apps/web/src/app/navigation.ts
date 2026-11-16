@@ -1,5 +1,5 @@
 /** 全站唯一一级导航登记；WEB-REACT-001 H 后不再维护 Rust 页头副本。 */
-export type PrimarySurface = 'corpus' | 'collection' | 'topic' | 'settings' | 'ops';
+export type PrimarySurface = 'corpus' | 'collection' | 'topic' | 'settings' | 'ops' | 'opportunity';
 
 export interface PrimaryEntry {
   zh: string;

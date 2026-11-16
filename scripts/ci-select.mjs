@@ -153,6 +153,7 @@ paths.web_real_chain = [
   'apps/web/src/pages/workbench/draftChecks.ts',
   'apps/web/src/pages/topics/topicRequest.ts',
   'apps/web/src/pages/topics/TopicsPage.tsx',
+  'apps/web/src/pages/opportunity/**',
   // These scripts are launched by the Rust/PostgreSQL proof runners below.
   // A test-only edit must execute the test it changes.
   'apps/web/test/e2e/creators-real-chain.mjs',
@@ -163,6 +164,7 @@ paths.web_real_chain = [
   'apps/web/test/e2e/shell-layout.mjs',
   'apps/web/test/e2e/topic-workspace-real-chain.mjs',
   'apps/web/test/e2e/offline-preview.mjs',
+  'apps/web/test/e2e/opportunity-real-chain.mjs',
   'apps/web/test/e2e/ops-real-chain.mjs',
   'apps/web/test/e2e/research-dossier-v2.mjs',
   'apps/web/test/e2e/settings-real-chain.mjs',

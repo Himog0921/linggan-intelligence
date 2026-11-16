@@ -101,6 +101,28 @@ async fn registered_page_returns_the_react_entry_with_local_guard_headers() {
 }
 
 #[tokio::test]
+async fn opportunity_entry_remains_available_when_disabled() {
+    let dist = synthetic_dist(None, true);
+    let disabled = web(dist.clone(), "unknown");
+    assert_eq!(
+        send(disabled, "/opportunity", "127.0.0.1:3000").await.0,
+        StatusCode::OK
+    );
+    let mut config = WebAppConfig::new(dist, "unknown");
+    config.opportunity_enabled = true;
+    assert_eq!(
+        send(
+            routes_for(config),
+            "/opportunity?domain=synthetic",
+            "127.0.0.1:3000"
+        )
+        .await
+        .0,
+        StatusCode::OK
+    );
+}
+
+#[tokio::test]
 async fn settings_entry_redirects_to_the_models_page() {
     let router = web(synthetic_dist(None, true), "unknown");
     let (status, headers, _) = send(router, "/settings", "localhost:3000").await;

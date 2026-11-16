@@ -83,6 +83,8 @@ mod offline_preview;
 #[cfg(test)]
 mod offline_preview_tests;
 mod opportunity_api;
+#[cfg(test)]
+mod opportunity_browser_tests;
 mod ops;
 mod ops_api;
 mod ops_auth;

@@ -461,3 +461,29 @@
 - 远端 Delivery `43813837722` 的机会卡 PostgreSQL 用例 `shadow_versions_avoid_existing_numbers_and_follow_current_changes` 失败：该历史升级测试主动移除 0217 卡片表，但新迁移 0223 依赖该表。测试装配已同步排除 0223，业务迁移与指标规则不变；`bash /private/tmp/opportunity-t15-shadow-compat-proof.sh` 隔离重跑 `1 passed; 0 failed`，专用容器和卷已清理。最终 CI 以最终 head 为准。
 - `cargo clippy -p linggan-intelligence --lib --locked --no-deps` → exit 101，48 项既有 `too_many_lines` 错误，位置均不在本次修改的函数；本次新增长函数已拆分。追加 `-- -A clippy::too_many_lines` 后 exit 0、42 条警告；不将此结果称为严格 Clippy 通过，既有问题未修改。
 - 新迁移只在隔离测试中执行；未迁移或部署本机运行库与生产环境，未进行真实采集或模型外发。独立 review 和远端 CI 须针对 PR #592 的最终 head 核实，不沿用旧 head 的通过记录。
+
+## 2026-11-16 T1.6 / T1.7 页面工作包
+
+- 负责人授权一次实现机会首页、机会卡页面及现有只读接口接线，完成后统一 review 和测试；执行者 Codex，基线 `a343ba8f57ad0bc4194b63371a691be9592c1d5e`，分支 `codex/opportunity-t16-t17-page`，工作树 `.worktrees/opportunity-t16-t17-page`。
+- 负责人答复 Q-43/Q-44：周对比由服务端按同一已知协议计算并标明不可比较；三个入口连接现有用户问题、证据库与创作者并保留领域。R4、R5、R10、D-042/043/045/062 仍生效。
+- 本机运行服务与生产环境迁移、部署、真实采集和模型外发不在本次授权内；使用隔离合成数据验证，真实前端和业务验收不由合成证明代替。
+- 实现：特性开关启用时显示机会首页和卡片详情；领域选择、三个现有任务入口、按协议分组、需求／供给／渠道、依据分页和原声来源均接入现有接口。周对比在服务端使用既有指标和上海自然周计算；缺少协议、数据或当前周卡片时显示不可比较。领域内卡片与依据读取复用既有事务和来源限制；领域不匹配返回 404。
+- `cd apps/web && npm test` → `Test Files 172 passed (172); Tests 1788 passed (1788)`。首次全量测试发现新页面的三个尺寸未使用 LIDS 令牌，修正后完成上述全量重跑。`npm run typecheck && npm run lint && npm run lids:check` → exit 0，`LIDS sync: PASS`。
+- `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-final CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`；P1/P2/P3 均由手册合成数据生成并截图，三类依据经过真实 Axum 和隔离 PostgreSQL 读取；输出 `all synthetic reads passed; no writes or external requests`，容器和卷清理已验证。首页、P1/P2/P3 及其依据截图和合成报告保存于 `artifacts/private/opportunity-t16-t17-proof-20261116/`，不进入 Git。
+- `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-intelligence --lib --locked weekly_comparison_requires_same_known_protocol_and_current_week -- --test-threads=1` → `1 passed; 0 failed`。`cargo test -p linggan-api --locked opportunity_api::tests -- --test-threads=1` → `3 passed; 0 failed; 1 ignored`；忽略的隔离 PostgreSQL HTTP 测试单独运行通过。`cargo test -p linggan-api --locked opportunity_entry_is_available_only_when_enabled -- --test-threads=1` → `1 passed; 0 failed`。
+- `bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`。`node --test scripts/ci-select.test.mjs` → `21 pass; 0 fail`；新浏览器证明纳入现有真实链路及 CI 选择。改动 Rust 文件逐一执行 `rustfmt --edition 2024 --config skip_children=true --check` → exit 0；`git diff --check`、`bash -n scripts/test-web-app-postgres.sh` → exit 0。
+- 页面墓碑文案由 React 测试覆盖；当前标准合成数据未生成真实墓碑原声，截图只证明 P1/P2/P3 标准数据展示。状态：实现与隔离验证完成，独立 review、最终提交的远端 CI、合并、运行环境部署和真实业务验收仍待进行。
+
+### T1.6 / T1.7 独立审阅后的修正
+
+- 独立审阅基线 `a343ba8f`、候选 `39a90f4f`，发现四项本工作包问题：重读或依据读取失败后旧原声仍可能可见；`k` 去重人数被标成评论条数；开关关闭时直接访问未显示“未启用”；卡片与依据版本交错后可能无法恢复。
+- 已集中处理：卡片和依据重读期间隐藏旧正文，依据读取失败时隐藏卡片原声并要求重新读取；将 `k` 和 `n` 分别标明人数与评论数；关闭开关仍提供页面并显示“机会卡未启用”；依据缓存绑定卡片时点并在版本冲突后重置。未引入实时推送，页面保持开启且没有触发重读时，不会主动获知其他窗口发生的来源变化。
+- `cd apps/web && npm run typecheck && npm run lint && npm test -- --run src/pages/opportunity/OpportunityPage.test.tsx` → `9 passed; 0 failed`；包括延迟重读、依据失败、版本交错与开关关闭。`cd apps/web && npm test` → `Test Files 172 passed (172); Tests 1793 passed (1793)`。
+- `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target cargo test -p linggan-api --locked opportunity_entry_remains_available_when_disabled -- --test-threads=1` → `1 passed; 0 failed`。审阅增量 Rust 文件 `rustfmt --edition 2024 --config skip_children=true --check` → exit 0。
+- `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-reviewed CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`；P1/P2/P3、三类依据及隔离清理再次通过；私有截图已更新为审阅后页面。
+- 后续状态：需对本次修正做独立增量复核，并核实最终提交的远端 CI；尚未合并、部署或进行真实业务验收。
+
+- 对 `39a90f4f..19d918cf` 的独立增量复核确认人数标签、关闭开关直达和版本恢复已解决；同时指出首次读取依据挂起时，父级代表原声仍可能可见。现将依据状态提升为整张卡片共用：首次读取、重读、依据与卡片时点不一致时均隐藏代表原声；依据失败仍要求重新读取卡片。
+- `cd apps/web && npm run typecheck && npm run lint && npm test -- --run src/pages/opportunity/OpportunityPage.test.tsx` → `10 passed; 0 failed`。`cd apps/web && npm test` → `Test Files 172 passed (172); Tests 1794 passed (1794)`。
+- `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-final-head CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`，P1/P2/P3 和三类依据读取通过，隔离容器和卷已清理；私有截图已更新。
+- 对代码提交 `ccc73a1f` 的独立定点复核确认前述四项问题均已处理；复核未自行运行测试。依据重读成功后父级原声恢复的条件已静态核对，尚无该细节的单独断言。远端 CI 以 PR #597 最终提交的实际结果为准；合并、部署及真实业务验收不由本次测试推断。
