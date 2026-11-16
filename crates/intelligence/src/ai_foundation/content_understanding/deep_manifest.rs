@@ -177,7 +177,9 @@ pub(crate) fn build(
             break;
         }
         images += 1;
-        let id = format!("M{:02}", materials.len() + 1);
+        // The adapter labels sent images image_1..image_n, so the manifest uses
+        // the same identity instead of an unrelated sequence number.
+        let id = format!("image_{images}");
         let material_kind = if cover { "cover" } else { "image" };
         materials.push(json!({
             "id":id,"materialKind":material_kind,

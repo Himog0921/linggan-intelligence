@@ -131,7 +131,7 @@ async fn content_understanding_real_browser_chain() {
           (SELECT count(*) FROM linggan_model_invocation WHERE task_key='content_understanding_deep'),
           (SELECT count(*) FROM linggan_content_understanding_deep_request
              JOIN linggan_ai_batch_item_control USING(item_ref)
-             WHERE failure_code='ai_output_invalid' AND attempt_count=1)"
+             WHERE failure_code='content_understanding_deep_rejected_excess' AND attempt_count=1)"
     ).fetch_one(db.pool()).await.unwrap();
     assert_eq!(deep_counts, (1, 1, 2, 2, 1));
     assert_eq!(deep_calls, 2);
@@ -169,7 +169,7 @@ async fn configure_deep(
                     output_tokens: 1024,
                     timeout_seconds: 30,
                     attempts: 1,
-                    thinking_level: "off".into(),
+                    thinking_level: "high".into(),
                 },
             }),
             skill_version_ref: None,

@@ -37,8 +37,11 @@ pub(super) async fn prepare_with_images_in(
     mut input: Input<'_>,
     images: Vec<crate::pi_adapter::PiImage>,
 ) -> Result<Call, ExecutorError> {
-    let cfg: Uuid = sqlx::query_scalar(
-        "SELECT model_config_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
+    // The item stamp must equal the frozen config's execution contract; the
+    // domain contract (input.contract) can move ahead of it, e.g. L2 method v2
+    // while the queue handler contract stays v1.
+    let (cfg, stamp_contract): (Uuid, Option<String>) = sqlx::query_as(
+        "SELECT model_config_ref,execution_contract FROM linggan_ai_task_config WHERE task_config_ref=$1",
     )
     .bind(item.task_config_ref)
     .fetch_one(&mut **tx)
@@ -72,8 +75,11 @@ pub(super) async fn prepare_with_images_in(
         .as_object_mut()
         .ok_or(ExecutorError::Invalid)?
         .insert("instruction".into(), json!(instruction));
-    if item.task_key == crate::ai_foundation::TaskKey::ContentUnderstanding
-        && model.limits.thinking_level != "high"
+    if matches!(
+        item.task_key,
+        crate::ai_foundation::TaskKey::ContentUnderstanding
+            | crate::ai_foundation::TaskKey::ContentUnderstandingDeep
+    ) && model.limits.thinking_level != "high"
     {
         return Err(FoundationError::AdmissionDenied(vec![
             "content_understanding_requires_high".into(),
@@ -111,7 +117,7 @@ pub(super) async fn prepare_with_images_in(
  .bind(invocation).bind(model.connection_version_ref).bind(model.current_model_ref).bind(cfg).bind(hash).bind(reservation as i64).bind(item.task_config_ref).bind(item.batch_ref)
  .bind((item.position/linggan_contracts::ai_limits::AI_LIMITS.round_size+1) as i32).bind(admitted).bind(request.timeout_ms as f64/1000.0+10.0)
  .bind(egress).bind(json!({"producer":"ai-gen1-executor.v1","purpose":item.task_key.as_str(),"requestRef":input.reference,"methodVersion":input.contract,"promptVersion":prompt_version_ref})).bind(item.task_key.as_str()).execute(&mut **tx).await?;
-    let changed=sqlx::query("UPDATE linggan_ai_batch_item_control SET invocation_ref=$2,attempt_count=attempt_count+1,executed_config_ref=$3,executed_skill_version_ref=(SELECT skill_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$3),execution_contract=$4 WHERE item_ref=$1 AND attempt_count=0").bind(item.item_ref).bind(invocation).bind(item.task_config_ref).bind(input.contract).execute(&mut **tx).await?;
+    let changed=sqlx::query("UPDATE linggan_ai_batch_item_control SET invocation_ref=$2,attempt_count=attempt_count+1,executed_config_ref=$3,executed_skill_version_ref=(SELECT skill_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$3),execution_contract=$4 WHERE item_ref=$1 AND attempt_count=0").bind(item.item_ref).bind(invocation).bind(item.task_config_ref).bind(stamp_contract).execute(&mut **tx).await?;
     if changed.rows_affected() != 1 {
         return Err(ExecutorError::FenceLost);
     }

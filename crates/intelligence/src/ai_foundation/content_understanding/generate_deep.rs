@@ -11,9 +11,8 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sqlx::{Postgres, Row, Transaction};
 
-pub(crate) const METHOD: &str = "content-understanding.l2.model.v1";
-use super::deep_grounding::accept;
-pub(crate) use super::deep_grounding::{INSUFFICIENT_EVIDENCE, response_schema};
+pub(crate) const METHOD: &str = "content-understanding.l2.model.v2";
+pub(crate) use super::deep_v2::{INSUFFICIENT as INSUFFICIENT_EVIDENCE, response_schema};
 const TASK: TaskKey = TaskKey::ContentUnderstandingDeep;
 
 #[derive(Serialize, Deserialize)]
@@ -139,10 +138,16 @@ pub async fn generate_deep(db: &Database, r: &GenerateDeep) -> Result<Receipt, F
 }
 
 pub(crate) struct FrozenDeep {
-    domain: Uuid,
-    work: Uuid,
-    core: Uuid,
-    question: String,
+    pub(crate) domain: Uuid,
+    pub(crate) work: Uuid,
+    pub(crate) core: Uuid,
+    pub(crate) question: String,
+    pub(crate) research_mode: String,
+    pub(crate) base_mode: Option<String>,
+    pub(crate) sub_questions: Vec<SubQuestion>,
+    pub(crate) core_basis: Value,
+    pub(crate) input_manifest: Value,
+    pub(crate) input_fingerprint: String,
 }
 
 impl FrozenDeep {
@@ -154,7 +159,8 @@ impl FrozenDeep {
         item: Uuid,
     ) -> Result<Self, FoundationError> {
         let row = sqlx::query(
-            "SELECT r.domain_ref,r.core_ref,r.question,c.work_ref
+            "SELECT r.domain_ref,r.core_ref,r.question,r.research_mode,r.base_mode,
+              r.sub_questions,r.core_basis,r.input_manifest,r.input_fingerprint,c.work_ref
             FROM linggan_content_understanding_deep_request r
             JOIN linggan_content_understanding_result c ON c.request_ref=r.core_ref
             WHERE r.request_ref=$1 AND r.task_config_ref=$2 AND r.batch_ref=$3 AND r.item_ref=$4",
@@ -171,25 +177,57 @@ impl FrozenDeep {
             work: row.get("work_ref"),
             core: row.get("core_ref"),
             question: row.get("question"),
+            research_mode: row.get("research_mode"),
+            base_mode: row.get("base_mode"),
+            sub_questions: serde_json::from_value(row.get::<Value, _>("sub_questions"))
+                .map_err(|_| FoundationError::Invalid)?,
+            core_basis: row.get("core_basis"),
+            input_manifest: row.get("input_manifest"),
+            input_fingerprint: row.get("input_fingerprint"),
         })
     }
 
-    pub(crate) async fn card_in(
+    /// Current packet, Core card and its basis for the frozen request.
+    pub(crate) async fn packet_card_basis_in(
         &self,
         tx: &mut Transaction<'_, Postgres>,
-    ) -> Result<Option<Value>, FoundationError> {
-        match deep::current_card_in(tx, self.domain, self.work, self.core).await {
-            Err(FoundationError::NotFound) => Ok(None),
-            other => other,
-        }
+    ) -> Result<Option<(super::source::Packet, Value, Value)>, FoundationError> {
+        let cutoff = linggan_evidence::research_dossier::cutoff_in(tx, None).await?;
+        let packet = match super::source::load(tx, self.domain, self.work, &cutoff).await {
+            Ok(packet) => packet,
+            Err(FoundationError::NotFound) => return Ok(None),
+            Err(error) => return Err(error),
+        };
+        let Some((card, basis)) = deep::current_card_basis_in(
+            tx,
+            self.work,
+            self.core,
+            &packet.snapshot.material_snapshot_identity,
+        )
+        .await?
+        else {
+            return Ok(None);
+        };
+        Ok(Some((packet, card, basis)))
     }
 
     pub(crate) fn payload(&self, card: &Value) -> Value {
-        super::deep_grounding::payload(&self.question, card)
+        super::deep_v2::payload(
+            &self.question,
+            &self.research_mode,
+            self.base_mode.as_deref(),
+            &self.sub_questions,
+            card,
+            &self.input_manifest,
+        )
     }
 
-    pub(crate) fn accept(&self, text: &str, card: &Value) -> Result<Value, &'static str> {
-        accept(text, &self.question, card)
+    pub(crate) fn accept(
+        &self,
+        text: &str,
+        card: &Value,
+    ) -> Result<(Value, Value, Value), &'static str> {
+        super::deep_v2::accept(text, card, &self.input_manifest, &self.sub_questions)
     }
 
     pub(crate) async fn publish_in(
@@ -198,11 +236,15 @@ impl FrozenDeep {
         request: Uuid,
         invocation: Uuid,
         findings: Value,
+        rejected: Value,
+        sub_question_status: Value,
     ) -> Result<(), FoundationError> {
-        sqlx::query("INSERT INTO linggan_content_understanding_deep(analysis_ref,core_ref,domain_ref,method_version,question,findings,invocation_ref)
-            VALUES($1,$2,$3,$4,$5,$6,$7)")
+        sqlx::query("INSERT INTO linggan_content_understanding_deep(analysis_ref,core_ref,domain_ref,method_version,question,findings,invocation_ref,research_mode,sub_question_status,rejected)
+            VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)")
             .bind(request).bind(self.core).bind(self.domain).bind(METHOD).bind(&self.question)
-            .bind(findings).bind(invocation).execute(&mut **tx).await?;
+            .bind(findings).bind(invocation).bind(&self.research_mode)
+            .bind(sub_question_status).bind(rejected)
+            .execute(&mut **tx).await?;
         Ok(())
     }
 
