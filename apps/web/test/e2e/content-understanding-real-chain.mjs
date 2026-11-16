@@ -253,7 +253,8 @@ try {
     const generatedQuestion = '作者怎样安排材料和核对顺序？';
     const generatedStatement = '作者用材料示范核对步骤。';
     const generate = { commandRef: crypto.randomUUID(), domainRef: domain, workRef: work,
-      coreRef: card.analysisRef, question: generatedQuestion,
+      coreRef: card.analysisRef, researchMode: 'content_design',
+      subQuestions: [{ id: 'Q1', text: generatedQuestion }],
       taskConfigRef: fixture.deepConfigRef, taskRevision: fixture.deepRevision };
     const denied = await call(generatePath, 'POST', generate);
     assert.equal(denied.status, 409);
@@ -277,7 +278,8 @@ try {
       }
       throw new Error('单篇深化未在等待时间内结束');
     };
-    const bad = await call(generatePath, 'POST', { ...generate, commandRef: crypto.randomUUID(), question: '合成无效引用' });
+    const bad = await call(generatePath, 'POST', { ...generate, commandRef: crypto.randomUUID(),
+      subQuestions: [{ id: 'Q1', text: '合成无效引用' }] });
     assert.equal(bad.status, 202, JSON.stringify(bad.body));
     const badItem = await waitForDeep(bad.body.batchRef);
     assert.equal(badItem.state, 'failed');

@@ -1,10 +1,14 @@
-use super::{Command, Database, FoundationError, Receipt, TaskKey, Uuid, Value, admission, deep};
+use super::{
+    Command, Database, FoundationError, Receipt, TaskKey, Uuid, Value, admission, deep,
+    deep_manifest::{self, SubQuestion},
+};
 use crate::ai_foundation::{
     batch_store::{self, BatchInput, BatchKind, InputRef},
     store::valid_reason,
     task_config::lock_setting,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use sqlx::{Postgres, Row, Transaction};
 
 pub(crate) const METHOD: &str = "content-understanding.l2.model.v1";
@@ -19,17 +23,27 @@ pub struct GenerateDeep {
     domain_ref: Uuid,
     work_ref: Uuid,
     core_ref: Uuid,
-    question: String,
+    research_mode: String,
+    base_mode: Option<String>,
+    sub_questions: Vec<SubQuestion>,
     task_config_ref: Uuid,
     task_revision: i64,
 }
 
 pub async fn generate_deep(db: &Database, r: &GenerateDeep) -> Result<Receipt, FoundationError> {
+    let research_mode = r.research_mode.trim();
+    let base_mode = r
+        .base_mode
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let question = deep_manifest::validate_request(research_mode, base_mode, &r.sub_questions)
+        .map_err(|_| FoundationError::Invalid)?;
     if [r.command_ref, r.domain_ref, r.work_ref, r.core_ref]
         .iter()
         .any(Uuid::is_nil)
         || r.task_revision < 0
-        || !valid_reason(&r.question, 300)
+        || !valid_reason(&question, 300)
     {
         return Err(FoundationError::Invalid);
     }
@@ -47,19 +61,32 @@ pub async fn generate_deep(db: &Database, r: &GenerateDeep) -> Result<Receipt, F
     admission::check_queue_configuration(&mut c.tx, TASK, config, false).await?;
     admission::check_queue_input_scope(&mut c.tx, TASK, config, &input).await?;
     deep::lock_core(&mut c.tx, r.core_ref).await?;
-    if deep::current_card_in(&mut c.tx, r.domain_ref, r.work_ref, r.core_ref)
-        .await?
-        .is_none()
-    {
-        return Err(FoundationError::Conflict);
-    }
-    let question = r.question.trim();
+    let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut c.tx, None).await?;
+    let packet = super::source::load(&mut c.tx, r.domain_ref, r.work_ref, &cutoff).await?;
+    let (card, core_basis) = deep::current_card_basis_in(
+        &mut c.tx,
+        r.work_ref,
+        r.core_ref,
+        &packet.snapshot.material_snapshot_identity,
+    )
+    .await?
+    .ok_or(FoundationError::Conflict)?;
+    let (manifest, fingerprint) = deep_manifest::build(
+        &packet,
+        &card,
+        research_mode,
+        base_mode,
+        &r.sub_questions,
+        METHOD,
+        &core_basis,
+    )
+    .map_err(|_| FoundationError::Invalid)?;
     let existing = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,c.failure_code
         FROM linggan_content_understanding_deep_request r JOIN linggan_ai_batch_item_control c USING(item_ref)
-        WHERE r.core_ref=$1 AND r.domain_ref=$2 AND r.question=$3
+        WHERE r.core_ref=$1 AND r.domain_ref=$2 AND r.input_fingerprint=$3
           AND (c.state IN ('pending','running') OR c.failure_code='ai_dispatch_unknown')
         ORDER BY (c.failure_code IS NOT DISTINCT FROM 'ai_dispatch_unknown') DESC LIMIT 1")
-        .bind(r.core_ref).bind(r.domain_ref).bind(question).fetch_optional(&mut *c.tx).await?;
+        .bind(r.core_ref).bind(r.domain_ref).bind(&fingerprint).fetch_optional(&mut *c.tx).await?;
     if let Some(existing) = existing {
         if existing.get::<Option<String>, _>("failure_code").as_deref()
             == Some("ai_dispatch_unknown")
@@ -96,10 +123,12 @@ pub async fn generate_deep(db: &Database, r: &GenerateDeep) -> Result<Receipt, F
         .bind(batch)
         .fetch_one(&mut *c.tx)
         .await?;
-    sqlx::query("INSERT INTO linggan_content_understanding_deep_request(request_ref,domain_ref,core_ref,question,task_config_ref,batch_ref,item_ref)
-        VALUES($1,$2,$3,$4,$5,$6,$7)")
-        .bind(r.command_ref).bind(r.domain_ref).bind(r.core_ref).bind(question).bind(config)
-        .bind(batch).bind(item).execute(&mut *c.tx).await?;
+    sqlx::query("INSERT INTO linggan_content_understanding_deep_request(request_ref,domain_ref,core_ref,question,task_config_ref,batch_ref,item_ref,research_mode,base_mode,sub_questions,core_basis,input_manifest,input_fingerprint)
+        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)")
+        .bind(r.command_ref).bind(r.domain_ref).bind(r.core_ref).bind(&question).bind(config)
+        .bind(batch).bind(item).bind(research_mode).bind(base_mode)
+        .bind(json!(&r.sub_questions)).bind(&core_basis).bind(&manifest).bind(&fingerprint)
+        .execute(&mut *c.tx).await?;
     c.finish(Receipt {
         request_ref: r.command_ref,
         batch_ref: batch,
