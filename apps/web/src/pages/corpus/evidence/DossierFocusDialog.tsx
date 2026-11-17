@@ -72,7 +72,7 @@ export function DossierFocusDialog({ title, groups, memoryKey, onClose }: { titl
     return () => dialog.removeEventListener('cancel', cancel, true);
   }
   return <ModalDialog labelledBy={id} className={`${styles.surface} ${styles.dialog} ${styles.focusDialog}`} onClose={onClose} closeOnBackdrop setup={menuCancelGuard}>
-    <header className={styles.modalHeader}><div><h2 id={id}><span className="v7-sr-only">视频口播 · </span>专注阅读</h2><p className={styles.focusTitle} title={title}>{title}</p></div><button type="button" className={styles.close} aria-label="返回底稿" onClick={onClose}><DossierIcon name="close"/></button></header>
+    <header className={styles.modalHeader}><div><h2 id={id}><span className="v7-sr-only">视频口播 ·</span>{' '}专注阅读</h2><p className={styles.focusTitle} title={title}>{title}</p></div><button type="button" className={styles.close} aria-label="返回底稿" onClick={onClose}><DossierIcon name="close"/></button></header>
     {times.length ? <div className={styles.focusTools}>
       <div className={styles.timeField}>
         <span className={styles.timeLabel}>跳到</span>
