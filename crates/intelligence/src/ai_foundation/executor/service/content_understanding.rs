@@ -5,8 +5,8 @@ use super::super::{
 };
 use crate::{
     ai_foundation::{
-        admission, batch_store::InputRef, content_understanding as owner, store::FoundationError,
-        transport::ResponseSchema,
+        admission, batch_store::InputRef, billing_pause, content_understanding as owner,
+        store::FoundationError, transport::ResponseSchema,
     },
     content_understanding::{self as contract, Generation, METHOD},
     model_invocation::finish_invocation_in,
@@ -14,7 +14,7 @@ use crate::{
     pi_adapter::{PiAdapter, PiRequest, PiResponse, safe_result},
 };
 use linggan_storage_postgres::Database;
-use serde_json::{Value, json};
+use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
@@ -126,25 +126,34 @@ async fn settle(
         created_at: versions.get("created_at"),
     };
     let mut validation = None;
-    let parsed = response
-        .filter(|r| r.ok)
-        .and_then(|r| r.text.as_deref())
-        .and_then(|s| serde_json::from_str::<Value>(s).ok())
-        .and_then(|draft| {
-            sources.as_ref().ok().and_then(
-                |packet| match contract::model_draft::accept_model_draft(
-                    draft,
-                    &packet.snapshot,
-                    &generation,
-                ) {
-                    Ok(result) => Some(result),
-                    Err(code) => {
-                        validation = Some(code);
-                        None
-                    }
-                },
-            )
-        });
+    let mut reply_repair = None;
+    let parsed = match (response.filter(|r| r.ok), sources.as_ref()) {
+        (Some(reply), Ok(packet)) => {
+            let complete = reply.diagnostic.as_ref().is_some_and(|d| {
+                d.terminal_received == Some(true)
+                    && d.finish_reason.as_deref() == Some("stop")
+                    && d.limit_kind.is_none()
+            });
+            let checked =
+                contract::reply::parse(reply.text.as_deref().unwrap_or_default(), complete)
+                    .and_then(|(draft, repair)| {
+                        reply_repair = repair;
+                        contract::model_draft::accept_model_draft(
+                            draft,
+                            &packet.snapshot,
+                            &generation,
+                        )
+                    });
+            match checked {
+                Ok(result) => Some(result),
+                Err(code) => {
+                    validation = Some(code);
+                    None
+                }
+            }
+        }
+        _ => None,
+    };
     let allowed = !cancelled
         && sources.is_ok()
         && admission::check_queue_configuration(&mut tx, item.task_key, item.task_config_ref, true)
@@ -171,6 +180,9 @@ async fn settle(
     if let Some(code) = validation {
         metadata["validationCode"] = json!(code);
     }
+    if let Some(repair) = reply_repair {
+        metadata["replyRepair"] = json!(repair);
+    }
     metadata["executorReceipt"] = json!(item.lease_token);
     metadata["requestRef"] = json!(prepared.request_ref);
     metadata["promptVersion"] = json!(prepared.prompt_version_ref);
@@ -188,6 +200,16 @@ async fn settle(
         &metadata,
     )
     .await?;
+    if response.is_some_and(|r| {
+        !r.ok
+            && r.diagnostic.as_ref().is_some_and(|d| {
+                d.http_status == Some(402)
+                    && d.request_sent == Some(true)
+                    && d.response_started == Some(true)
+            })
+    }) {
+        billing_pause::record(&mut tx, prepared.invocation).await?;
+    }
     let output = json!({"requestRef":prepared.request_ref,"methodVersion":METHOD});
     receipt::write_item_in(
         &mut tx,

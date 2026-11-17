@@ -23,6 +23,11 @@ pub fn accept_model_draft(
     snapshot: &Snapshot,
     generation: &Generation,
 ) -> Result<Value, &'static str> {
+    if draft.get("evidenceCandidates").is_none()
+        && draft.pointer("/core/evidenceCandidates").is_some()
+    {
+        return Err("misplaced_evidence_candidates");
+    }
     let result = accept_draft(draft.clone(), snapshot, generation, true, &BTreeSet::new())?;
     let unsupported = verify_literal_support(&result, snapshot)?;
     if unsupported.is_empty() {

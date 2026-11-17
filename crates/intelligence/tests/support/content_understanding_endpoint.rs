@@ -5,8 +5,12 @@ mod note_response;
 mod writing_wire;
 
 use serde_json::{Value, json};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
+};
 use tokio::{
+    io::AsyncWriteExt,
     net::TcpListener,
     sync::watch,
     task::{JoinHandle, JoinSet},
@@ -29,6 +33,7 @@ pub fn text(request: &Value, role: &str) -> String {
 pub struct Endpoint {
     pub url: String,
     pub requests: Arc<Mutex<Vec<Value>>>,
+    pub payment_required: Arc<AtomicBool>,
     stop: watch::Sender<bool>,
     task: JoinHandle<()>,
 }
@@ -38,6 +43,8 @@ impl Endpoint {
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let recorded = requests.clone();
+        let payment_required = Arc::new(AtomicBool::new(false));
+        let reject = payment_required.clone();
         let (stop, mut stopping) = watch::channel(false);
         let task = tokio::spawn(async move {
             let mut clients = JoinSet::new();
@@ -47,11 +54,17 @@ impl Endpoint {
                     socket = listener.accept() => {
                         let (mut socket, _) = socket.unwrap();
                         let recorded = recorded.clone();
+                        let reject = reject.clone();
                         clients.spawn(async move {
                             // Reuse the bounded reader, synthetic-credential check and SSE
                             // response (including its actual wire model: synthetic-writing).
                             let request = writing_wire::read(&mut socket).await;
                             let prompt = text(&request, "user");
+                            if reject.load(Ordering::SeqCst) {
+                                recorded.lock().unwrap().push(request);
+                                socket.write_all(b"HTTP/1.1 402 Payment Required\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+                                return;
+                            }
                             let output = if prompt.contains("ai-probe.synthetic.v1") {
                                 json!({"lingganProbe":"ok"})
                             } else {
@@ -105,8 +118,12 @@ impl Endpoint {
                                     note_response::response(&packet)
                                 }
                             };
+                            let mut text = output.to_string();
+                            if output.get("core").is_some() {
+                                text.push('}');
+                            }
                             recorded.lock().unwrap().push(request);
-                            writing_wire::respond(&mut socket, &output.to_string()).await;
+                            writing_wire::respond(&mut socket, &text).await;
                         });
                     }
                 }
@@ -118,6 +135,7 @@ impl Endpoint {
         Self {
             url,
             requests,
+            payment_required,
             stop,
             task,
         }

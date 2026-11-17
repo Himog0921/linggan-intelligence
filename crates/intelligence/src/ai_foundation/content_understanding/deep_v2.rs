@@ -64,11 +64,37 @@ struct DraftStatus {
     reason: Option<String>,
     note: Option<String>,
 }
+/// One finding may answer several sub-questions. Accept a list, or one string such as
+/// "Q1,Q3" / "Q1、Q3" (the form models actually write), and keep an ordered, de-duplicated list.
+fn answer_ids<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Raw {
+        One(String),
+        Many(Vec<String>),
+    }
+    let parts: Vec<String> = match Raw::deserialize(deserializer)? {
+        Raw::One(text) => text
+            .split(|c: char| c == ',' || c == '，' || c == '、' || c == ';' || c == '；' || c.is_whitespace())
+            .map(str::to_string)
+            .collect(),
+        Raw::Many(list) => list,
+    };
+    let mut ids = Vec::new();
+    for part in parts {
+        let id = part.trim().to_string();
+        if !id.is_empty() && !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct DraftFinding {
     id: String,
-    answers: String,
+    #[serde(deserialize_with = "answer_ids")]
+    answers: Vec<String>,
     finding_type: String,
     assertion_kind: String,
     statement: String,
@@ -253,7 +279,8 @@ fn admit(
         serde_json::from_value(finding.clone()).map_err(|_| "assertion_rule")?;
     if finding["id"].as_str().is_none()
         || draft.id.trim().is_empty()
-        || !answered.contains(&draft.answers)
+        || draft.answers.is_empty()
+        || draft.answers.iter().any(|id| !answered.contains(id))
     {
         return Err("answers_unknown");
     }
@@ -479,7 +506,8 @@ pub(crate) fn accept(
     }
     let answered_with_finding: BTreeSet<&str> = published
         .iter()
-        .filter_map(|finding| finding["answers"].as_str())
+        .flat_map(|finding| finding["answers"].as_array().into_iter().flatten())
+        .filter_map(Value::as_str)
         .collect();
     for entry in status.values_mut() {
         if entry["status"] == json!("answered") {
@@ -557,7 +585,7 @@ pub(crate) fn response_schema() -> Value {
                 "required":["id","answers","findingType","assertionKind","statement","support"],
                 "properties":{
                     "id":{"type":"string"},
-                    "answers":{"type":"string"},
+                    "answers":{"type":"array","minItems":1,"items":{"type":"string"}},
                     "findingType":{"type":"string","enum":["hook","structure","value_delivery","expression_mechanism","engagement_hypothesis","transferable_method"]},
                     "assertionKind":{"type":"string","enum":["observation","author_claim","interpretation","hypothesis"]},
                     "statement":{"type":"string","maxLength":400},
@@ -766,6 +794,53 @@ mod tests {
                 .iter()
                 .all(|item| item["rejectCode"] == json!("over_limit"))
         );
+    }
+
+    fn two_questions() -> Vec<SubQuestion> {
+        vec![
+            SubQuestion { id: "Q1".into(), text: "正文怎么展开？".into() },
+            SubQuestion { id: "Q2".into(), text: "怎么调整？".into() },
+        ]
+    }
+    fn two_status_draft(findings: Vec<Value>) -> String {
+        json!({"subQuestionStatus":[{"id":"Q1","status":"answered"},{"id":"Q2","status":"answered"}],"findings":findings})
+            .to_string()
+    }
+    fn answering(id: &str, answers: Value) -> Value {
+        let mut value = good(id);
+        value["answers"] = answers;
+        value
+    }
+
+    #[test]
+    fn one_finding_may_answer_several_sub_questions_as_list_or_text() {
+        for answers in [json!(["Q1", "Q2"]), json!("Q1,Q2"), json!("Q1、Q2"), json!("Q1, Q2"), json!(["Q1", "Q2", "Q1"])] {
+            let text = two_status_draft(vec![answering("F1", answers.clone()), good("F2"), good("F3")]);
+            let (published, rejected, statuses) =
+                accept(&text, &card(), &manifest(), &two_questions()).unwrap();
+            assert_eq!(rejected, json!([]), "{answers}");
+            assert_eq!(published[0]["answers"], json!(["Q1", "Q2"]), "{answers}");
+            assert_eq!(published[1]["answers"], json!(["Q1"]));
+            assert_eq!(statuses[0]["status"], json!("answered"));
+            assert_eq!(statuses[1]["status"], json!("answered"), "Q2 is covered by F1");
+        }
+    }
+
+    #[test]
+    fn an_unknown_or_empty_answer_list_is_rejected() {
+        for answers in [json!(["Q1", "Q9"]), json!([]), json!(""), json!(" , ")] {
+            let text = two_status_draft(vec![good("F1"), good("F2"), answering("FB", answers.clone())]);
+            let (_, rejected, _) = accept(&text, &card(), &manifest(), &two_questions()).unwrap();
+            assert_eq!(rejected[0]["rejectCode"], json!("answers_unknown"), "{answers}");
+        }
+    }
+
+    #[test]
+    fn a_sub_question_marked_answered_without_a_finding_becomes_unsupported() {
+        let text = two_status_draft(vec![good("F1"), good("F2")]);
+        let (_, _, statuses) = accept(&text, &card(), &manifest(), &two_questions()).unwrap();
+        assert_eq!(statuses[0]["status"], json!("answered"));
+        assert_eq!(statuses[1]["status"], json!("unsupported"));
     }
 
     #[test]

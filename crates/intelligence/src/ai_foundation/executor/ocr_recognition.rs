@@ -297,6 +297,11 @@ pub async fn execute(
         Err(ExecutorError::Configuration(
             crate::ai_foundation::store::FoundationError::AdmissionDenied(reasons),
         )) => {
+            let billing_pause = crate::ai_foundation::billing_pause::REASON;
+            if reasons.iter().any(|reason| reason == billing_pause) {
+                item.defer(db, billing_pause).await?;
+                return Ok(());
+            }
             let code = if reasons.iter().any(|reason| reason == "ocr_context_changed") {
                 "ocr_context_changed"
             } else {

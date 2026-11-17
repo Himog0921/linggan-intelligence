@@ -104,9 +104,10 @@ async fn recover_in(
         created_at: row.get("generation_at"),
     };
     let raw: String = row.get("raw_output");
-    let draft = serde_json::from_str(&raw).map_err(|_| FoundationError::Invalid)?;
+    let (draft, repair) = contract::reply::parse(&raw, true)
+        .map_err(|code| FoundationError::AdmissionDenied(vec![code.into()]))?;
     let protocol: Option<String> = row.get("draft_protocol");
-    let result = match protocol.as_deref() {
+    let mut result = match protocol.as_deref() {
         None => contract::accept(draft, &packet.snapshot, &generation),
         Some(contract::model_draft::PROTOCOL) => {
             contract::model_draft::accept_model_draft(draft, &packet.snapshot, &generation)
@@ -114,6 +115,9 @@ async fn recover_in(
         Some(_) => return Err(FoundationError::Invalid),
     }
     .map_err(|code| FoundationError::AdmissionDenied(vec![code.to_owned()]))?;
+    if let Some(repair) = repair {
+        result["replyRepair"] = json!(repair);
+    }
     sqlx::query(
         "INSERT INTO linggan_content_understanding_offline_recovery
         (request_ref,work_ref,material_snapshot_identity,method_version,result,validator_revision)

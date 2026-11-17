@@ -183,3 +183,16 @@ it('底稿不活跃时不请求', () => {
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch); mount(false);
   expect(fetch).not.toHaveBeenCalled();
 });
+it('已有核心理解时提供深入研究入口，展开前不发出额外请求；缺少编号时不提供', async () => {
+  const withRef = saved();
+  (withRef.result.card as Record<string, unknown>).analysisRef = 'core-1';
+  const fetch = vi.fn(async () => response(withRef)); vi.stubGlobal('fetch', fetch);
+  mount();
+  expect(await screen.findByRole('button', { name: '发起深入研究' })).toBeVisible();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  cleanup();
+  vi.stubGlobal('fetch', vi.fn(async () => response(saved())));
+  mount();
+  await screen.findByText('来自同一张卡片的整篇摘要。');
+  expect(screen.queryByRole('button', { name: '发起深入研究' })).not.toBeInTheDocument();
+});

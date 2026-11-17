@@ -315,7 +315,8 @@ try {
     assert.equal(generated.deepAnalyses[0].methodVersion, 'content-understanding.l2.model.v2');
     const [generatedFinding] = generated.deepAnalyses[0].findings;
     assert.equal(generatedFinding.id, 'F1');
-    assert.equal(generatedFinding.answers, 'Q1');
+    // The model draft sends a single id as text; the stored finding keeps a list of sub-question ids.
+    assert.deepEqual(generatedFinding.answers, ['Q1']);
     assert.equal(generatedFinding.findingType, 'structure');
     assert.equal(generatedFinding.assertionKind, 'observation');
     assert.equal(generatedFinding.statement, generatedStatement);

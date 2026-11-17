@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 pub mod model_draft;
+pub(crate) mod reply;
 mod schema;
 pub use schema::response_schema;
 #[cfg(test)]

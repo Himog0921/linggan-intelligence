@@ -1,5 +1,8 @@
+import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ActionButton } from '../../../shared/ActionButton';
+import { DeepResearchLauncher } from './DeepResearchLauncher';
+import { DEEP_MODE_LABELS } from './deepResearchApi';
 import { isRecord, requestJson } from '../../../shared/api';
 import { parseMaterialReadiness } from './evidenceDecode';
 import { materialReadinessCopy } from './evidencePresent';
@@ -20,7 +23,7 @@ type Understanding = {
   deepAnalyses?: DeepAnalysis[];
   deepEvidence?: Record<string, string[]>;
   analysis: null | { state: string; failureCode: string | null; result: null | {
-    card: { core: { summary: { text: string }; knowledgeUnits: Unit[] } };
+    card: { analysisRef?: string; core: { summary: { text: string }; knowledgeUnits: Unit[] } };
   } };
 };
 const GROUPS = [
@@ -87,11 +90,20 @@ async function read(domain: string, work: string, asOf: string, signal: AbortSig
   return { analysis: analysis as Understanding['analysis'], materialReadiness, deepAnalyses, deepEvidence };
 }
 export function DossierUnderstanding({ domain, work, revision, asOf, active }: { domain: string; work: string; revision: string; asOf: string; active: boolean }) {
+  // After a deep request is submitted the page watches for one more published result, for a bounded time.
+  const [waiting, setWaiting] = useState<null | { count: number; expired: boolean }>(null);
+  const watching = waiting !== null && !waiting.expired;
+  useEffect(() => {
+    if (!watching) return;
+    const timer = window.setTimeout(() => setWaiting(current => current && { ...current, expired: true }), 10 * 60 * 1000);
+    return () => window.clearTimeout(timer);
+  }, [watching]);
   const query = useQuery({
     queryKey: ['content-understanding', domain, work, revision, asOf],
     queryFn: ({ signal }) => read(domain, work, asOf, signal), enabled: active, retry: false,
     gcTime: 0, refetchOnWindowFocus: false,
-    refetchInterval: q => ['pending', 'running'].includes(q.state.data?.analysis?.state ?? '') ? 1500 : false,
+    refetchInterval: q => ['pending', 'running'].includes(q.state.data?.analysis?.state ?? '') ? 1500
+      : watching && (q.state.data?.deepAnalyses?.length ?? 0) <= waiting.count ? 4000 : false,
   });
   const analysis = query.isError ? null : query.data?.analysis;
   const result = analysis?.result;
@@ -99,6 +111,8 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
   const deepEvidence = query.isError ? undefined : query.data?.deepEvidence;
   const materialReadiness = query.isError ? null : query.data?.materialReadiness;
   const readiness = materialReadinessCopy(materialReadiness);
+  const coreRef = result?.card.analysisRef;
+  const waitingExpired = waiting?.expired === true && (deepAnalyses?.length ?? 0) <= waiting.count;
   return <section className={styles.section} aria-label="整篇内容理解">
     <header className={styles.sectionIndex}><h2>作品概览</h2></header>
     <div className={styles.content}>
@@ -116,9 +130,13 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
           const units = result.card.core.knowledgeUnits.filter(u => u.unitType === type);
           return units.length ? <div key={type}><h3 className={styles.heading}>{title}</h3><ul className={styles.list}>{units.map(unit => <li key={unit.id}>{unit.statement}</li>)}</ul></div> : null;
         })}
+        {coreRef ? <DeepResearchLauncher domain={domain} work={work} coreRef={coreRef}
+          onSubmitted={() => { setWaiting({ count: deepAnalyses?.length ?? 0, expired: false }); void query.refetch(); }}/> : null}
+        {waitingExpired ? <p role="status">提交后一段时间内没有新的研究发现出现。可能仍在处理，也可能没有通过校验；稍后刷新页面再看。</p> : null}
         {deepAnalyses?.length ? <div>
           <h3 className={styles.heading}>研究发现</h3>
           {deepAnalyses.map(analysis => <div key={analysis.analysisRef}>
+            {analysis.researchMode ? <p className={styles.paragraph}>{`研究模式：${DEEP_MODE_LABELS[analysis.researchMode] ?? analysis.researchMode}`}</p> : null}
             <p className={styles.paragraph}>{analysis.question}</p>
             {analysis.coreBasis ? <p className={styles.paragraph}>
               {analysis.coreBasis.kind === 'revision' ? '基于某次修订' : '基于原始 Core'}

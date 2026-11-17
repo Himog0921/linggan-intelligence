@@ -929,6 +929,25 @@ fn response_schema_explains_closed_json_literal_quotes_and_image_local_evidence(
 }
 
 #[test]
+fn full_prompt_example_is_accepted_using_its_explicit_evidence() {
+    let (_, mut snapshot, generation) = text_only();
+    snapshot.texts[0].text = "先核对顺序，再摆出材料。".into();
+    let draft = response_schema()["examples"][0].clone();
+    assert!(model_draft::accept_model_draft(draft.clone(), &snapshot, &generation).is_ok());
+    let mut misplaced = draft;
+    let evidence = misplaced
+        .as_object_mut()
+        .unwrap()
+        .remove("evidenceCandidates")
+        .unwrap();
+    misplaced["core"]["evidenceCandidates"] = evidence;
+    assert_eq!(
+        model_draft::accept_model_draft(misplaced, &snapshot, &generation),
+        Err("misplaced_evidence_candidates")
+    );
+}
+
+#[test]
 fn missing_transcript_line_break_restores_the_exact_source_slice_and_anchor() {
     let (mut draft, mut snapshot, generation) = text_only();
     let source = &mut snapshot.texts[0];
