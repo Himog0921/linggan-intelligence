@@ -596,3 +596,5 @@
 | I7、I8 不变量 | `opportunity/invariants.rs` | `opportunity_metrics_postgres/card.rs::invariant_violations_prevent_metric_and_card_commits` | 新增 |
 
 - W4：历史记录发现 32 次临时脚本引用，已逐条索引；已有 17、新增 0、无法复现 2、待补 13。索引按原记录逐条登记，待补项未宣称已证明，见 [PROOF_INDEX](PROOF_INDEX.md)。
+
+- W7：按任务书记录 Q-45，阶段 1 暂不改变提及率口径；同时记录负责人已答复的 Q-49，限定 Clippy 的依赖告警处理。`rg -n '^## Q-(45|49)' docs/opportunity/QUESTIONS.md` 可定位两条记录。
