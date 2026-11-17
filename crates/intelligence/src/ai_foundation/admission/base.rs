@@ -64,7 +64,7 @@ pub(crate) async fn check_queue_configuration(
     }
     if task != TaskKey::ModelProbe {
         if row.get::<bool, _>("billing_paused") {
-            denied.push("model_connection_billing_paused".into());
+            denied.push(super::super::billing_pause::REASON.into());
         }
         if row.get::<Option<bool>, _>("connection_enabled") == Some(false) {
             denied.push("connection_disabled".into());
