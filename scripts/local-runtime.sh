@@ -537,7 +537,7 @@ migrate() {
   apply_migration_once "0223_opportunity_card_period_index" "$project_root/database/migrations/0223_opportunity_card_period_index.sql"
   apply_migration_once "0224_content_understanding_deep_v2" "$project_root/database/migrations/0224_content_understanding_deep_v2.sql"
   apply_migration_once "0225_content_understanding_deep_outcome" "$project_root/database/migrations/0225_content_understanding_deep_outcome.sql"
-  apply_migration_once "0226_opportunity_exclusion_precedence" "$project_root/database/migrations/0226_opportunity_exclusion_precedence.sql"
+  apply_migration_once "0227_opportunity_exclusion_precedence" "$project_root/database/migrations/0227_opportunity_exclusion_precedence.sql"
 }
 
 case "$command_name" in

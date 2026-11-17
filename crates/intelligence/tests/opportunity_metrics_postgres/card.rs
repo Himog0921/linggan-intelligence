@@ -1,7 +1,5 @@
 //! T1.4 standard snapshot, debounce and source-withdrawal proofs.
-use super::{
-    database, database_with_standard_creators, opportunity_creator_dataset, opportunity_dataset,
-};
+use super::{database, opportunity_creator_dataset, opportunity_dataset};
 use linggan_intelligence::opportunity::{
     CardError, CardRebuildMode, CommenterDigest, check_invariants, rebuild_opportunity_cards,
     sync_comment_mentions, sync_comment_mentions_for_domain,
@@ -10,7 +8,13 @@ use serde_json::Value;
 use uuid::Uuid;
 
 async fn prepare() -> (linggan_storage_postgres::Database, Uuid, CommenterDigest) {
-    let db = database_with_standard_creators(true).await;
+    prepare_with_migrations(super::full_schema_fixture::FULL_MIGRATIONS).await
+}
+
+async fn prepare_with_migrations(
+    migrations: &str,
+) -> (linggan_storage_postgres::Database, Uuid, CommenterDigest) {
+    let db = super::database_with_migrations(true, migrations).await;
     sqlx::raw_sql(r#"
       CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE
       AS $$ SELECT timestamptz '2026-11-10T00:00:00Z' $$;
@@ -125,6 +129,159 @@ async fn pending_change_is_a_read_only_stale_flag_for_card_and_list() {
         .await
         .unwrap();
     assert_eq!(stale(&read_card(&db, problem).await.unwrap()), 0);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn list_cursor_restarts_when_pending_card_state_changes() {
+    use linggan_intelligence::opportunity::{
+        OpportunityListQuery, OpportunityReadError, read_opportunities,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let mut query = OpportunityListQuery {
+        limit: Some(1),
+        ..Default::default()
+    };
+    let first = read_opportunities(&db, domain, &query).await.unwrap();
+    query.cursor = first["page"]["nextCursor"].as_str().map(str::to_owned);
+    assert!(query.cursor.is_some());
+    let second = read_opportunities(&db, domain, &query).await.unwrap();
+    assert_eq!(first["page"]["asOf"], second["page"]["asOf"]);
+    let item = &second["items"][0];
+    assert!(
+        !item["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "stale_read_model")
+    );
+    let problem = Uuid::parse_str(item["problem"]["id"].as_str().unwrap()).unwrap();
+    sqlx::query("INSERT INTO linggan_opportunity_card_change(problem_ref) VALUES ($1)")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &query).await,
+        Err(OpportunityReadError::PageChanged)
+    ));
+    query.cursor = None;
+    let refreshed = read_opportunities(&db, domain, &query).await.unwrap();
+    query.cursor = refreshed["page"]["nextCursor"].as_str().map(str::to_owned);
+    let changed = read_opportunities(&db, domain, &query).await.unwrap();
+    assert!(
+        changed["items"][0]["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "stale_read_model")
+    );
+    sqlx::query("DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &query).await,
+        Err(OpportunityReadError::PageChanged)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn exclusion_upgrade_requeues_existing_cards_and_rebuilds_counts() {
+    use linggan_intelligence::opportunity::read_card;
+    let migration =
+        include_str!("../../../../database/migrations/0227_opportunity_exclusion_precedence.sql");
+    let before = super::full_schema_fixture::FULL_MIGRATIONS
+        .replace(migration, "")
+        .lines()
+        .filter(|line| !line.contains("VALUES ('0227_opportunity_exclusion_precedence'"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (db, domain, digest) = prepare_with_migrations(&before).await;
+    let inserted = sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,restricted_at,reason) \
+         SELECT content_ref,comment_external_id,'2026-11-09T00:00:00Z','synthetic' \
+         FROM linggan_opportunity_comment_eligibility($1,'2026-11-10T00:00:00Z','Asia/Shanghai','work_published_cohort') \
+         WHERE exclusion_reason='work_author_unknown' LIMIT 1",
+    )
+    .bind(domain)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(inserted.rows_affected(), 1);
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let old = p1(&db).await;
+    sqlx::query("INSERT INTO linggan_opportunity_card_change(problem_ref,revision) VALUES($1,7)")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
+    let (problems, queued, revision): (i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM linggan_opportunity_problem), \
+         (SELECT count(*) FROM linggan_opportunity_card_change), \
+         (SELECT revision FROM linggan_opportunity_card_change WHERE problem_ref=$1)",
+    )
+    .bind(problem)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(queued, problems);
+    assert_eq!(revision, 7);
+    assert_eq!(p1(&db).await, old);
+    assert!(
+        read_card(&db, problem).await.unwrap()["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|flag| flag == "stale_read_model")
+    );
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let updated = p1(&db).await;
+    let count = |card: &Value, reason: &str| {
+        card["exclusions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["reason"] == reason)
+            .unwrap()["comments"]
+            .as_i64()
+            .unwrap()
+    };
+    assert_eq!(count(&updated, "restricted"), count(&old, "restricted") + 1);
+    assert_eq!(
+        count(&updated, "work_author_unknown"),
+        count(&old, "work_author_unknown") - 1
+    );
+    assert_eq!(
+        updated["demand"]["groups"][0]["current"]["n"],
+        old["demand"]["groups"][0]["current"]["n"]
+    );
+    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_card_change")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0);
+    assert!(
+        !read_card(&db, problem).await.unwrap()["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|flag| flag == "stale_read_model")
+    );
 }
 
 #[tokio::test]
@@ -676,6 +833,12 @@ async fn creator_evidence_does_not_lock_the_card_change_queue() {
         Err(OpportunityReadError::Snapshot(CardError::SourcesBusy))
     ));
     writer.rollback().await.unwrap();
+    assert!(read_card(&db, problem).await.is_ok());
+    assert!(
+        read_opportunities(&db, domain, &OpportunityListQuery::default())
+            .await
+            .is_ok()
+    );
 }
 
 #[tokio::test]

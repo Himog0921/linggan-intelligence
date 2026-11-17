@@ -23,14 +23,14 @@ async fn database() -> Database {
 }
 
 async fn database_with_standard_creators(standard_creators: bool) -> Database {
+    database_with_migrations(standard_creators, full_schema_fixture::FULL_MIGRATIONS).await
+}
+
+async fn database_with_migrations(standard_creators: bool, migrations: &str) -> Database {
     let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("disposable proof URL");
-    let db = isolated_proof_schema(
-        &url,
-        "opportunity_t12_metrics",
-        full_schema_fixture::FULL_MIGRATIONS,
-    )
-    .await
-    .expect("isolated schema");
+    let db = isolated_proof_schema(&url, "opportunity_t12_metrics", migrations)
+        .await
+        .expect("isolated schema");
     opportunity_dataset::build(&db).await.unwrap();
     if standard_creators {
         opportunity_creator_dataset::build_standard(&db)
@@ -523,7 +523,7 @@ async fn shadow_versions_avoid_existing_numbers_and_follow_current_changes() {
             "",
         )
         .replace(
-            include_str!("../../../database/migrations/0226_opportunity_exclusion_precedence.sql"),
+            include_str!("../../../database/migrations/0227_opportunity_exclusion_precedence.sql"),
             "",
         );
     let db = isolated_proof_schema(&url, "opportunity_t12_shadow_versions", &before)

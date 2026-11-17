@@ -679,3 +679,8 @@
 - W6/W10 的完整最终复验全部退出 0；前述首次工作台失败及其重跑结果仍保留，原因未确定。定向 Clippy 的 848 条为非目标诊断汇总，不代表全仓无告警。运行库和生产的不变量未执行，G1 真实任务未开始。
 
 - 最终主线核对：`git ls-remote origin refs/heads/main` → `11389187177321e8b4ed4ed8f53f09d09cbc5f2c`；`git merge-base --is-ancestor f730df8ab50a36217a0c0073717d3c69000d8af0 11389187177321e8b4ed4ed8f53f09d09cbc5f2c` → exit 0。与基线相比主线改动 13 个文件、与本分支改动重叠 0；主线迁移仍止于 0225，0226 编号未冲突。最终测试在原基线上的代码 `86f76b27` 执行，未声称在新主线整合后通过。最终文档检查前 `bash scripts/ci-preflight.sh f730df8ab50a36217a0c0073717d3c69000d8af0` → exit 0，输出 `Preflight passed; required module proofs and independent review remain separate.`
+
+## 2026-11-17 阶段 1 审查问题修复
+
+- 首页直接显示服务端卡片级质量标记；列表指纹纳入待重建状态，状态在翻页之间变化时沿用 `PageChanged`。补充 0225 有数据的机会卡迁移升级、重建和队列锁释放恢复测试。原 0226 编号下 `env -u LINGGAN_OPPORTUNITY_CARD bash scripts/test-opportunity-postgres.sh` → exit 0、25 组 132 passed / 0 failed，专用数据库、容器和卷清理通过；`npm --prefix apps/web run verify` → exit 0、172 文件 1797 passed；`node scripts/check-opportunity-clippy.mjs` → exit 0、机会卡诊断 0、其他诊断 952。
+- 修复期间远端 main 前进到 `3d16debdd4a3223181cb9a77c50f0f84b9c3d944`，占用 0226 为 `0226_ai_connection_billing_pause`。机会卡迁移此前未应用于运行库，按前向迁移规则重排为 0227，内容哈希不变；历史 0226 测试记录保留。整合 main 后需重新验证 0226→0227 有数据升级及运行登记。未执行运行库或生产迁移。

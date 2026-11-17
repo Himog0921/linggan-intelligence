@@ -61,11 +61,21 @@ describe('机会卡页面', () => {
     const table = await screen.findByRole('table', { name: '本周观察到上升的问题' });
     expect(within(table).getByRole('link', { name: '合成的用户问题' })).toHaveAttribute('href', `/opportunity?domain=${DOMAIN}&problem=${PROBLEM}`);
     expect(table).toHaveTextContent('采集协议 1'); expect(table).toHaveTextContent('上周 10');
+    expect(within(table).queryByText('读模型可能过期')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /查看用户问题/ })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}&view=problems`);
     expect(screen.getByRole('link', { name: /查看作品依据/ })).toHaveAttribute('href', `/corpus/evidence?domain=${DOMAIN}`);
     expect(screen.getByRole('link', { name: /查看创作者/ })).toHaveAttribute('href', `/corpus/creators?domain=${DOMAIN}`);
     expect(screen.getByText(/提及人数反映讨论热度/)).toBeVisible();
     expect(calls.find(url => url.pathname.endsWith('/opportunities'))?.searchParams.get('includeWeeklyComparison')).toBe('true');
+  });
+  it('首页直接显示服务端返回的卡片过期提示', async () => {
+    setup(`domain=${DOMAIN}`, url => {
+      if (!url.pathname.endsWith('/opportunities')) return undefined;
+      const card = fixture(); card.flags.push('stale_read_model');
+      return reply({ domainRef: DOMAIN, items: [card], weeklyComparisons: [{ problemId: PROBLEM, groups: [{ protocolVersion: 1, currentPeriodStart: '2026-11-09', previousPeriodStart: '2026-11-02', currentRatePer1k: 12, previousRatePer1k: 10, status: 'rising', reason: null }] }], page: { nextCursor: null, hasMore: false, asOf: card.asOf } });
+    });
+    const table = await screen.findByRole('table', { name: '本周观察到上升的问题' });
+    expect(within(table).getByText('读模型可能过期')).toBeVisible();
   });
   it('详情保留墓碑、未知作者和供给未评估，并按领域读取依据', async () => {
     const { calls } = setup(`domain=${DOMAIN}&problem=${PROBLEM}`);

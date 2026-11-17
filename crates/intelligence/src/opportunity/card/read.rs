@@ -408,11 +408,12 @@ async fn read_card_scoped(
     serde_json::to_value(stored.card).map_err(|_| OpportunityReadError::InvalidModel)
 }
 
-const LIST_SQL: &str = "SELECT p.problem_ref,c.input_fingerprint, \
+const LIST_SQL: &str = "SELECT p.problem_ref,c.input_fingerprint,(pending.problem_ref IS NOT NULL) AS has_pending_change, \
  CASE WHEN $2::text IS NULL THEN NULL ELSE i.period_index END AS period_index, \
  CASE WHEN $2::text IS NULL THEN NULL ELSE c.payload END AS period_payload \
  FROM linggan_opportunity_opportunity_card c \
  JOIN linggan_opportunity_problem p USING(problem_ref) \
+ LEFT JOIN linggan_opportunity_card_change pending ON pending.problem_ref=c.problem_ref \
  LEFT JOIN linggan_opportunity_card_period_index i ON i.problem_ref=c.problem_ref \
  AND i.card_fingerprint=c.input_fingerprint AND i.taxonomy_version=c.taxonomy_version \
  AND i.metric_def_version=c.metric_def_version WHERE p.domain_ref=$1 \
@@ -623,6 +624,7 @@ fn list_entries(
     for row in rows {
         let id: Uuid = row.try_get("problem_ref")?;
         let digest: String = row.try_get("input_fingerprint")?;
+        let pending: bool = row.try_get("has_pending_change")?;
         let groups = if let Some(period) = &query.period {
             let groups = matching_period_groups(&row, period, query.tier.as_deref(), &digest)?;
             if groups.is_empty() {
@@ -634,6 +636,7 @@ fn list_entries(
         };
         key_data.extend_from_slice(id.as_bytes());
         key_data.extend_from_slice(digest.as_bytes());
+        key_data.push(u8::from(pending));
         let encoded =
             serde_json::to_vec(&groups).map_err(|_| OpportunityReadError::InvalidModel)?;
         let len = u64::try_from(encoded.len()).map_err(|_| OpportunityReadError::InvalidModel)?;
