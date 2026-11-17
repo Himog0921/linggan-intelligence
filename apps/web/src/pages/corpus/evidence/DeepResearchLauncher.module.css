@@ -1,0 +1,6 @@
+.panel { display: grid; gap: var(--lgi-space-4); margin-block: var(--lgi-space-3); min-width: 0; }
+.group { display: grid; gap: var(--lgi-space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
+.label { padding: 0; color: var(--lgi-muted); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); }
+.row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--lgi-space-2); min-width: 0; }
+.question { flex: 1 1 16em; min-width: 0; min-height: var(--lgi-space-10); padding: 0 var(--lgi-space-3); border: 1px solid var(--lgi-border-strong); color: var(--lgi-ink); background: var(--lgi-canvas); font: var(--lgi-type-input-weight) var(--lgi-type-input-size) / var(--lgi-type-input-leading) var(--lgi-font-ui); }
+.question:focus-visible { outline: var(--lgi-focus-inset) solid var(--lgi-ink); outline-offset: 0; }
