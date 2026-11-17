@@ -57,6 +57,70 @@ async fn p1(db: &linggan_storage_postgres::Database) -> Value {
 
 #[tokio::test]
 #[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn pending_change_is_a_read_only_stale_flag_for_card_and_list() {
+    use linggan_intelligence::opportunity::{OpportunityListQuery, read_card, read_opportunities};
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let original = p1(&db).await;
+    let stale = |value: &Value| {
+        value["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|flag| *flag == "stale_read_model")
+            .count()
+    };
+    assert_eq!(stale(&read_card(&db, problem).await.unwrap()), 0);
+
+    let mut gate = db.pool().acquire().await.unwrap();
+    sqlx::query("SELECT pg_advisory_lock(linggan_opportunity_card_event_gate_key())")
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    let task = Uuid::new_v4();
+    let attempt = Uuid::new_v4();
+    let package = Uuid::new_v4();
+    let producer = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_runtime_task(task_id,task_spec_hash,task_spec,source,platform,page_type,created_at) VALUES($1,md5($1::text)||md5($1::text||'task'),'{}'::jsonb,'manual','xhs','seed','2026-11-09T23:58:00Z')").bind(task).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_attempt(attempt_id,task_id,producer_instance_id,started_at) VALUES($1,$2,$3,'2026-11-09T23:58:00Z')").bind(attempt).bind(task).bind(producer).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_capture_package(package_ref,attempt_id,task_id,producer_instance_id,package_kind,platform,package_hash,observed_at,captured_at,coverage,payload,accepted_at) VALUES($1,$2,$3,$4,'comments','xhs',md5($1::text)||md5($1::text||'package'),'2026-11-09T23:59:00Z','2026-11-09T23:59:00Z','{}','{}','2026-11-09T23:59:00Z')").bind(package).bind(attempt).bind(task).bind(producer).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason,created_at) VALUES($1,0,'accepted_for_library_content','synthetic','2026-11-09T23:59:00Z')").bind(package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_comment(material_ref,content_public_ref,package_ref,record_ordinal,comment_external_id,root_comment_external_id,parent_comment_external_id,parent_identity_source_field,is_reply,body_text,body_state,author_external_id,observed_at,created_at) SELECT $1,content_public_ref,$2,0,comment_external_id,root_comment_external_id,parent_comment_external_id,parent_identity_source_field,is_reply,body_text,body_state,author_external_id,'2026-11-09T23:59:00Z','2026-11-09T23:59:00Z' FROM linggan_material_comment WHERE comment_external_id='c-work-0-1' LIMIT 1").bind(Uuid::new_v4()).bind(package).execute(db.pool()).await.unwrap();
+    sqlx::query(include_str!("../../src/opportunity/card/source_events.sql"))
+        .bind(1024_i64)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("SELECT pg_advisory_unlock(linggan_opportunity_card_event_gate_key())")
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    assert_eq!(stale(&read_card(&db, problem).await.unwrap()), 1);
+    let list = read_opportunities(&db, domain, &OpportunityListQuery::default())
+        .await
+        .unwrap();
+    let item = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["problem"]["id"] == problem.to_string())
+        .unwrap();
+    assert_eq!(stale(item), 1);
+    assert_eq!(p1(&db).await, original);
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    assert_eq!(stale(&read_card(&db, problem).await.unwrap()), 0);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
 async fn period_filter_keeps_unchanged_cards_after_incremental_metrics() {
     use linggan_intelligence::opportunity::{
         OpportunityListQuery, OpportunityReadError, RebuildMode, read_opportunities,

@@ -45,6 +45,13 @@ function setup(search: string, custom?: (url: URL) => Response | Promise<Respons
 afterEach(() => vi.unstubAllGlobals());
 
 describe('机会卡页面', () => {
+  it('显示服务端返回的读模型过期提示', async () => {
+    setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => {
+      if (!url.pathname.endsWith('/card')) return undefined;
+      const card = fixture(); card.flags.push('stale_read_model'); return reply(card);
+    });
+    expect(await screen.findByText('读模型可能过期')).toBeVisible();
+  });
   it('开关关闭时直接访问说明未启用', () => {
     render(<OpportunityStatusContext.Provider value={{ state: 'disabled', retry: () => {} }}><OpportunityPage /></OpportunityStatusContext.Provider>);
     expect(screen.getByRole('heading', { name: '机会卡未启用' })).toBeVisible();

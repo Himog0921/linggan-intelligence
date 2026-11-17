@@ -12,12 +12,14 @@ use uuid::Uuid;
 // Each reader signs only the relations it actually reads (D-061).
 const CARD_READ_TABLES: &[&str] = &[
     "linggan_material_comment_restriction",
+    "linggan_opportunity_card_change",
     "linggan_opportunity_opportunity_card",
     "linggan_opportunity_problem",
     "linggan_opportunity_problem_lineage",
 ];
 const LIST_READ_TABLES: &[&str] = &[
     "linggan_material_comment_restriction",
+    "linggan_opportunity_card_change",
     "linggan_opportunity_card_period_index",
     "linggan_opportunity_opportunity_card",
     "linggan_opportunity_problem",
@@ -235,6 +237,32 @@ struct StoredCard {
     card: read_model::Card,
 }
 
+async fn mark_stale_cards(
+    tx: &mut Transaction<'_, Postgres>,
+    cards: &mut [read_model::Card],
+) -> Result<(), OpportunityReadError> {
+    let ids: Vec<Uuid> = cards.iter().map(|card| card.problem.id).collect();
+    let pending: BTreeSet<Uuid> = sqlx::query_scalar(
+        "SELECT problem_ref FROM linggan_opportunity_card_change WHERE problem_ref=ANY($1)",
+    )
+    .bind(&ids)
+    .fetch_all(&mut **tx)
+    .await?
+    .into_iter()
+    .collect();
+    for card in cards {
+        if pending.contains(&card.problem.id)
+            && !card
+                .flags
+                .iter()
+                .any(|flag| matches!(flag, read_model::QualityFlag::StaleReadModel))
+        {
+            card.flags.push(read_model::QualityFlag::StaleReadModel);
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PeriodMatchGroup {
@@ -373,6 +401,7 @@ async fn read_card_scoped(
         return Err(OpportunityReadError::NotFound);
     }
     stored.card.problem.redirected_from = (requested != problem).then_some(requested);
+    mark_stale_cards(&mut tx, std::slice::from_mut(&mut stored.card)).await?;
     snapshot::verify_for(&mut tx, CARD_READ_TABLES).await?;
     tx.commit().await?;
     serde_json::to_value(stored.card).map_err(|_| OpportunityReadError::InvalidModel)
@@ -673,6 +702,7 @@ pub async fn read_opportunities(
             matches.push(json!({"problemId":id,"periodStart":period,"groups":groups}));
         }
     }
+    mark_stale_cards(&mut tx, &mut items).await?;
     let next = if end < entries.len() {
         Some(page_cursor(
             "opportunity-list",
