@@ -103,6 +103,10 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
       {!sections.length && !hasMissing ? <p className={styles.empty}>本次范围没有可读文字。</p> : null}
       {dossier.selection.mode === 'explicit' ? <p className={styles.selectionNote}>当前为选定范围</p> : null}
       <EmptySpeechNotes materials={dossier.materials}/>
+      <details className={styles.materialNotes}>
+        <summary>材料说明</summary>
+        <p>作品正文、图片文字、视觉描述与视频口播沿用同一份底稿。打开底稿不会触发新的识读或处理任务。</p>
+      </details>
     </article>
     {active && exportSnapshot ? <DossierExportDialog payload={exportSnapshot} domain={domain} onClose={closeModal} onUnavailable={onUnavailable}/> : null}
     {active && focus ? <DossierFocusDialog title={focus.title} groups={focus.groups} memoryKey={`${memoryKey}:focus:${focus.ref}`} onClose={closeModal}/> : null}
