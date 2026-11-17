@@ -42,16 +42,16 @@ it.each(['image', 'audio'] as const)('%s 连续同角色仅首处说明，已知
   const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { kind, blocks: roles.map((speaker, index) => ({ ref: `role-${index}`, kind: 'paragraph', speaker, text: `完整原文 ${index}` })) })] }));
   const groups = resolveReadingSections(payload.dossier)[0]!.groups;
   const view = render(kind === 'audio' ? <TranscriptGroups groups={groups} prefix="roles"/> : <>{groups.map((value, index) => <DossierGroup key={value.group.ref} value={value} prefix="roles" previousRole={endingGroupAttribution(groups[index - 1])}/>)}</>);
-  for (const label of ['他人表述', '作品作者表述']) expect(screen.getAllByText(label)).toHaveLength(1);
+  for (const label of ['他人表述', '作者表述']) expect(screen.getAllByText(label)).toHaveLength(1);
   const text = view.container.textContent ?? '';
-  expect(text.indexOf('作品作者表述')).toBeLessThan(text.indexOf('完整原文 2'));
+  expect(text.indexOf('作者表述')).toBeLessThan(text.indexOf('完整原文 2'));
   expect(screen.queryByText('表达归属未确认')).not.toBeInTheDocument();
   expect(screen.getByText('完整原文 4')).toBeVisible();
   expect(text).not.toMatch(/讲述者|说话人|\d+ 人/);
 });
 it('同一个 blocks 组内及对话之后也重置表达归属', () => {
   mount([{ ref: 'other', kind: 'paragraph', speaker: 'other', text: '他人原话' }, { ref: 'author', kind: 'paragraph', speaker: 'author', text: '作者回应' }, { ref: 'dialogue', kind: 'dialogue', turns: [{ speaker: 'other', text: '明确对话' }] }, { ref: 'after', kind: 'paragraph', speaker: 'author', text: '对话后的作者正文' }]);
-  expect(screen.getAllByText('作品作者表述')).toHaveLength(2);
+  expect(screen.getAllByText('作者表述')).toHaveLength(2);
   expect(screen.getByText('对话后的作者正文')).toBeVisible();
 });
 it.each([['running', '处理中'], ['failed', '处理失败'], ['cancelled', '已取消'], ['invalidated', '已失效']] as const)('无读本的 %s 保留真实执行状态', (state, expected) => {
@@ -97,9 +97,9 @@ it('结构块的真实时间范围保留毫秒，连续口播保持紧凑起点�
 
 it.each(['blocks', 'paragraph'] as const)('在线资料在%s模式保留原文与视觉类型', mode => {
   mount([{ ref: 'observation', kind: 'paragraph', text: '两栏以不同底色区分。', speaker: 'unconfirmed', contentType: 'visual_description', regionRef: 'r1', regionLabel: '整图' }], mode);
-  expect(screen.getByText('视觉描述 · 模型观察，非原文')).toBeVisible();
+  expect(screen.getByText('视觉描述 · 非原文')).toBeVisible();
   expect(screen.queryByText('整图')).toBeNull();
-  expect(screen.queryByText('作品作者表述')).toBeNull();
+  expect(screen.queryByText('作者表述')).toBeNull();
 });
 
 it('图片资料提供所属原图入口并保留未知页码', () => {
@@ -157,7 +157,7 @@ it('同图连续文字只标一次类型，切换视觉观察时保留边界和�
     { ...common, ref: 'd', kind: 'paragraph', text: '不要做' },
   ]);
   expect(screen.getAllByText('图片文字 · 识别提取')).toHaveLength(2);
-  expect(screen.getAllByText('视觉描述 · 模型观察，非原文')).toHaveLength(1);
+  expect(screen.getAllByText('视觉描述 · 非原文')).toHaveLength(1);
   expect(screen.getByRole('columnheader', { name: '时间' })).toBeVisible();
   expect(screen.getByText('蓝色阅读卡覆盖页面中部。')).toBeVisible();
 });

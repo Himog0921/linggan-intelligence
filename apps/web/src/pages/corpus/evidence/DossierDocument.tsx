@@ -1,4 +1,3 @@
-import { EvidenceLabel } from './EvidenceLabel';
 import { Fragment, useId, useMemo, useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { humanMoment } from '../../../shared/formatting';
@@ -8,7 +7,7 @@ import { DossierFocusDialog } from './DossierFocusDialog';
 import { DossierIcon } from './DossierIcon';
 import { DossierNavigation } from './DossierNavigation';
 import { DossierUnderstanding } from './DossierUnderstanding';
-import { endingGroupAttribution, groupTime, readingAnchor, readingGaps, resolveReadingSections, SECTION_LABELS, transcriptStats, type ResolvedReadingGroup } from './dossierDocumentModel';
+import { endingGroupAttribution, groupTime, readingAnchor, readingGaps, resolveReadingSections, SECTION_LABELS, type ResolvedReadingGroup } from './dossierDocumentModel';
 import { jumpReading, useDossierReadingPosition, type ReadingPosition } from './useDossierReadingPosition';
 import type { DossierMaterial, DossierPayload } from './dossierTypes';
 import styles from './DossierDocument.module.css';
@@ -26,7 +25,7 @@ function audioRuns(groups: readonly ResolvedReadingGroup[]) {
   return runs;
 }
 function ImageSource({ unit }: { unit: DossierMaterial }) {
-  return <div className={styles.transcriptSummary}><span>图片</span>{unit.originalUrl ? <a className={styles.focusTrigger} href={unit.originalUrl} target="_blank" rel="noreferrer">查看原图</a> : <span>原图尚未取得</span>}</div>;
+  return <div className={styles.imageSource}><span>图片</span>{unit.originalUrl ? <a className={styles.focusTrigger} href={unit.originalUrl} target="_blank" rel="noreferrer">查看原图</a> : <span>原图尚未取得</span>}</div>;
 }
 function readableSnapshot(previous: readonly DossierMaterial[], latest: readonly DossierMaterial[]): boolean {
   const current = new Map(latest.map(unit => [unit.ref, unit]));
@@ -53,8 +52,8 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
   const selection = dossier.selection;
   const memoryKey = `dossier-reading:v3:${domain}:${dossier.workRef}:${JSON.stringify([selection.mode, selection.kinds, selection.unitRefs, selection.blockRefs, selection.imagePages])}`;
   const position = useDossierReadingPosition(root, toolbar, memoryKey, active, dossier.revision);
-  const navSections = sections.map(({ section }, index) => ({ ref: section.ref, label: SECTION_LABELS[section.kind], number: String(index + 1).padStart(2, '0') }));
-  if (hasMissing) navSections.push({ ref: 'reading:missing', label: '缺失内容', number: String(navSections.length + 1).padStart(2, '0') });
+  const navSections = sections.map(({ section }) => ({ ref: section.ref, label: SECTION_LABELS[section.kind] }));
+  if (hasMissing) navSections.push({ ref: 'reading:missing', label: '缺失内容' });
   const times = sections.filter(section => section.section.kind === 'audio').flatMap(section => section.groups.flatMap(group => {
     const time = groupTime(group);
     return group.group.mode === 'transcript_paragraph' && time ? [{ ref: group.group.ref, startMs: time.startMs }] : [];
@@ -70,8 +69,8 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
   return <div ref={root} className={`${styles.surface} ${styles.root} ${tools.reader}`} aria-label="研究底稿正文" aria-busy={busy} data-dossier-document>
     <div ref={toolbar} className={`${styles.toolbar} ${tools.toolbar}`}>
       <div className={styles.toolbarContext}>
-          <div className={styles.snapshot}><DossierIcon name="clock"/><span>数据截至</span><time dateTime={dossier.asOf}>{humanMoment(dossier.asOf)}</time><span className={styles.zone}>UTC+8</span></div>
-          <span className={styles.availability} data-complete={gaps.length === 0 && !hasMissingInformation && sections.length > 0}><DossierIcon name={gaps.length || hasMissingInformation ? 'info' : 'check'}/>{gaps.length || hasMissingInformation ? '含待补内容' : sections.length ? '内容就绪' : '暂无可读文字'}</span>
+          <div className={styles.snapshot}><DossierIcon name="clock"/><span>数据截至</span><time dateTime={dossier.asOf}>{humanMoment(dossier.asOf)}</time></div>
+          {sections.length || gaps.length || hasMissingInformation ? <span className={styles.availability} data-complete={gaps.length === 0 && !hasMissingInformation && sections.length > 0}><DossierIcon name={gaps.length || hasMissingInformation ? 'info' : 'check'}/>{gaps.length || hasMissingInformation ? '含待补内容' : '内容就绪'}</span> : null}
         {showNavigation ? <DossierNavigation sections={navSections} times={times} current={position.current} root={root} toolbar={toolbar} onJump={jump}/> : null}
         <div className={`${styles.actions} ${tools.actions}`}><ActionButton className={`${styles.control} ${styles.quiet}`} aria-label="刷新底稿" title="刷新底稿" disabled={busy} onClick={onRefresh}><DossierIcon name="refresh"/><span className={`${styles.refreshLabel} ${tools.refreshLabel}`}>刷新</span></ActionButton><ActionButton className={`${styles.control} ${styles.primary} ${tools.export}`} onClick={openExport}><DossierIcon name="download"/>导出</ActionButton></div>
       </div>
@@ -79,30 +78,35 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
     {refreshFailed ? <p className={styles.notice} role="status">刷新未完成，当前保留上一次读到的版本。<button type="button" onClick={onRefresh}>重试刷新</button></p> : null}
     <article className={styles.document} aria-label="连续阅读文档">
       <DossierUnderstanding domain={domain} work={dossier.workRef} revision={dossier.revision} asOf={dossier.asOf} active={active}/>
-      {sections.map(({ section, groups }, index) => <section key={section.ref} className={styles.section} id={readingAnchor(prefix, section.ref)} data-section-ref={section.ref} data-reading-anchor={section.ref} tabIndex={-1} aria-labelledby={readingAnchor(prefix, `${section.ref}:title`)}>
-        <header className={styles.sectionIndex}><span className={styles.sectionNumber}>{String(index + 1).padStart(2, '0')}</span><h2 id={readingAnchor(prefix, `${section.ref}:title`)}>{SECTION_LABELS[section.kind]}</h2></header>
+      {sections.map(({ section, groups }) => <section key={section.ref} className={styles.section} id={readingAnchor(prefix, section.ref)} data-section-ref={section.ref} data-reading-anchor={section.ref} tabIndex={-1} aria-labelledby={readingAnchor(prefix, `${section.ref}:title`)}>
+        <header className={styles.sectionIndex}><h2 id={readingAnchor(prefix, `${section.ref}:title`)}>{SECTION_LABELS[section.kind]}</h2></header>
         <div className={`${styles.content} ${section.kind === 'publication' && groups.every(group => group.group.mode === 'tags' || group.entries.every(entry => entry.unit.kind === 'tags')) ? styles.onlyTags : ''}`}>
-          {section.kind === 'audio' ? audioRuns(groups).map((run, runIndex, runs) => <div key={run.groups[0]?.group.ref} className={styles.audioRun}>
-            <div className={styles.transcriptSummary}><span>{runs.length > 1 ? `口播 ${runIndex + 1} · ` : ''}{transcriptStats(run.groups)}</span>{run.groups.some(group => group.group.mode === 'transcript_paragraph') ? <button type="button" className={styles.focusTrigger} onClick={() => openFocus(run)}><DossierIcon name="expand"/>专注阅读</button> : null}</div>
-            <TranscriptGroups groups={run.groups} prefix={prefix}/>
-          </div>) : groups.map((value, groupIndex) => <Fragment key={value.group.ref}>
+          {section.kind === 'audio' ? audioRuns(groups).map((run, runIndex, runs) => {
+            const canFocus = run.groups.some(group => group.group.mode === 'transcript_paragraph');
+            return <div key={run.groups[0]?.group.ref} className={styles.audioRun}>
+              {runs.length > 1 || canFocus ? <div className={styles.transcriptSummary}>
+                {runs.length > 1 ? <span className={styles.audioLabel}>{`音轨 ${runIndex + 1}`}</span> : <span/>}
+                {canFocus ? <button type="button" className={styles.focusTrigger} onClick={() => openFocus(run)}><DossierIcon name="expand"/>专注阅读</button> : null}
+              </div> : null}
+              <TranscriptGroups groups={run.groups} prefix={prefix}/>
+            </div>;
+          }) : groups.map((value, groupIndex) => <Fragment key={value.group.ref}>
             {value.entries[0]?.unit.kind === 'image' && value.entries[0].unit.ref !== groups[groupIndex - 1]?.entries[0]?.unit.ref ? <ImageSource unit={value.entries[0].unit}/> : null}
             <DossierGroup value={value} prefix={prefix} previousRole={endingGroupAttribution(groups[groupIndex - 1])} previousBlock={value.entries[0]?.unit.ref === groups[groupIndex - 1]?.entries.at(-1)?.unit.ref ? groups[groupIndex - 1]?.entries.at(-1)?.block : undefined}/>
           </Fragment>)}
         </div>
       </section>)}
       {hasMissing ? <section className={styles.section} id={readingAnchor(prefix, 'reading:missing')} data-section-ref="reading:missing" data-reading-anchor="reading:missing" tabIndex={-1} aria-labelledby={readingAnchor(prefix, 'reading:missing:title')}>
-        <header className={styles.sectionIndex}><span className={styles.sectionNumber}>{String(sections.length + 1).padStart(2, '0')}</span><h2 id={readingAnchor(prefix, 'reading:missing:title')}>缺失内容</h2></header>
+        <header className={styles.sectionIndex}><h2 id={readingAnchor(prefix, 'reading:missing:title')}>缺失内容</h2></header>
         <div className={styles.content}>{gaps.map(gap => <div className={styles.missingRow} key={gap.key}><span className={styles.missingTitle}>{gap.label}</span><span className={styles.missingMessage}>{gap.message}</span><span className={styles.missingState}>{gap.state}</span></div>)}</div>
       </section> : null}
-      {!sections.length && !hasMissing ? <p className={styles.empty}><EvidenceLabel>本次范围没有可读文字。</EvidenceLabel></p> : null}
-      <details className={tools.materialNotes}>
-        <summary>{sections.length || hasMissing ? <EvidenceLabel>材料说明</EvidenceLabel> : '材料说明'}</summary>
-        <dl><div><dt>数据截至</dt><dd><time dateTime={dossier.asOf}>{humanMoment(dossier.asOf)}</time> UTC+8</dd></div>
-          {dossier.selection.mode !== 'explicit' ? <div><dt>阅读范围</dt><dd>当前底稿全部可读材料</dd></div> : null}</dl>
-      </details>
+      {!sections.length && !hasMissing ? <p className={styles.empty}>本次范围没有可读文字。</p> : null}
+      {dossier.selection.mode === 'explicit' ? <p className={styles.selectionNote}>当前为选定范围</p> : null}
       <EmptySpeechNotes materials={dossier.materials}/>
-      {dossier.selection.mode === 'explicit' ? <p className={styles.end}>当前为选定范围</p> : null}
+      <details className={styles.materialNotes}>
+        <summary>材料说明</summary>
+        <p>作品正文、图片文字、视觉描述与视频口播沿用同一份底稿。打开底稿不会触发新的识读或处理任务。</p>
+      </details>
     </article>
     {active && exportSnapshot ? <DossierExportDialog payload={exportSnapshot} domain={domain} onClose={closeModal} onUnavailable={onUnavailable}/> : null}
     {active && focus ? <DossierFocusDialog title={focus.title} groups={focus.groups} memoryKey={`${memoryKey}:focus:${focus.ref}`} onClose={closeModal}/> : null}

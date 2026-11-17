@@ -5,7 +5,7 @@ import { normalizedTagLabel } from './dossierTagText';
 import type { DossierBlock, DossierMaterial, Speaker } from './dossierTypes';
 import styles from './DossierDocument.module.css';
 
-const ROLE_LABELS: Record<Speaker, string> = { author: '作品作者表述', other: '他人表述', unconfirmed: '表达归属未确认' };
+const ROLE_LABELS: Record<Speaker, string> = { author: '作者表述', other: '他人表述', unconfirmed: '表达归属未确认' };
 export function ReadingText({ text }: { text: string }) {
   const parts = text.split(/((?:周[一二三四五六日天]\s*)?\d{1,2}:\d{2}|\d{1,6}(?:\.\d{1,2})?\s*(?:个工作日|分钟|小时|秒|天|字|条|页|项|次|人|%))/gu);
   return <>{parts.map((part, index) => index % 2 ? <span className={styles.unit} key={index}>{part}</span> : part)}</>;
@@ -45,7 +45,7 @@ function ContentBlock({ block, tags }: { block: DossierBlock; tags?: boolean }) 
   }
 }
 function ImageAttribution({ block, previous }: { block: DossierBlock; previous?: DossierBlock }) {
-  const label = (value: DossierBlock | undefined) => value?.contentType === 'visual_description' ? '视觉描述 · 模型观察，非原文'
+  const label = (value: DossierBlock | undefined) => value?.contentType === 'visual_description' ? '视觉描述 · 非原文'
     : value?.contentType === 'extracted_text' ? `${value.sourceRole === 'background' ? '背景文字' : value.sourceRole === 'brand' ? '品牌文字' : value.sourceRole === 'subtitle' ? '字幕文字' : '图片文字'} · 识别提取` : null;
   const current = label(block);
   if (!current || current === label(previous)) return null;
