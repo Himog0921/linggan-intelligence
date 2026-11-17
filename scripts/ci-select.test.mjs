@@ -82,10 +82,16 @@ test('opportunity changes retain the isolated PostgreSQL proof', () => {
     'crates/intelligence/tests/opportunity_mentions_postgres.rs',
     'database/migrations/0211_opportunity_comment_mentions.sql',
     'scripts/test-opportunity-postgres.sh',
+    'scripts/check-opportunity-clippy.mjs',
+    'scripts/check-opportunity-clippy.test.mjs',
   ]) assert.ok(selected([path]).includes('ai'), path);
   assert.match(
     readFileSync(join(root, '.github/workflows/ai-gen1-foundation.yml'), 'utf8'),
     /bash scripts\/test-opportunity-postgres\.sh/,
+  );
+  assert.match(
+    readFileSync(join(root, '.github/workflows/ai-gen1-foundation.yml'), 'utf8'),
+    /node scripts\/check-opportunity-clippy\.mjs[\s\S]*bash scripts\/test-opportunity-postgres\.sh/,
   );
 });
 

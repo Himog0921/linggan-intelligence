@@ -4,7 +4,7 @@
 #[path = "../../../apps/api/src/local_web/full_schema_fixture.rs"]
 mod full_schema_fixture;
 #[path = "support/opportunity_dataset.rs"]
-mod opportunity_dataset;
+pub mod opportunity_dataset;
 
 use linggan_intelligence::opportunity::{
     Period, PeriodBasis, WeekStart, check_invariants, load_current_metric_definition,
@@ -618,11 +618,15 @@ async fn display_labels_project_as_day_precision_from_the_collection_moment() {
         .sum();
     assert_eq!(with_time, 10);
 
+    assert_exact_time_supersedes_display(&database).await;
+}
+
+async fn assert_exact_time_supersedes_display(database: &Database) {
     // A later exact epoch is added alongside the historical day row, and readers prefer it.
-    opportunity_dataset::build_platform_times(&database)
+    opportunity_dataset::build_platform_times(database)
         .await
         .unwrap();
-    let second = project_comment_platform_times(&database).await.unwrap();
+    let second = project_comment_platform_times(database).await.unwrap();
     assert!(second.inserted > 0);
     let day_rows: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_material_comment_platform_time
@@ -668,7 +672,7 @@ ALTER TABLE linggan_runtime_capture_package ENABLE TRIGGER USER;
     .await
     .unwrap();
     let report =
-        read_platform_time_report(&database, Uuid::parse_str(DOMAIN).unwrap(), AS_OF, TZ, 12)
+        read_platform_time_report(database, Uuid::parse_str(DOMAIN).unwrap(), AS_OF, TZ, 12)
             .await
             .unwrap();
     assert_eq!(report.agreement.compared, 5798);
@@ -803,6 +807,11 @@ ALTER TABLE linggan_comment_problem_definition ENABLE TRIGGER USER;
     .unwrap();
     assert_eq!(bumped, 2);
 
+    insert_synthetic_problem_lineage(&database).await;
+    assert_problem_lineage_resolution(&database).await;
+}
+
+async fn insert_synthetic_problem_lineage(database: &Database) {
     sqlx::raw_sql(
         r#"
 INSERT INTO linggan_opportunity_problem(problem_ref, source_ref, source_definition_ref, domain_ref, label) VALUES
@@ -833,7 +842,9 @@ INSERT INTO linggan_opportunity_problem_lineage(operation_ref, from_problem_ref,
     .execute(database.pool())
     .await
     .unwrap();
+}
 
+async fn assert_problem_lineage_resolution(database: &Database) {
     let direct: String = sqlx::query_scalar(
         "SELECT array_to_string(path, '>') FROM linggan_opportunity_resolve_problem_id($1::uuid)",
     )

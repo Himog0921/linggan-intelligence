@@ -155,42 +155,13 @@ pub async fn rebuild_opportunity_cards(
         metric_exclusions: &metric_report.exclusions,
     };
     for pending_row in pending {
-        let problem: Uuid = pending_row.try_get("problem_ref")?;
-        let current_revision: i64 = sqlx::query_scalar(
-            "SELECT revision FROM linggan_opportunity_card_change WHERE problem_ref=$1",
+        store_pending_card(
+            &mut tx,
+            pending_row.try_get("problem_ref")?,
+            &inputs,
+            &mut report,
         )
-        .bind(problem)
-        .fetch_one(&mut *tx)
         .await?;
-        let (card, excluded) = assemble_card(&mut tx, problem, &inputs).await?;
-        let flags: std::collections::BTreeSet<&str> = card
-            .flags
-            .iter()
-            .chain(
-                card.demand
-                    .groups
-                    .iter()
-                    .flat_map(|group| group.flags.iter()),
-            )
-            .copied()
-            .collect();
-        for flag in flags {
-            *report.flag_counts.entry(flag.to_owned()).or_default() += 1;
-        }
-        touch_sources(&mut tx, problem, &card).await?;
-        save(&mut tx, problem, taxonomy, version, &as_of, &card).await?;
-        sqlx::query(
-            "DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1 AND revision=$2",
-        )
-        .bind(problem)
-        .bind(current_revision)
-        .execute(&mut *tx)
-        .await?;
-        report.cards_built += 1;
-        for (reason, count) in excluded {
-            report.voices_excluded += count;
-            *report.voice_exclusion_reasons.entry(reason).or_default() += count;
-        }
     }
     let invariants = super::invariants::check_invariants_in(&mut tx, &as_of, domain).await?;
     if invariants.failed() {
@@ -207,6 +178,56 @@ pub async fn rebuild_opportunity_cards(
     snapshot::verify(&mut tx).await?;
     tx.commit().await?;
     Ok(report)
+}
+
+async fn store_pending_card(
+    tx: &mut Transaction<'_, Postgres>,
+    problem: Uuid,
+    inputs: &CardInputs<'_>,
+    report: &mut CardRebuildReport,
+) -> Result<(), CardError> {
+    let current_revision: i64 = sqlx::query_scalar(
+        "SELECT revision FROM linggan_opportunity_card_change WHERE problem_ref=$1",
+    )
+    .bind(problem)
+    .fetch_one(&mut **tx)
+    .await?;
+    let (card, excluded) = assemble_card(tx, problem, inputs).await?;
+    let flags: std::collections::BTreeSet<&str> = card
+        .flags
+        .iter()
+        .chain(
+            card.demand
+                .groups
+                .iter()
+                .flat_map(|group| group.flags.iter()),
+        )
+        .copied()
+        .collect();
+    for flag in flags {
+        *report.flag_counts.entry(flag.to_owned()).or_default() += 1;
+    }
+    touch_sources(tx, problem, &card).await?;
+    save(
+        tx,
+        problem,
+        inputs.taxonomy,
+        inputs.version,
+        inputs.as_of,
+        &card,
+    )
+    .await?;
+    sqlx::query("DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1 AND revision=$2")
+        .bind(problem)
+        .bind(current_revision)
+        .execute(&mut **tx)
+        .await?;
+    report.cards_built += 1;
+    for (reason, count) in excluded {
+        report.voices_excluded += count;
+        *report.voice_exclusion_reasons.entry(reason).or_default() += count;
+    }
+    Ok(())
 }
 
 async fn unparseable_observations(
@@ -350,7 +371,7 @@ async fn pending_changes(
     params: &OpportunityMetricParams,
 ) -> Result<(Vec<sqlx::postgres::PgRow>, usize), CardError> {
     // The executor and explicit rebuilds use the same missing-index detector.
-    enqueue_period_index_repairs_in(&mut **tx, Some(domain), Some(as_of)).await?;
+    enqueue_period_index_repairs_in(tx, Some(domain), Some(as_of)).await?;
     if mode == CardRebuildMode::Full {
         sqlx::query(
             "INSERT INTO linggan_opportunity_card_change(problem_ref) \
@@ -406,7 +427,7 @@ async fn assemble_card(
         taxonomy,
         version,
         as_of,
-        current_observation_proven,
+        current_observation_proven: _,
         params,
         metric_exclusions,
     } = *inputs;
@@ -417,17 +438,7 @@ async fn assemble_card(
     .fetch_one(&mut **tx)
     .await?;
     let demand_groups = groups::demand(tx, problem, taxonomy, version, as_of, params).await?;
-    let creator_groups = groups::creators(
-        tx,
-        domain,
-        problem,
-        taxonomy,
-        version,
-        as_of,
-        params,
-        current_observation_proven,
-    )
-    .await?;
+    let creator_groups = groups::creators(tx, problem, inputs).await?;
     let (sample_voices, excluded) = voices::select(
         tx,
         domain,

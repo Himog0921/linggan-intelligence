@@ -1,5 +1,5 @@
 //! Assemble protocol-separated demand and creator groups from the existing metric rows.
-use super::{CardError, model};
+use super::{CardError, CardInputs, model};
 use crate::opportunity::{
     CreatorDensity, CreatorDensityGroup, OpportunityMetricParams, rate_per_1k,
     sort_creator_density_group,
@@ -123,14 +123,18 @@ pub(super) async fn demand(
 
 pub(super) async fn creators(
     tx: &mut Transaction<'_, Postgres>,
-    domain: Uuid,
     problem: Uuid,
-    taxonomy: i64,
-    version: i32,
-    as_of: &str,
-    params: &OpportunityMetricParams,
-    current_observation_proven: bool,
+    inputs: &CardInputs<'_>,
 ) -> Result<Vec<model::CreatorGroup>, CardError> {
+    let CardInputs {
+        domain,
+        taxonomy,
+        version,
+        as_of,
+        params,
+        current_observation_proven,
+        ..
+    } = *inputs;
     let rows = sqlx::query(
         "SELECT density.protocol_version,density.creator_id,density.k,density.n,density.ci_low,\
          density.ci_high,density.sufficient,profile.display_name,profile.follower_count,\
@@ -156,6 +160,20 @@ pub(super) async fn creators(
     .bind(i32::try_from(params.creator_window_days).map_err(|_| CardError::InvalidMetrics)?)
     .bind(current_observation_proven)
     .fetch_all(&mut **tx).await?;
+    organize_creators(rows, problem, inputs)
+}
+
+fn organize_creators(
+    rows: Vec<sqlx::postgres::PgRow>,
+    problem: Uuid,
+    inputs: &CardInputs<'_>,
+) -> Result<Vec<model::CreatorGroup>, CardError> {
+    let CardInputs {
+        taxonomy,
+        version,
+        params,
+        ..
+    } = *inputs;
     let mut grouped: BTreeMap<Option<i32>, CreatorDensityGroup> = BTreeMap::new();
     let mut details = BTreeMap::new();
     for row in rows {
@@ -300,18 +318,16 @@ mod tests {
             .execute(&mut *tx)
             .await
             .unwrap();
-        let groups = creators(
-            &mut tx,
+        let inputs = super::CardInputs {
             domain,
-            problem,
-            1,
-            1,
-            &as_of,
-            &definition.params,
-            true,
-        )
-        .await
-        .unwrap();
+            taxonomy: 1,
+            version: 1,
+            as_of: &as_of,
+            current_observation_proven: true,
+            params: &definition.params,
+            metric_exclusions: &[],
+        };
+        let groups = creators(&mut tx, problem, &inputs).await.unwrap();
         let states = groups
             .iter()
             .flat_map(|group| group.ranked.iter().chain(&group.insufficient))

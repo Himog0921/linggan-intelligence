@@ -17,28 +17,6 @@ use uuid::Uuid;
 // This is the fixed maximum in the card response contract, not a metric threshold.
 const MAX_SAMPLE_VOICES: usize = 3;
 
-pub(super) async fn select(
-    tx: &mut Transaction<'_, Postgres>,
-    domain: Uuid,
-    problem: Uuid,
-    taxonomy: i64,
-    as_of: &str,
-    tz: &str,
-    basis: &str,
-) -> Result<(Vec<model::Voice>, BTreeMap<String, usize>), CardError> {
-    select_with_limit(
-        tx,
-        domain,
-        problem,
-        taxonomy,
-        as_of,
-        tz,
-        basis,
-        Some(MAX_SAMPLE_VOICES),
-    )
-    .await
-}
-
 fn candidate_sql() -> String {
     format!(
         "{}, {}, eligible AS MATERIALIZED (\
@@ -65,7 +43,7 @@ fn candidate_sql() -> String {
     )
 }
 
-async fn select_with_limit(
+pub(super) async fn select(
     tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,
     problem: Uuid,
@@ -73,7 +51,6 @@ async fn select_with_limit(
     as_of: &str,
     tz: &str,
     basis: &str,
-    limit: Option<usize>,
 ) -> Result<(Vec<model::Voice>, BTreeMap<String, usize>), CardError> {
     let rows = sqlx::query(AssertSqlSafe(candidate_sql()))
         .bind(domain)
@@ -94,7 +71,7 @@ async fn select_with_limit(
             *excluded.entry(reason).or_default() += 1;
             continue;
         }
-        if limit.is_some_and(|limit| voices.len() == limit) {
+        if voices.len() == MAX_SAMPLE_VOICES {
             continue;
         }
         if !row.try_get::<bool, _>("same_body")? {

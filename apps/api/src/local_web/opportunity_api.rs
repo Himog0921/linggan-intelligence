@@ -383,19 +383,11 @@ mod tests {
         assert!(OpportunityAccess::new(true).verify(&token).is_err());
     }
 
-    #[tokio::test]
-    #[ignore = "owned PostgreSQL proof; synthetic cards only"]
-    async fn enabled_routes_return_cards_and_guard_changed_pages() {
+    async fn insert_synthetic_cards(
+        db: &linggan_storage_postgres::Database,
+        domain: Uuid,
+    ) -> (Uuid, Value) {
         use sha2::{Digest, Sha256};
-        let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("owned proof URL");
-        let db = linggan_storage_postgres::testing::isolated_proof_schema(
-            &url,
-            "opportunity_t15_http",
-            super::super::full_schema_fixture::FULL_MIGRATIONS,
-        )
-        .await
-        .unwrap();
-        let domain = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
         let mut payload: Value = serde_json::from_str(include_str!(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../crates/intelligence/tests/opportunity_metrics_postgres/p1-card.snapshot.json"
@@ -420,6 +412,22 @@ mod tests {
                 .bind(id).bind(&fingerprint).bind(&index)
                 .execute(db.pool()).await.unwrap();
         }
+        (first, payload)
+    }
+
+    #[tokio::test]
+    #[ignore = "owned PostgreSQL proof; synthetic cards only"]
+    async fn enabled_routes_return_cards_and_guard_changed_pages() {
+        let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("owned proof URL");
+        let db = linggan_storage_postgres::testing::isolated_proof_schema(
+            &url,
+            "opportunity_t15_http",
+            super::super::full_schema_fixture::FULL_MIGRATIONS,
+        )
+        .await
+        .unwrap();
+        let domain = Uuid::parse_str("00000000-0000-4000-8000-000000000001").unwrap();
+        let (first, mut payload) = insert_synthetic_cards(&db, domain).await;
         let app = routes(true).with_state(LocalWebState {
             database: LocalDatabaseState::Ready(Arc::new(db.clone())),
             active_media_sessions: Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),

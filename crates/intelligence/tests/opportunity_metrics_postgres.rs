@@ -8,7 +8,7 @@ mod full_schema_fixture;
 #[path = "support/opportunity_creator_dataset.rs"]
 mod opportunity_creator_dataset;
 #[path = "support/opportunity_dataset.rs"]
-mod opportunity_dataset;
+pub mod opportunity_dataset;
 
 use linggan_intelligence::opportunity::{
     CommenterDigest, RebuildMode, check_invariants, project_comment_platform_times,

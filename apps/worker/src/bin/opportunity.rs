@@ -134,35 +134,7 @@ async fn run() -> Result<bool, Box<dyn std::error::Error>> {
             print_json(&report)?;
             Ok(matches)
         }
-        "rebuild-problem-metrics" => {
-            if !opportunity_enabled {
-                return Err("opportunity_card_disabled".into());
-            }
-            let domain = options
-                .domain
-                .as_deref()
-                .ok_or("rebuild-problem-metrics requires --domain")?;
-            let domain = Uuid::parse_str(domain).map_err(|_| "--domain must be a UUID")?;
-            let digest = CommenterDigest::load()?;
-            let database = connect(&options).await?;
-            let as_of = match options.as_of {
-                Some(ref value) => value.clone(),
-                None => current_as_of(&database).await?,
-            };
-            if options.full && options.preview {
-                return Err("--full and --preview are mutually exclusive".into());
-            }
-            let mode = if options.preview {
-                RebuildMode::Preview
-            } else if options.full {
-                RebuildMode::Full
-            } else {
-                RebuildMode::Incremental
-            };
-            let report = rebuild_problem_metrics(&database, domain, &as_of, &digest, mode).await?;
-            print_json(&report)?;
-            Ok(true)
-        }
+        "rebuild-problem-metrics" => rebuild_metrics(&options, opportunity_enabled).await,
         "rebuild-cards" => {
             if !opportunity_enabled {
                 return Err("opportunity_card_disabled".into());
@@ -219,6 +191,39 @@ async fn run() -> Result<bool, Box<dyn std::error::Error>> {
         }
         other => Err(format!("unknown command {other}\n{USAGE}").into()),
     }
+}
+
+async fn rebuild_metrics(
+    options: &Options,
+    opportunity_enabled: bool,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if !opportunity_enabled {
+        return Err("opportunity_card_disabled".into());
+    }
+    let domain = options
+        .domain
+        .as_deref()
+        .ok_or("rebuild-problem-metrics requires --domain")?;
+    let domain = Uuid::parse_str(domain).map_err(|_| "--domain must be a UUID")?;
+    let digest = CommenterDigest::load()?;
+    let database = connect(options).await?;
+    let as_of = match options.as_of {
+        Some(ref value) => value.clone(),
+        None => current_as_of(&database).await?,
+    };
+    if options.full && options.preview {
+        return Err("--full and --preview are mutually exclusive".into());
+    }
+    let mode = if options.preview {
+        RebuildMode::Preview
+    } else if options.full {
+        RebuildMode::Full
+    } else {
+        RebuildMode::Incremental
+    };
+    let report = rebuild_problem_metrics(&database, domain, &as_of, &digest, mode).await?;
+    print_json(&report)?;
+    Ok(true)
 }
 
 fn print_json<T: serde::Serialize>(value: &T) -> Result<(), serde_json::Error> {

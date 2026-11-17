@@ -602,3 +602,5 @@
 - W8：准备 G1 任务和记录表，真实卡片、授权、不变量与关闭态回归仍为前提；通过标准由负责人填写。`rg -n '阻塞|3–5|通过标准|check-invariants' docs/opportunity/G1.md` 可核对准备包；未对运行库执行检查。
 
 - W9：编写第一张真实卡路径，标出 A1–A4 均待授权、真实研究可能接收的材料、单条研究的三个阶段和全局同步影响。`rg -n '待授权|3N|没有领域参数|totalViolations' docs/opportunity/FIRST_CARD_RUNBOOK.md` 可核对；未迁移、研究、同步、重建或打开开关。
+
+- W5：新增 `scripts/check-opportunity-clippy.mjs` 并接入 AI foundation CI；按 Q-49 将既有 lint 错误限制为警告，机会卡目标路径的警告仍严格失败，编译失败也失败。`node scripts/check-opportunity-clippy.mjs` → exit 0，`Opportunity diagnostics: 0; other diagnostics: 848; cargo exit: 0`；非目标诊断只汇总。`node --test scripts/check-opportunity-clippy.test.mjs scripts/ci-select.test.mjs` → exit 0，25 passed、0 failed。只拆分目标路径的长函数、测试阶段，保留一套业务逻辑；最终完整回归见 W6。改动 Rust 文件的 `rustfmt --edition 2024 --config skip_children=true --check` → exit 0。
