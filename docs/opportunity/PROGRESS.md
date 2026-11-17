@@ -553,3 +553,9 @@
 - 在独立的 3001 发布工作树构建并执行 `LINGGAN_RUNTIME_DIR=<独立发布工作树> zsh scripts/runtime/install.sh --target-sha 07e1b1f66a9bfb86ca8b1911f4dcff3fb0099217` → `迁移台账已是最新`、`revision 07e1b1f6 就绪`、`local-runtime` 已启动；`curl http://127.0.0.1:3001/health` → HTTP 200，数据库与前端版本均为 ready。巡检、媒体和 AI 执行器保持禁用；AI 原本启用，为避免未授权模型外发而临时禁用。
 - 浏览器在 ADHD 领域打开机会首页，用户问题、作品依据、创作者三个入口均可到达，领域仍为 ADHD。`GET /api/local/opportunity/domains/<ADHD领域>/opportunities?includeWeeklyComparison=true&limit=1` → HTTP 200、`items=0`、`hasMore=false`；现有库无通过核验的问题与机会卡，无法验证真实卡片详情和依据分页。
 - 迁移前后 `linggan_model_invocation` 总数均为 239、运行中 0；AI 批任务 pending/running 均为 0；`capture_package` 和 `local_discovery_package` 表计数均为 0。未触发真实采集或模型调用，未迁移生产库。[Delivery 43995181848](https://github.com/Himog0921/linggan-intelligence/actions/runs/43995181848) 对合并提交运行，14 个 job 均成功，工作流结论为 `success`。
+
+## 2026-11-16 阶段 1 收口
+
+- W0 基线 `f730df8ab50a36217a0c0073717d3c69000d8af0`；独立分支 `opportunity/phase1-closeout`。任务书 A1–A5 均为否；不迁移运行库、不进行真实研究、重建或外发、不推送。0223–0225 已在此前授权发布时执行。
+- `bash scripts/test-opportunity-postgres.sh`：退出 0，25 组共 124 passed、0 failed，隔离容器和卷清理通过。`cd apps/web && npm run verify`：退出 0，172 个文件、1795 项测试通过。`cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked`：退出 101，依赖 `linggan-evidence` 有 59 条既有 `too_many_lines` 错误，检查未到达机会卡目标代码。
+- Q-46、Q-47、Q-48 已依负责人答复记录；W1 的事件未处理缺口需要如实保留。
