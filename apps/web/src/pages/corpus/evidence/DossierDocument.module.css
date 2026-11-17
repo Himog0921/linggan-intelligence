@@ -88,6 +88,7 @@
 .audioLabel { color:var(--lgi-muted);font-weight:var(--lgi-type-label-weight); }
 .imageSource { display:flex;align-items:center;gap:var(--lgi-space-2);margin:0 0 var(--lgi-space-2);color:var(--lgi-meta);font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--dr-font); }
 .imageSource a { margin-left:auto;color:var(--lgi-signal-ink);text-decoration:underline;text-decoration-style:dotted;text-underline-offset:var(--lgi-space-1);white-space:nowrap; }
+.imageSource .focusTrigger { min-height:0;padding:0;border:0; }
 .focusTrigger { display:inline-flex;align-items:center;gap:var(--lgi-space-1);min-height:var(--lgi-space-8);padding:var(--lgi-space-1) var(--lgi-space-2);border:1px solid transparent;background:transparent;color:var(--lgi-signal-ink);font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--dr-font);white-space:nowrap;cursor:pointer; }
 .focusTrigger .icon { width:var(--lgi-icon-status-size);height:var(--lgi-icon-status-size); }
 .focusTrigger:hover { color:var(--lgi-ink);background:var(--lgi-canvas-low); }
