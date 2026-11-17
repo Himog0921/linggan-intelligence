@@ -4,7 +4,7 @@
 #[path = "../../../apps/api/src/local_web/full_schema_fixture.rs"]
 mod full_schema_fixture;
 #[path = "support/opportunity_dataset.rs"]
-mod opportunity_dataset;
+pub mod opportunity_dataset;
 
 use linggan_intelligence::opportunity::{
     Period, PeriodBasis, WeekStart, check_invariants, load_current_metric_definition,
@@ -211,6 +211,25 @@ async fn seeded_definition_loads_and_invalid_parameters_are_refused() {
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-opportunity-postgres.sh and an isolated PostgreSQL proof database"]
+async fn restricted_takes_precedence_over_unknown_work_author() {
+    let database = full_database("opportunity_w2_precedence").await;
+    opportunity_dataset::build(&database).await.unwrap();
+    let before = eligible_count(&database, AS_OF).await;
+    let prior = exclusion_counts(&database, AS_OF).await;
+    let inserted = sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,restricted_at,reason) SELECT content_ref,comment_external_id,'2026-11-09T00:00:00Z','synthetic' FROM linggan_opportunity_comment_eligibility($1::uuid,$2::timestamptz,$3,$4) WHERE exclusion_reason='work_author_unknown' LIMIT 1")
+        .bind(DOMAIN).bind(AS_OF).bind(TZ).bind(BASIS).execute(database.pool()).await.unwrap();
+    assert_eq!(inserted.rows_affected(), 1);
+    let after = exclusion_counts(&database, AS_OF).await;
+    assert_eq!(eligible_count(&database, AS_OF).await, before);
+    assert_eq!(after["restricted"], prior["restricted"] + 1);
+    assert_eq!(
+        after["work_author_unknown"],
+        prior["work_author_unknown"] - 1
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-opportunity-postgres.sh and an isolated PostgreSQL proof database"]
 async fn playbook_dataset_matches_eligibility_counts_and_the_equality() {
     let database = full_database("opportunity_t02_dataset").await;
     opportunity_dataset::build(&database).await.unwrap();
@@ -321,7 +340,8 @@ async fn comment_published_basis_uses_platform_time_and_never_falls_back() {
         0
     );
     let exclusions = exclusion_counts_for(&database, AS_OF, "comment_published").await;
-    assert_eq!(exclusions.get("comment_time_unknown"), Some(&5807));
+    assert_eq!(exclusions.get("comment_time_unknown"), Some(&5805));
+    assert_eq!(exclusions.get("restricted"), Some(&2));
     assert_eq!(exclusions.get("period_anchor_missing"), None);
 
     opportunity_dataset::build_platform_times(&database)
@@ -599,11 +619,15 @@ async fn display_labels_project_as_day_precision_from_the_collection_moment() {
         .sum();
     assert_eq!(with_time, 10);
 
+    assert_exact_time_supersedes_display(&database).await;
+}
+
+async fn assert_exact_time_supersedes_display(database: &Database) {
     // A later exact epoch is added alongside the historical day row, and readers prefer it.
-    opportunity_dataset::build_platform_times(&database)
+    opportunity_dataset::build_platform_times(database)
         .await
         .unwrap();
-    let second = project_comment_platform_times(&database).await.unwrap();
+    let second = project_comment_platform_times(database).await.unwrap();
     assert!(second.inserted > 0);
     let day_rows: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_material_comment_platform_time
@@ -649,7 +673,7 @@ ALTER TABLE linggan_runtime_capture_package ENABLE TRIGGER USER;
     .await
     .unwrap();
     let report =
-        read_platform_time_report(&database, Uuid::parse_str(DOMAIN).unwrap(), AS_OF, TZ, 12)
+        read_platform_time_report(database, Uuid::parse_str(DOMAIN).unwrap(), AS_OF, TZ, 12)
             .await
             .unwrap();
     assert_eq!(report.agreement.compared, 5798);
@@ -784,6 +808,11 @@ ALTER TABLE linggan_comment_problem_definition ENABLE TRIGGER USER;
     .unwrap();
     assert_eq!(bumped, 2);
 
+    insert_synthetic_problem_lineage(&database).await;
+    assert_problem_lineage_resolution(&database).await;
+}
+
+async fn insert_synthetic_problem_lineage(database: &Database) {
     sqlx::raw_sql(
         r#"
 INSERT INTO linggan_opportunity_problem(problem_ref, source_ref, source_definition_ref, domain_ref, label) VALUES
@@ -814,7 +843,9 @@ INSERT INTO linggan_opportunity_problem_lineage(operation_ref, from_problem_ref,
     .execute(database.pool())
     .await
     .unwrap();
+}
 
+async fn assert_problem_lineage_resolution(database: &Database) {
     let direct: String = sqlx::query_scalar(
         "SELECT array_to_string(path, '>') FROM linggan_opportunity_resolve_problem_id($1::uuid)",
     )

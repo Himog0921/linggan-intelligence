@@ -2,7 +2,7 @@
 #[path = "../../../apps/api/src/local_web/full_schema_fixture.rs"]
 mod full_schema_fixture;
 #[path = "support/opportunity_dataset.rs"]
-mod opportunity_dataset;
+pub mod opportunity_dataset;
 
 use linggan_intelligence::opportunity::{
     CommenterDigest, MentionSyncError, check_invariants, sync_comment_mentions,

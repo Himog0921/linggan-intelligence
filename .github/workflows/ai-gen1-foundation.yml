@@ -32,7 +32,7 @@ jobs:
           cache-dependency-path: apps/pi-adapter/package-lock.json
       - name: Matching Rust and locked SDK
         run: |
-          rustup toolchain install 1.95.0 --profile minimal --component rustfmt
+          rustup toolchain install 1.95.0 --profile minimal --component rustfmt --component clippy
           rustup default 1.95.0
           npm ci --prefix apps/pi-adapter --ignore-scripts --no-audit --no-fund
           mkdir -p artifacts/private/ai-gen1-pr1b
@@ -59,6 +59,11 @@ jobs:
       - name: Fresh and repeat runtime schema migration
         if: matrix.segment == 'contracts'
         run: bash scripts/test-local-runtime-schema.sh
+      - name: Opportunity Clippy gate
+        if: matrix.segment == 'contracts'
+        run: |
+          node --test scripts/check-opportunity-clippy.test.mjs
+          node scripts/check-opportunity-clippy.mjs
       - name: Opportunity PostgreSQL invariants and projections
         if: matrix.segment == 'contracts'
         run: bash scripts/test-opportunity-postgres.sh

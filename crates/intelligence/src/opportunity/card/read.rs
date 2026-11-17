@@ -10,14 +10,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 // Each reader signs only the relations it actually reads (D-061).
+const CARD_CHANGE_TABLE: &str = "linggan_opportunity_card_change";
 const CARD_READ_TABLES: &[&str] = &[
     "linggan_material_comment_restriction",
+    CARD_CHANGE_TABLE,
     "linggan_opportunity_opportunity_card",
     "linggan_opportunity_problem",
     "linggan_opportunity_problem_lineage",
 ];
 const LIST_READ_TABLES: &[&str] = &[
     "linggan_material_comment_restriction",
+    CARD_CHANGE_TABLE,
     "linggan_opportunity_card_period_index",
     "linggan_opportunity_opportunity_card",
     "linggan_opportunity_problem",
@@ -235,6 +238,32 @@ struct StoredCard {
     card: read_model::Card,
 }
 
+async fn mark_stale_cards(
+    tx: &mut Transaction<'_, Postgres>,
+    cards: &mut [read_model::Card],
+) -> Result<(), OpportunityReadError> {
+    let ids: Vec<Uuid> = cards.iter().map(|card| card.problem.id).collect();
+    let pending: BTreeSet<Uuid> = sqlx::query_scalar(
+        "SELECT problem_ref FROM linggan_opportunity_card_change WHERE problem_ref=ANY($1)",
+    )
+    .bind(&ids)
+    .fetch_all(&mut **tx)
+    .await?
+    .into_iter()
+    .collect();
+    for card in cards {
+        if pending.contains(&card.problem.id)
+            && !card
+                .flags
+                .iter()
+                .any(|flag| matches!(flag, read_model::QualityFlag::StaleReadModel))
+        {
+            card.flags.push(read_model::QualityFlag::StaleReadModel);
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct PeriodMatchGroup {
@@ -373,16 +402,18 @@ async fn read_card_scoped(
         return Err(OpportunityReadError::NotFound);
     }
     stored.card.problem.redirected_from = (requested != problem).then_some(requested);
+    mark_stale_cards(&mut tx, std::slice::from_mut(&mut stored.card)).await?;
     snapshot::verify_for(&mut tx, CARD_READ_TABLES).await?;
     tx.commit().await?;
     serde_json::to_value(stored.card).map_err(|_| OpportunityReadError::InvalidModel)
 }
 
-const LIST_SQL: &str = "SELECT p.problem_ref,c.input_fingerprint, \
+const LIST_SQL: &str = "SELECT p.problem_ref,c.input_fingerprint,(pending.problem_ref IS NOT NULL) AS has_pending_change, \
  CASE WHEN $2::text IS NULL THEN NULL ELSE i.period_index END AS period_index, \
  CASE WHEN $2::text IS NULL THEN NULL ELSE c.payload END AS period_payload \
  FROM linggan_opportunity_opportunity_card c \
  JOIN linggan_opportunity_problem p USING(problem_ref) \
+ LEFT JOIN linggan_opportunity_card_change pending ON pending.problem_ref=c.problem_ref \
  LEFT JOIN linggan_opportunity_card_period_index i ON i.problem_ref=c.problem_ref \
  AND i.card_fingerprint=c.input_fingerprint AND i.taxonomy_version=c.taxonomy_version \
  AND i.metric_def_version=c.metric_def_version WHERE p.domain_ref=$1 \
@@ -593,6 +624,7 @@ fn list_entries(
     for row in rows {
         let id: Uuid = row.try_get("problem_ref")?;
         let digest: String = row.try_get("input_fingerprint")?;
+        let pending: bool = row.try_get("has_pending_change")?;
         let groups = if let Some(period) = &query.period {
             let groups = matching_period_groups(&row, period, query.tier.as_deref(), &digest)?;
             if groups.is_empty() {
@@ -604,6 +636,7 @@ fn list_entries(
         };
         key_data.extend_from_slice(id.as_bytes());
         key_data.extend_from_slice(digest.as_bytes());
+        key_data.push(u8::from(pending));
         let encoded =
             serde_json::to_vec(&groups).map_err(|_| OpportunityReadError::InvalidModel)?;
         let len = u64::try_from(encoded.len()).map_err(|_| OpportunityReadError::InvalidModel)?;
@@ -673,6 +706,7 @@ pub async fn read_opportunities(
             matches.push(json!({"problemId":id,"periodStart":period,"groups":groups}));
         }
     }
+    mark_stale_cards(&mut tx, &mut items).await?;
     let next = if end < entries.len() {
         Some(page_cursor(
             "opportunity-list",
@@ -826,8 +860,14 @@ async fn read_evidence_scoped(
     let prior = previous("opportunity-evidence", query.cursor.as_deref(), &scope)?;
     let mut tx = begin(database).await?;
     let evidence_tables = snapshot::evidence_read_tables();
+    // Creator evidence reads the stored card, but does not inspect pending changes.
+    let creator_tables: Vec<_> = CARD_READ_TABLES
+        .iter()
+        .copied()
+        .filter(|table| *table != CARD_CHANGE_TABLE)
+        .collect();
     let tables = if matches!(query.kind, EvidenceKind::Creators) {
-        CARD_READ_TABLES
+        creator_tables.as_slice()
     } else {
         &evidence_tables
     };

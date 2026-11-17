@@ -268,10 +268,20 @@ mod tests {
         capture(&mut after).await.unwrap();
         after.rollback().await.unwrap();
 
-        // Reverse order: hold the same source-table SHARE lock as capture,
-        // then confirm an actual image admission waits and resumes.
+        image_admission_waits_for_snapshot(&db, id, uri).await;
+    }
+
+    // Reverse order: hold the same source-table SHARE lock as capture,
+    // then confirm an actual image admission waits and resumes.
+    async fn image_admission_waits_for_snapshot(
+        db: &linggan_storage_postgres::Database,
+        id: &str,
+        uri: &str,
+    ) {
+        use serde_json::json;
+        use std::time::Duration;
         let second = Uuid::new_v4();
-        material_fixture::submit_package(&db, "media_slots", json!({"contentExternalId":id}),
+        material_fixture::submit_package(db, "media_slots", json!({"contentExternalId":id}),
             json!({"kind":"media_slot","slotKey":format!("xhs:{id}:image:2"),"observationRef":second,
                 "slot":{"role":"image","ordinal":2},"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},
                 "sourceObject":{"platform":"xhs","type":"content","externalId":id}})).await;

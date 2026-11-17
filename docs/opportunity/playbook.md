@@ -1027,7 +1027,7 @@ interface CreatorDensity {
   - `not_calibrated`：没有导入问卷时**必须**出现；
   - `no_baseline`：对应协议组的基线不足时出现在该组的 `flags`；不得用其他协议补足（D-043）；
   - `collection_volume_shift`：本周期与上周期的领域有效评论数变化超过 `collection_volume_shift_alert` 时出现；
-  - `stale_read_model`：读模型的 `as_of` 早于最新事实的 `first_observed_at` 超过 24 小时时出现；
+  - `stale_read_model`：见 D-065；
   - `period_anchor_missing`：因 `period_anchor_missing` 被排除的评论占候选评论的比例超过 `max_unanchored_share` 时出现；
   - `author_unknown_share_high`：因 `work_author_unknown` 被排除的比例超过 `max_author_unknown_share` 时出现；
   - `engagement_reference_missing`：领域点赞中位数没有可用的 `KNOWN` 值时出现（D-019）；

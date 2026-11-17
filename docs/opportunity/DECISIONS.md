@@ -533,6 +533,24 @@
 
 - 三个入口分别指向现有的用户问题、证据库和创作者页面，保留当前领域；未选择领域时不构造虚假领域。
 
+### D-065 读模型过期的判定（替代 playbook §6.7 中“超过 24 小时”的规则）
+- 读取卡片时，如果 `linggan_opportunity_card_change` 里存在该 `problem_ref` 的行（即还有待重建的变更），就在响应的卡片级 `flags` 里追加 `stale_read_model`。
+- 判定在读接口的同一个 REPEATABLE READ 事务里完成，**只出现在响应中，不写回 payload**。
+- 不使用时间阈值。理由：仓库已经有精确的变更队列，比“24 小时”的估计更准，也不需要新增参数（R3）。
+- 因撤回而被删除的卡片，行为不变（直接不可见）。
+
+### D-066 排除原因的优先级
+一条评论只记一个排除原因，按以下顺序取第一个满足的：
+1. `not_in_domain_primary`
+2. `restricted`
+3. `work_author_unknown`
+4. `comment_time_unknown`
+5. `period_anchor_missing`
+6. `observed_at_unparseable`
+7. `creator_self`
+
+理由：撤回是墓碑（R10），优先级必须高于数据质量类原因，否则会污染质量提示。有效评论集合不变，只改变排除计数的归类。
+
 ## 待裁定
 
 - D-057 的影响与可行性验证仍未完成。

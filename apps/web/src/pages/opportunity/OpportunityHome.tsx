@@ -23,7 +23,7 @@ function ObservationTable({ rows, domain, label }: { rows: Row[]; domain: string
       const flags = [...new Set([...card.flags, ...group.flags])];
       const detail = `/opportunity?${new URLSearchParams({ domain, problem: card.problem.id })}`;
       return <tr key={`${card.problem.id}:${group.protocolVersion ?? 'unknown'}`}>
-        <th scope="row"><Link className={styles.problemLink} to={detail}>{card.problem.statement}</Link><span className={styles.metaLine}>{protocolLabel(group.protocolVersion)}</span><QualityFlags flags={group.flags} /></th>
+        <th scope="row"><Link className={styles.problemLink} to={detail}>{card.problem.statement}</Link><span className={styles.metaLine}>{protocolLabel(group.protocolVersion)}</span><QualityFlags flags={flags} /></th>
         <td><Metric value={group.mentionersTotal} flags={flags} /></td>
         <td><span className={styles.metaLine}>本周 <Metric value={comparison.currentRatePer1k} flags={flags} /></span><span className={styles.metaLine}>上周 <Metric value={comparison.previousRatePer1k} flags={flags} /></span>{comparison.status === 'incomparable' ? <span className={styles.muted}>不可比较：{comparisonReason(comparison.reason)}</span> : <span className={styles.muted}>{comparison.status === 'rising' ? '观察到上升' : '本周未观察到上升'}</span>}</td>
         <td>{supplyLabel(card.supply.state)}</td><td><FocusAuthors groups={card.channel.groups} protocol={group.protocolVersion} /></td><td>{tierLabel(group.evidenceTier)}</td>

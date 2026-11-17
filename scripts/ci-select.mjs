@@ -17,6 +17,7 @@ const paths = {
     'apps/worker/**', 'apps/pi-adapter/**', 'database/migrations/**',
     'scripts/runtime/**', 'scripts/local-runtime.sh',
     'scripts/test-research-dossier-postgres.sh', 'scripts/test-opportunity-postgres.sh',
+    'scripts/check-opportunity-clippy.mjs', 'scripts/check-opportunity-clippy.test.mjs',
     'docs/data-contracts/deep-content-research/**', 'scripts/sql/l2-calibration-*.sql',
   ],
   material_reading: [

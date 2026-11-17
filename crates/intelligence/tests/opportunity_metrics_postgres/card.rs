@@ -1,7 +1,5 @@
 //! T1.4 standard snapshot, debounce and source-withdrawal proofs.
-use super::{
-    database, database_with_standard_creators, opportunity_creator_dataset, opportunity_dataset,
-};
+use super::{database, opportunity_creator_dataset, opportunity_dataset};
 use linggan_intelligence::opportunity::{
     CardError, CardRebuildMode, CommenterDigest, check_invariants, rebuild_opportunity_cards,
     sync_comment_mentions, sync_comment_mentions_for_domain,
@@ -10,7 +8,13 @@ use serde_json::Value;
 use uuid::Uuid;
 
 async fn prepare() -> (linggan_storage_postgres::Database, Uuid, CommenterDigest) {
-    let db = database_with_standard_creators(true).await;
+    prepare_with_migrations(super::full_schema_fixture::FULL_MIGRATIONS).await
+}
+
+async fn prepare_with_migrations(
+    migrations: &str,
+) -> (linggan_storage_postgres::Database, Uuid, CommenterDigest) {
+    let db = super::database_with_migrations(true, migrations).await;
     sqlx::raw_sql(r#"
       CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE sql VOLATILE
       AS $$ SELECT timestamptz '2026-11-10T00:00:00Z' $$;
@@ -53,6 +57,362 @@ async fn preserve_synthetic_marketing(db: &linggan_storage_postgres::Database) {
 async fn p1(db: &linggan_storage_postgres::Database) -> Value {
     sqlx::query_scalar("SELECT payload FROM linggan_opportunity_opportunity_card WHERE problem_ref=md5('metric-problem:1')::uuid")
         .fetch_one(db.pool()).await.unwrap()
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn pending_change_is_a_read_only_stale_flag_for_card_and_list() {
+    use linggan_intelligence::opportunity::{OpportunityListQuery, read_card, read_opportunities};
+    let (db, domain, digest) = prepare().await;
+    let report = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    assert_eq!(
+        report.flag_counts.get("not_calibrated"),
+        Some(&report.cards_built)
+    );
+    assert_eq!(
+        serde_json::to_value(&report).unwrap()["flagCounts"]["not_calibrated"],
+        report.cards_built
+    );
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let original = p1(&db).await;
+    let stale = |value: &Value| {
+        value["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|flag| *flag == "stale_read_model")
+            .count()
+    };
+    assert_eq!(stale(&read_card(&db, problem).await.unwrap()), 0);
+
+    let mut gate = db.pool().acquire().await.unwrap();
+    sqlx::query("SELECT pg_advisory_lock(linggan_opportunity_card_event_gate_key())")
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    let task = Uuid::new_v4();
+    let attempt = Uuid::new_v4();
+    let package = Uuid::new_v4();
+    let producer = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_runtime_task(task_id,task_spec_hash,task_spec,source,platform,page_type,created_at) VALUES($1,md5($1::text)||md5($1::text||'task'),'{}'::jsonb,'manual','xhs','seed','2026-11-09T23:58:00Z')").bind(task).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_attempt(attempt_id,task_id,producer_instance_id,started_at) VALUES($1,$2,$3,'2026-11-09T23:58:00Z')").bind(attempt).bind(task).bind(producer).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_capture_package(package_ref,attempt_id,task_id,producer_instance_id,package_kind,platform,package_hash,observed_at,captured_at,coverage,payload,accepted_at) VALUES($1,$2,$3,$4,'comments','xhs',md5($1::text)||md5($1::text||'package'),'2026-11-09T23:59:00Z','2026-11-09T23:59:00Z','{}','{}','2026-11-09T23:59:00Z')").bind(package).bind(attempt).bind(task).bind(producer).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason,created_at) VALUES($1,0,'accepted_for_library_content','synthetic','2026-11-09T23:59:00Z')").bind(package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_comment(material_ref,content_public_ref,package_ref,record_ordinal,comment_external_id,root_comment_external_id,parent_comment_external_id,parent_identity_source_field,is_reply,body_text,body_state,author_external_id,observed_at,created_at) SELECT $1,content_public_ref,$2,0,comment_external_id,root_comment_external_id,parent_comment_external_id,parent_identity_source_field,is_reply,body_text,body_state,author_external_id,'2026-11-09T23:59:00Z','2026-11-09T23:59:00Z' FROM linggan_material_comment WHERE comment_external_id='c-work-0-1' LIMIT 1").bind(Uuid::new_v4()).bind(package).execute(db.pool()).await.unwrap();
+    sqlx::query(include_str!("../../src/opportunity/card/source_events.sql"))
+        .bind(1024_i64)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("SELECT pg_advisory_unlock(linggan_opportunity_card_event_gate_key())")
+        .execute(&mut *gate)
+        .await
+        .unwrap();
+    assert_eq!(stale(&read_card(&db, problem).await.unwrap()), 1);
+    let list = read_opportunities(&db, domain, &OpportunityListQuery::default())
+        .await
+        .unwrap();
+    let item = list["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["problem"]["id"] == problem.to_string())
+        .unwrap();
+    assert_eq!(stale(item), 1);
+    assert_eq!(p1(&db).await, original);
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    assert_eq!(stale(&read_card(&db, problem).await.unwrap()), 0);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn list_cursor_restarts_when_pending_card_state_changes() {
+    use linggan_intelligence::opportunity::{
+        OpportunityListQuery, OpportunityReadError, read_opportunities,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let mut query = OpportunityListQuery {
+        limit: Some(1),
+        ..Default::default()
+    };
+    let first = read_opportunities(&db, domain, &query).await.unwrap();
+    query.cursor = first["page"]["nextCursor"].as_str().map(str::to_owned);
+    assert!(query.cursor.is_some());
+    let second = read_opportunities(&db, domain, &query).await.unwrap();
+    assert_eq!(first["page"]["asOf"], second["page"]["asOf"]);
+    let item = &second["items"][0];
+    assert!(
+        !item["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "stale_read_model")
+    );
+    let problem = Uuid::parse_str(item["problem"]["id"].as_str().unwrap()).unwrap();
+    sqlx::query("INSERT INTO linggan_opportunity_card_change(problem_ref) VALUES ($1)")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &query).await,
+        Err(OpportunityReadError::PageChanged)
+    ));
+    query.cursor = None;
+    let refreshed = read_opportunities(&db, domain, &query).await.unwrap();
+    query.cursor = refreshed["page"]["nextCursor"].as_str().map(str::to_owned);
+    let changed = read_opportunities(&db, domain, &query).await.unwrap();
+    assert!(
+        changed["items"][0]["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|f| f == "stale_read_model")
+    );
+    sqlx::query("DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    assert!(matches!(
+        read_opportunities(&db, domain, &query).await,
+        Err(OpportunityReadError::PageChanged)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn exclusion_upgrade_requeues_existing_cards_and_rebuilds_counts() {
+    use linggan_intelligence::opportunity::read_card;
+    let migration =
+        include_str!("../../../../database/migrations/0227_opportunity_exclusion_precedence.sql");
+    let before = super::full_schema_fixture::FULL_MIGRATIONS
+        .replace(migration, "")
+        .lines()
+        .filter(|line| !line.contains("VALUES ('0227_opportunity_exclusion_precedence'"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let (db, domain, digest) = prepare_with_migrations(&before).await;
+    let inserted = sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,restricted_at,reason) \
+         SELECT content_ref,comment_external_id,'2026-11-09T00:00:00Z','synthetic' \
+         FROM linggan_opportunity_comment_eligibility($1,'2026-11-10T00:00:00Z','Asia/Shanghai','work_published_cohort') \
+         WHERE exclusion_reason='work_author_unknown' LIMIT 1",
+    )
+    .bind(domain)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(inserted.rows_affected(), 1);
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let old = p1(&db).await;
+    sqlx::query("INSERT INTO linggan_opportunity_card_change(problem_ref,revision) VALUES($1,7)")
+        .bind(problem)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
+    let (problems, queued, revision): (i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM linggan_opportunity_problem), \
+         (SELECT count(*) FROM linggan_opportunity_card_change), \
+         (SELECT revision FROM linggan_opportunity_card_change WHERE problem_ref=$1)",
+    )
+    .bind(problem)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(queued, problems);
+    assert_eq!(revision, 7);
+    assert_eq!(p1(&db).await, old);
+    assert!(
+        read_card(&db, problem).await.unwrap()["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|flag| flag == "stale_read_model")
+    );
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let updated = p1(&db).await;
+    let count = |card: &Value, reason: &str| {
+        card["exclusions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["reason"] == reason)
+            .unwrap()["comments"]
+            .as_i64()
+            .unwrap()
+    };
+    assert_eq!(count(&updated, "restricted"), count(&old, "restricted") + 1);
+    assert_eq!(
+        count(&updated, "work_author_unknown"),
+        count(&old, "work_author_unknown") - 1
+    );
+    assert_eq!(
+        updated["demand"]["groups"][0]["current"]["n"],
+        old["demand"]["groups"][0]["current"]["n"]
+    );
+    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_card_change")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(remaining, 0);
+    assert!(
+        !read_card(&db, problem).await.unwrap()["flags"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|flag| flag == "stale_read_model")
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn invariant_violations_prevent_metric_and_card_commits() {
+    use linggan_intelligence::opportunity::{RebuildMode, rebuild_problem_metrics};
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let original = p1(&db).await;
+    let metric_digest = || async {
+        sqlx::query_scalar::<_, Option<String>>("SELECT md5(string_agg(to_jsonb(metric)::text, ',' ORDER BY to_jsonb(metric)::text)) FROM linggan_opportunity_problem_metric_period metric")
+            .fetch_one(db.pool()).await.unwrap()
+    };
+    let original_metrics = metric_digest().await;
+    let updated = sqlx::query("UPDATE linggan_opportunity_creator_problem_density SET sufficient=true WHERE creator_id='creator-C2' AND protocol_version IS NULL AND metric_def_version=1 AND problem_ref=md5('metric-problem:1')::uuid")
+        .execute(db.pool()).await.unwrap();
+    assert_eq!(updated.rows_affected(), 1);
+    let report = check_invariants(&db).await.unwrap();
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|check| check.id == "I7" && check.violations > 0)
+    );
+    let metrics = rebuild_problem_metrics(
+        &db,
+        domain,
+        "2026-11-10T00:00:00Z",
+        &digest,
+        RebuildMode::Incremental,
+    )
+    .await;
+    assert!(metrics.is_err());
+    let card = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full).await;
+    assert!(card.is_err());
+    assert_eq!(p1(&db).await, original);
+    assert_eq!(metric_digest().await, original_metrics);
+    sqlx::query("UPDATE linggan_opportunity_creator_problem_density SET sufficient=false WHERE creator_id='creator-C2' AND protocol_version IS NULL AND metric_def_version=1 AND problem_ref=md5('metric-problem:1')::uuid").execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_opportunity_problem_lineage(operation_ref,from_problem_ref,to_problem_ref,relation,created_at) VALUES(gen_random_uuid(),md5('metric-problem:1')::uuid,md5('metric-problem:2')::uuid,'rename','2026-11-09T00:00:00Z'),(gen_random_uuid(),md5('metric-problem:2')::uuid,md5('metric-problem:1')::uuid,'rename','2026-11-09T00:00:00Z')").execute(db.pool()).await.unwrap();
+    let report = check_invariants(&db).await.unwrap();
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|check| check.id == "I8" && check.violations > 0)
+    );
+    let metrics = rebuild_problem_metrics(
+        &db,
+        domain,
+        "2026-11-10T00:00:00Z",
+        &digest,
+        RebuildMode::Incremental,
+    )
+    .await;
+    assert!(metrics.is_err());
+    let card = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full).await;
+    assert!(card.is_err());
+    assert_eq!(p1(&db).await, original);
+    assert_eq!(metric_digest().await, original_metrics);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn quality_flags_track_missing_work_metadata() {
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let has =
+        |value: &Value, flag: &str| value["flags"].as_array().unwrap().iter().any(|v| v == flag);
+    let initial = p1(&db).await;
+    assert!(!has(&initial, "period_anchor_missing"));
+    assert!(!has(&initial, "author_unknown_share_high"));
+    sqlx::raw_sql("CREATE TABLE synthetic_detail_backup AS SELECT material_ref,published_at,author_external_id FROM linggan_material_content_detail; ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER; UPDATE linggan_material_content_detail SET published_at=NULL; ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER;").execute(db.pool()).await.unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    assert!(has(&p1(&db).await, "period_anchor_missing"));
+    sqlx::raw_sql("ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER; UPDATE linggan_material_content_detail detail SET published_at=backup.published_at,author_external_id=NULL FROM synthetic_detail_backup backup WHERE detail.material_ref=backup.material_ref; ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER;").execute(db.pool()).await.unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let missing_author = p1(&db).await;
+    assert!(!has(&missing_author, "period_anchor_missing"));
+    assert!(has(&missing_author, "author_unknown_share_high"));
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn quality_flags_track_period_sample_thresholds() {
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let has =
+        |value: &Value, flag: &str| value["flags"].as_array().unwrap().iter().any(|v| v == flag);
+    let initial = p1(&db).await;
+    assert!(has(&initial, "collection_below_target"));
+    assert!(has(&initial, "collection_volume_shift"));
+    assert!(
+        initial["demand"]["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|g| has(g, "insufficient_sample"))
+    );
+    let (minimum, target): (i64, i64) = sqlx::query_as("SELECT (d.params->>'min_n_period')::bigint,(d.params->>'collection_target_per_period')::bigint FROM linggan_opportunity_metric_definition_current c JOIN linggan_opportunity_metric_definition d USING(version) WHERE c.singleton")
+        .fetch_one(db.pool()).await.unwrap();
+    sqlx::raw_sql("ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER; UPDATE linggan_material_content_detail SET published_at='2026-11-09T00:00:00Z' WHERE published_at IS NOT NULL; ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER;").execute(db.pool()).await.unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let current = p1(&db).await;
+    let groups = current["demand"]["groups"].as_array().unwrap();
+    assert!(
+        groups
+            .iter()
+            .map(|g| g["current"]["n"].as_i64().unwrap())
+            .sum::<i64>()
+            >= target
+    );
+    assert!(!has(&current, "collection_below_target"));
+    assert!(!has(&current, "collection_volume_shift"));
+    assert!(
+        groups
+            .iter()
+            .any(|g| g["current"]["n"].as_i64().unwrap() >= minimum
+                && !has(g, "insufficient_sample"))
+    );
 }
 
 #[tokio::test]
@@ -432,6 +792,57 @@ async fn creator_evidence_is_not_blocked_by_unrelated_model_writes() {
 
 #[tokio::test]
 #[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn creator_evidence_does_not_lock_the_card_change_queue() {
+    use linggan_intelligence::opportunity::{
+        EvidenceKind, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card,
+        read_evidence, read_opportunities,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let mut writer = db.pool().begin().await.unwrap();
+    sqlx::query("LOCK TABLE linggan_opportunity_card_change IN ROW EXCLUSIVE MODE")
+        .execute(&mut *writer)
+        .await
+        .unwrap();
+    let result = read_evidence(
+        &db,
+        problem,
+        &EvidenceQuery {
+            kind: EvidenceKind::Creators,
+            cursor: None,
+            limit: Some(1),
+        },
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "unrelated queue writes must not block creator evidence: {result:?}"
+    );
+    assert!(matches!(
+        read_card(&db, problem).await,
+        Err(OpportunityReadError::Snapshot(CardError::SourcesBusy))
+    ));
+    assert!(matches!(
+        read_opportunities(&db, domain, &OpportunityListQuery::default()).await,
+        Err(OpportunityReadError::Snapshot(CardError::SourcesBusy))
+    ));
+    writer.rollback().await.unwrap();
+    assert!(read_card(&db, problem).await.is_ok());
+    assert!(
+        read_opportunities(&db, domain, &OpportunityListQuery::default())
+            .await
+            .is_ok()
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
 async fn evidence_page_reads_source_context_only_for_the_requested_page() {
     use linggan_intelligence::comment_study_source::{StudySourceRole, selected_source_in};
     use linggan_intelligence::opportunity::{EvidenceKind, EvidenceQuery, read_evidence};
@@ -509,8 +920,7 @@ async fn evidence_page_reads_source_context_only_for_the_requested_page() {
 #[ignore = "requires the disposable opportunity PostgreSQL proof"]
 async fn read_endpoints_share_card_sources_and_fail_closed_after_change() {
     use linggan_intelligence::opportunity::{
-        EvidenceKind, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card,
-        read_evidence, read_opportunities,
+        EvidenceKind, EvidenceQuery, OpportunityReadError, read_card, read_evidence,
     };
     let (db, domain, digest) = prepare().await;
     rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
@@ -608,9 +1018,21 @@ async fn read_endpoints_share_card_sources_and_fail_closed_after_change() {
             .all(|creator| creator.get("protocolVersion").is_some())
     );
 
+    assert_list_lineage_and_withdrawal(&db, domain, problem, &card).await;
+}
+
+async fn assert_list_lineage_and_withdrawal(
+    db: &linggan_storage_postgres::Database,
+    domain: Uuid,
+    problem: Uuid,
+    card: &Value,
+) {
+    use linggan_intelligence::opportunity::{
+        OpportunityListQuery, OpportunityReadError, read_card, read_opportunities,
+    };
     let group = &card["demand"]["groups"][0];
     let filtered = read_opportunities(
-        &db,
+        db,
         domain,
         &OpportunityListQuery {
             period: group["current"]["periodStart"].as_str().map(str::to_owned),
@@ -633,14 +1055,14 @@ async fn read_endpoints_share_card_sources_and_fail_closed_after_change() {
         limit: Some(1),
         ..Default::default()
     };
-    let list = read_opportunities(&db, domain, &list_query).await.unwrap();
+    let list = read_opportunities(db, domain, &list_query).await.unwrap();
     assert_eq!(list["items"].as_array().unwrap().len(), 1);
     assert_eq!(list["page"]["hasMore"], true);
     list_query.cursor = list["page"]["nextCursor"].as_str().map(str::to_owned);
     sqlx::query("UPDATE linggan_opportunity_opportunity_card SET input_fingerprint=repeat('f',64) WHERE problem_ref=$1")
         .bind(problem).execute(db.pool()).await.unwrap();
     assert!(matches!(
-        read_opportunities(&db, domain, &list_query).await,
+        read_opportunities(db, domain, &list_query).await,
         Err(OpportunityReadError::PageChanged)
     ));
 
@@ -651,7 +1073,7 @@ async fn read_endpoints_share_card_sources_and_fail_closed_after_change() {
         .bind(old).bind(problem).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_opportunity_problem_lineage(operation_ref,from_problem_ref,to_problem_ref,relation) VALUES($1,$2,$3,'merge')")
         .bind(Uuid::new_v4()).bind(old).bind(problem).execute(db.pool()).await.unwrap();
-    let redirected = read_card(&db, old).await.unwrap();
+    let redirected = read_card(db, old).await.unwrap();
     assert_eq!(redirected["problem"]["id"], problem.to_string());
     assert_eq!(redirected["problem"]["redirectedFrom"], old.to_string());
 
@@ -661,7 +1083,7 @@ async fn read_endpoints_share_card_sources_and_fail_closed_after_change() {
         .bind(voice["commentExternalId"].as_str().unwrap())
         .execute(db.pool()).await.unwrap();
     assert!(matches!(
-        read_card(&db, old).await,
+        read_card(db, old).await,
         Err(OpportunityReadError::NotFound)
     ));
 }
@@ -949,19 +1371,7 @@ async fn current_card_releases_source_locks_before_build_finishes() {
     assert!(report.cards_built > 0);
 }
 
-#[tokio::test]
-#[ignore = "requires the disposable opportunity PostgreSQL proof"]
-async fn malformed_observations_do_not_block_card_or_override_valid_sources() {
-    let (db, domain, digest) = prepare().await;
-    let baseline = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
-        .await
-        .unwrap();
-    let baseline_unavailable = baseline
-        .voice_exclusion_reasons
-        .get("bodyUnavailable")
-        .copied()
-        .unwrap_or(0);
-    sqlx::raw_sql(r#"
+const MALFORMED_CARD_OBSERVATIONS: &str = r#"
       ALTER TABLE linggan_material_comment DISABLE TRIGGER USER;
       UPDATE linggan_material_comment SET observed_at='not-a-time' WHERE comment_external_id='c-work-0-2';
       ALTER TABLE linggan_material_comment ENABLE TRIGGER USER;
@@ -1012,7 +1422,24 @@ async fn malformed_observations_do_not_block_card_or_override_valid_sources() {
       FROM linggan_material_content_detail detail CROSS JOIN opportunity_seed_package package
       WHERE detail.content_public_ref='00000000-0000-4000-8000-000000000100' AND detail.record_ordinal=0
         AND package.work_key='work-0' AND package.kind='comments';
-    "#).execute(db.pool()).await.unwrap();
+    "#;
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn malformed_observations_do_not_block_card_or_override_valid_sources() {
+    let (db, domain, digest) = prepare().await;
+    let baseline = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let baseline_unavailable = baseline
+        .voice_exclusion_reasons
+        .get("bodyUnavailable")
+        .copied()
+        .unwrap_or(0);
+    sqlx::raw_sql(MALFORMED_CARD_OBSERVATIONS)
+        .execute(db.pool())
+        .await
+        .unwrap();
     let report = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
         .await
         .expect("one malformed observation must not abort the entire card build");
@@ -1619,13 +2046,26 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         "P1's synthetic card must match its reviewed snapshot"
     );
 
+    assert_card_event_debounce(&db, domain, &digest, &value).await;
+    assert_engagement_reference_cutoff(&db, domain, &digest).await;
+    assert_projection_and_withdrawal(&db, domain, &digest, &value).await;
+    let live = assert_withdrawal_precedes_rebuild(&db, domain, &digest).await;
+    assert_rebuild_precedes_withdrawal(&db, domain, &digest, &live).await;
+}
+
+async fn assert_card_event_debounce(
+    db: &linggan_storage_postgres::Database,
+    domain: Uuid,
+    digest: &CommenterDigest,
+    value: &Value,
+) {
     // An upstream event is durably transferred and debounced, without needing another worker.
     sqlx::query("SELECT linggan_opportunity_card_source_changed('domain',$1)")
         .bind(domain.to_string())
         .execute(db.pool())
         .await
         .unwrap();
-    let deferred = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+    let deferred = rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Due)
         .await
         .unwrap();
     assert_eq!(deferred.cards_built, 0);
@@ -1641,12 +2081,18 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
     );
     sqlx::query("UPDATE linggan_opportunity_card_change SET changed_at=clock_timestamp()-interval '301 seconds'")
         .execute(db.pool()).await.unwrap();
-    let delivered = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+    let delivered = rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Due)
         .await
         .unwrap();
     assert_eq!(delivered.cards_built, 3);
-    assert_eq!(p1(&db).await, value);
+    assert_eq!(p1(db).await, *value);
+}
 
+async fn assert_engagement_reference_cutoff(
+    db: &linggan_storage_postgres::Database,
+    domain: Uuid,
+    digest: &CommenterDigest,
+) {
     // A known like in the existing discovery lane counts as a work engagement reference,
     // but only after its observation exists at the card's as_of.
     sqlx::raw_sql(r#"
@@ -1667,11 +2113,11 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         VALUES(md5('card-like-finding')::uuid,md5('creator-work:c1-a')::uuid,md5('card-like-package')::uuid,0,
           'discovery_search',1,'2026-11-05T00:00:00Z','UNKNOWN','UNKNOWN','UNKNOWN',600,'KNOWN','2026-11-11T00:00:00Z');
     "#).execute(db.pool()).await.unwrap();
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap();
     assert!(
-        p1(&db).await["flags"]
+        p1(db).await["flags"]
             .as_array()
             .unwrap()
             .iter()
@@ -1686,17 +2132,25 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
     .execute(db.pool())
     .await
     .unwrap();
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap();
     assert!(
-        !p1(&db).await["flags"]
+        !p1(db).await["flags"]
             .as_array()
             .unwrap()
             .iter()
             .any(|flag| flag == "engagement_reference_missing")
     );
+}
 
+async fn assert_projection_and_withdrawal(
+    db: &linggan_storage_postgres::Database,
+    domain: Uuid,
+    digest: &CommenterDigest,
+    value: &Value,
+) {
+    let voices = value["demand"]["sampleVoices"].as_array().unwrap();
     let content = voices[0]["commentRef"]["contentRef"].as_str().unwrap();
     let comment = voices[0]["commentRef"]["commentExternalId"]
         .as_str()
@@ -1707,10 +2161,10 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         WHERE material_ref IN (SELECT material_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-1'); \
         ALTER TABLE linggan_material_comment_engagement ENABLE TRIGGER USER")
         .execute(db.pool()).await.unwrap();
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap();
-    let before_projection = p1(&db).await;
+    let before_projection = p1(db).await;
     let before_voices = before_projection["demand"]["sampleVoices"]
         .as_array()
         .unwrap();
@@ -1726,10 +2180,10 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         WHERE material_ref IN (SELECT material_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-1'); \
         ALTER TABLE linggan_material_comment_engagement ENABLE TRIGGER USER")
         .execute(db.pool()).await.unwrap();
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap();
-    assert_eq!(p1(&db).await["demand"]["sampleVoices"][0]["likes"], 40);
+    assert_eq!(p1(db).await["demand"]["sampleVoices"][0]["likes"], 40);
 
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,restricted_at,reason) VALUES($1::uuid,$2,'2026-11-09T00:00:00Z','synthetic withdrawal')")
         .bind(content).bind(comment).execute(db.pool()).await.unwrap();
@@ -1739,11 +2193,11 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         retained, 0,
         "withdrawal must remove stale text before debounce expires"
     );
-    let rebuilt = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    let rebuilt = rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap();
     assert_eq!(rebuilt.cards_built, 3);
-    let after = p1(&db).await;
+    let after = p1(db).await;
     let voices = after["demand"]["sampleVoices"].as_array().unwrap();
     assert_eq!(voices.len(), 3);
     assert!(
@@ -1755,7 +2209,7 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         voices[2]["likes"], 10,
         "the next eligible voice fills the vacated slot"
     );
-    let invariants = check_invariants(&db).await.unwrap();
+    let invariants = check_invariants(db).await.unwrap();
     let i9 = invariants
         .checks
         .iter()
@@ -1763,12 +2217,18 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         .unwrap();
     assert!(i9.available);
     assert_eq!(i9.violations, 0);
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Due)
         .await
         .unwrap();
+}
 
+async fn assert_withdrawal_precedes_rebuild(
+    db: &linggan_storage_postgres::Database,
+    domain: Uuid,
+    digest: &CommenterDigest,
+) -> Value {
     // A withdrawal which starts first makes a stale card transaction retry safely.
-    let live = p1(&db).await;
+    let live = p1(db).await;
     let content = live["demand"]["sampleVoices"][0]["commentRef"]["contentRef"]
         .as_str()
         .unwrap()
@@ -1781,15 +2241,15 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,restricted_at,reason) \
         VALUES($1::uuid,$2,'2026-11-09T00:00:00Z','synthetic concurrent withdrawal')")
         .bind(&content).bind(&comment).execute(&mut *withdrawing).await.unwrap();
-    let error = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    let error = rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap_err();
     assert!(matches!(error, CardError::SourcesBusy), "{error:?}");
     withdrawing.commit().await.unwrap();
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap();
-    let live = p1(&db).await;
+    let live = p1(db).await;
     assert!(
         live["demand"]["sampleVoices"]
             .as_array()
@@ -1798,8 +2258,17 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
             .all(|voice| voice["commentRef"]["commentExternalId"] != comment)
     );
 
+    live
+}
+
+async fn assert_rebuild_precedes_withdrawal(
+    db: &linggan_storage_postgres::Database,
+    domain: Uuid,
+    digest: &CommenterDigest,
+    live: &Value,
+) {
     // When the rebuild starts first, the writer waits and then removes the saved card atomically.
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Due)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Due)
         .await
         .unwrap();
     sqlx::raw_sql(r#"
@@ -1828,7 +2297,7 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         let digest = CommenterDigest::from_key(vec![42; 32]).unwrap();
         rebuild_opportunity_cards(&rebuild_db, domain, &digest, CardRebuildMode::Full).await
     });
-    wait_for_lock(&db, "%INSERT INTO linggan_opportunity_opportunity_card%").await;
+    wait_for_lock(db, "%INSERT INTO linggan_opportunity_opportunity_card%").await;
     tokio::time::timeout(std::time::Duration::from_secs(3), sqlx::query(
         "INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) \
          VALUES(md5('unrelated-work')::uuid,'unrelated-comment','synthetic unrelated withdrawal')")
@@ -1840,7 +2309,7 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
             VALUES($1::uuid,$2,'2026-11-09T00:00:00Z','synthetic concurrent withdrawal')")
             .bind(content).bind(withdrawal_comment).execute(&pool).await
     });
-    wait_for_lock(&db, "%INSERT INTO linggan_material_comment_restriction%").await;
+    wait_for_lock(db, "%INSERT INTO linggan_material_comment_restriction%").await;
     barrier.rollback().await.unwrap();
     tokio::time::timeout(std::time::Duration::from_secs(30), pending_rebuild)
         .await
@@ -1863,11 +2332,11 @@ async fn card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices() {
         retained, 0,
         "the later withdrawal cannot leave a stale card"
     );
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap();
     assert!(
-        p1(&db).await["demand"]["sampleVoices"]
+        p1(db).await["demand"]["sampleVoices"]
             .as_array()
             .unwrap()
             .iter()
@@ -2301,11 +2770,7 @@ async fn due_card_progresses_while_unrelated_source_events_remain() {
     assert_eq!(remaining, 1, "the event transaction must stay bounded");
 }
 
-#[tokio::test]
-#[ignore = "requires the disposable opportunity PostgreSQL proof"]
-async fn withdrawal_with_a_fixed_snapshot_cannot_leave_a_new_card_exposed() {
-    let (db, domain, digest) = prepare().await;
-    sqlx::raw_sql(r#"
+const FIXED_SNAPSHOT_BARRIER: &str = r#"
         DELETE FROM linggan_opportunity_card_change WHERE problem_ref<>md5('metric-problem:1')::uuid;
         UPDATE linggan_opportunity_card_change SET changed_at=clock_timestamp()-interval '301 seconds';
         CREATE FUNCTION synthetic_card_write_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
@@ -2322,7 +2787,16 @@ async fn withdrawal_with_a_fixed_snapshot_cannot_leave_a_new_card_exposed() {
         END $$;
         CREATE TRIGGER synthetic_card_write_barrier BEFORE INSERT ON linggan_opportunity_opportunity_card
         FOR EACH ROW EXECUTE FUNCTION synthetic_card_write_barrier();
-    "#).execute(db.pool()).await.unwrap();
+    "#;
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn withdrawal_with_a_fixed_snapshot_cannot_leave_a_new_card_exposed() {
+    let (db, domain, digest) = prepare().await;
+    sqlx::raw_sql(FIXED_SNAPSHOT_BARRIER)
+        .execute(db.pool())
+        .await
+        .unwrap();
     let mut barrier = db.pool().begin().await.unwrap();
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('synthetic-card-write-barrier',0))")
         .execute(&mut *barrier)
@@ -2391,6 +2865,13 @@ async fn withdrawal_with_a_fixed_snapshot_cannot_leave_a_new_card_exposed() {
             .await
             .unwrap();
     }
+    assert_fixed_snapshot_withdrawal_hidden(&db, content).await;
+}
+
+async fn assert_fixed_snapshot_withdrawal_hidden(
+    db: &linggan_storage_postgres::Database,
+    content: Uuid,
+) {
     let exposed: bool = sqlx::query_scalar("SELECT EXISTS(\
          SELECT 1 FROM linggan_opportunity_card_voice_ref WHERE content_ref=$1 AND comment_external_id='c-work-0-1')")
         .bind(content)
@@ -2410,7 +2891,7 @@ async fn withdrawal_with_a_fixed_snapshot_cannot_leave_a_new_card_exposed() {
     .fetch_one(db.pool())
     .await
     .unwrap();
-    let payload_exposed = payload_contains_comment(&db, content).await;
+    let payload_exposed = payload_contains_comment(db, content).await;
     println!(
         "fixed-snapshot outcome: cards={remaining_cards}, restricted={restricted}, payload_exposed={payload_exposed}"
     );
@@ -2809,16 +3290,24 @@ async fn card_keeps_unknown_and_known_protocols_in_separate_groups() {
                 .any(|c| c["creatorId"] == "creator-C2")
         );
     }
+    assert_known_protocol_change_window(&db, domain, &digest).await;
+}
+
+async fn assert_known_protocol_change_window(
+    db: &linggan_storage_postgres::Database,
+    domain: Uuid,
+    digest: &CommenterDigest,
+) {
     // Synthetic fixture only: give one first-admission package a second known version.
     sqlx::raw_sql("ALTER TABLE linggan_runtime_capture_package DISABLE TRIGGER USER; \
         UPDATE linggan_runtime_capture_package SET payload=jsonb_set(payload,'{collectionProtocol,version}','2'::jsonb) \
         WHERE package_ref=md5('creator-package:c2-v1:comments')::uuid; \
         ALTER TABLE linggan_runtime_capture_package ENABLE TRIGGER USER")
         .execute(db.pool()).await.unwrap();
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap();
-    let known_change = p1(&db).await;
+    let known_change = p1(db).await;
     assert!(
         known_change["flags"]
             .as_array()
@@ -2836,10 +3325,10 @@ async fn card_keeps_unknown_and_known_protocols_in_separate_groups() {
         WHERE content_public_ref IN (md5('creator-work:c1-v1')::uuid,md5('creator-work:c2-v1')::uuid); \
         ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER")
         .execute(db.pool()).await.unwrap();
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Full)
         .await
         .unwrap();
-    let outside_window = p1(&db).await;
+    let outside_window = p1(db).await;
     assert!(
         !outside_window["flags"]
             .as_array()
