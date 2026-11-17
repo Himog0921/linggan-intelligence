@@ -55,7 +55,8 @@ it('多图沿 owner 编排连续阅读，保留标题来源及相同文字的不
   expect(notes).not.toHaveAttribute('open');
   await view.user.click(screen.getByText('材料说明'));
   expect(notes).toHaveAttribute('open');
-  expect(within(notes!).getByText('数据截至')).toBeVisible();
+  expect(within(notes!).getByText(/沿用同一份底稿/)).toBeVisible();
+   expect(within(notes!).queryByText('数据截至')).not.toBeInTheDocument();
 });
 it('页面不展示核对说明，实际图片文字保留', async () => {
   const issue = { key: 'ocr_low_confidence_0', code: 'glyph', message: '数字需要对照原图核验', resolution: 'reading_edit' };
