@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ActionButton } from '../../../shared/ActionButton';
 import { DeepResearchLauncher } from './DeepResearchLauncher';
-import { DEEP_MODE_LABELS } from './deepResearchApi';
 import { isRecord, requestJson } from '../../../shared/api';
 import { parseMaterialReadiness } from './evidenceDecode';
 import { materialReadinessCopy } from './evidencePresent';
@@ -113,7 +112,7 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
   const readiness = materialReadinessCopy(materialReadiness);
   const coreRef = result?.card.analysisRef;
   const waitingExpired = waiting?.expired === true && (deepAnalyses?.length ?? 0) <= waiting.count;
-  return <section className={styles.section} aria-label="整篇内容理解">
+  return <section className={`${styles.section} ${styles.understanding}`} aria-label="整篇内容理解">
     <header className={styles.sectionIndex}><h2>作品概览</h2></header>
     <div className={styles.content}>
       {query.isPending ? <p role="status">正在读取理解结果…</p> : null}
@@ -125,25 +124,26 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
       {!query.isPending && !query.isError && !analysis ? <p>这篇尚无当前材料的理解结果，以下保留原始材料。</p> : null}
       {analysis && !result ? <p role="status">{analysis.state === 'pending' ? '等待理解处理。' : analysis.state === 'running' ? '正在理解这篇内容。' : analysis.failureCode === 'ai_dispatch_unknown' ? '本次处理结果尚未确认，以下仍可阅读原始材料。' : analysis.state === 'cancelled' ? '本次理解已取消，原始材料不受影响。' : '本次理解未完成，原始材料不受影响。'}</p> : null}
       {result ? <>
-        <p className={styles.paragraph}>{result.card.core.summary.text}</p>
-        {GROUPS.map(([type, title]) => {
-          const units = result.card.core.knowledgeUnits.filter(u => u.unitType === type);
-          return units.length ? <div key={type}><h3 className={styles.heading}>{title}</h3><ul className={styles.list}>{units.map(unit => <li key={unit.id}>{unit.statement}</li>)}</ul></div> : null;
-        })}
+        <p className={`${styles.paragraph} ${styles.summary}`}>{result.card.core.summary.text}</p>
+        <div className={styles.understandingGroups}>
+          {GROUPS.map(([type, title]) => {
+            const units = result.card.core.knowledgeUnits.filter(unit => unit.unitType === type);
+            return units.length ? <section className={styles.understandingGroup} key={type}>
+              <h3>{title}</h3>
+              <ul className={styles.list}>{units.map(unit => <li key={unit.id}>{unit.statement}</li>)}</ul>
+            </section> : null;
+          })}
+        </div>
         {coreRef ? <DeepResearchLauncher domain={domain} work={work} coreRef={coreRef}
           onSubmitted={() => { setWaiting({ count: deepAnalyses?.length ?? 0, expired: false }); void query.refetch(); }}/> : null}
         {waitingExpired ? <p role="status">提交后一段时间内没有新的研究发现出现。可能仍在处理，也可能没有通过校验；稍后刷新页面再看。</p> : null}
-        {deepAnalyses?.length ? <div>
-          <h3 className={styles.heading}>研究发现</h3>
-          {deepAnalyses.map(analysis => <div key={analysis.analysisRef}>
-            {analysis.researchMode ? <p className={styles.paragraph}>{`研究模式：${DEEP_MODE_LABELS[analysis.researchMode] ?? analysis.researchMode}`}</p> : null}
-            <p className={styles.paragraph}>{analysis.question}</p>
-            {analysis.coreBasis ? <p className={styles.paragraph}>
-              {analysis.coreBasis.kind === 'revision' ? '基于某次修订' : '基于原始 Core'}
-            </p> : null}
+        {deepAnalyses?.length ? <section className={styles.researchFindings}>
+          <h3 className={styles.researchTitle}>研究发现</h3>
+          {deepAnalyses.map(analysis => <article className={styles.researchAnalysis} key={analysis.analysisRef}>
+            <p className={styles.researchQuestion}>{analysis.question}</p>
             <ul className={styles.list}>{analysis.findings.map(finding => <li key={`${analysis.analysisRef}:${finding.id}`}>
               {finding.statement}
-              <details><summary>引用依据</summary><ul className={styles.list}>
+              <details className={styles.researchEvidence}><summary>引用依据</summary><ul className={styles.list}>
                 {finding.support
                   ? finding.support.map((item, index) => (
                     <li key={`${analysis.analysisRef}:${finding.id}:support:${index}`}>{item.excerpt ?? item.observation}</li>
@@ -153,8 +153,8 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
                   )))}
               </ul></details>
             </li>)}</ul>
-          </div>)}
-        </div> : null}
+          </article>)}
+        </section> : null}
       </> : null}
     </div>
   </section>;

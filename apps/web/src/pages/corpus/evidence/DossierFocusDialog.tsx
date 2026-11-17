@@ -4,7 +4,7 @@ import { ActionButton } from '../../../shared/ActionButton';
 import { DossierIcon } from './DossierIcon';
 import { FocusTimeMenu, type FocusTimeMenuHandle } from './FocusTimeMenu';
 import { TranscriptGroups } from './DossierDocumentBlocks';
-import { groupTime, readingAnchor, transcriptStats, type ResolvedReadingGroup } from './dossierDocumentModel';
+import { groupTime, readingAnchor, type ResolvedReadingGroup } from './dossierDocumentModel';
 import { captureReadingPosition, jumpReading, restoreReadingPosition, type ReadingPosition } from './useDossierReadingPosition';
 import styles from './DossierDocument.module.css';
 const positions = new Map<string, ReadingPosition>();
@@ -72,17 +72,14 @@ export function DossierFocusDialog({ title, groups, memoryKey, onClose }: { titl
     return () => dialog.removeEventListener('cancel', cancel, true);
   }
   return <ModalDialog labelledBy={id} className={`${styles.surface} ${styles.dialog} ${styles.focusDialog}`} onClose={onClose} closeOnBackdrop setup={menuCancelGuard}>
-    <header className={styles.modalHeader}><div><h2 id={id}>视频口播 · 专注阅读</h2><p className={styles.focusTitle} title={title}>{title}</p></div><button type="button" className={styles.close} aria-label="返回底稿" onClick={onClose}><DossierIcon name="close"/></button></header>
-    <div className={styles.focusTools}>
-      <span>{transcriptStats(groups)}</span>
-      {times.length ? (
-        <div className={styles.timeField}>
-          <span className={styles.timeLabel}>跳到</span>
-          <FocusTimeMenu ref={timeMenu} times={times} selected={selected} onJump={jumpToTime}/>
-        </div>
-      ) : <span>时间尚未取得</span>}
-    </div>
-    <div className={styles.focusBody} ref={root} tabIndex={0} aria-label="完整口播正文"><div className={styles.focusDocument}><TranscriptGroups groups={groups} prefix={prefix}/><p className={styles.focusEnd}>已显示本次全部口播文字</p></div></div>
-    <footer className={styles.modalFooter}><span className={styles.focusHelp}>按 Esc 返回 · 保留原阅读位置</span><ActionButton className={`${styles.control} ${styles.primary}`} onClick={onClose}>返回底稿</ActionButton></footer>
+    <header className={styles.modalHeader}><div><h2 id={id}>专注阅读</h2><p className={styles.focusTitle} title={title}>{title}</p></div><button type="button" className={styles.close} aria-label="返回底稿" onClick={onClose}><DossierIcon name="close"/></button></header>
+    {times.length ? <div className={styles.focusTools}>
+      <div className={styles.timeField}>
+        <span className={styles.timeLabel}>跳到</span>
+        <FocusTimeMenu ref={timeMenu} times={times} selected={selected} onJump={jumpToTime}/>
+      </div>
+    </div> : null}
+    <div className={styles.focusBody} ref={root} tabIndex={0} aria-label="完整口播正文"><div className={styles.focusDocument}><TranscriptGroups groups={groups} prefix={prefix}/></div></div>
+    <footer className={styles.modalFooter}><ActionButton className={`${styles.control} ${styles.primary}`} onClick={onClose}>返回底稿</ActionButton></footer>
   </ModalDialog>;
 }

@@ -4,7 +4,7 @@ import { formatReadingTime } from './dossierDocumentModel';
 import styles from './DossierDocument.module.css';
 import tools from './DossierTools.module.css';
 
-export interface ReadingNavSection { ref: string; label: string; number: string }
+export interface ReadingNavSection { ref: string; label: string }
 export interface ReadingNavTime { ref: string; startMs: number }
 interface Props {
   sections: readonly ReadingNavSection[]; times: readonly ReadingNavTime[];
@@ -46,11 +46,15 @@ export function DossierNavigation({ sections, times, current, root, toolbar, onJ
   }
   function jump(ref: string, first = false) { setOpen(false); onJump(ref, first); }
   return <div className={`${styles.readerNav} ${tools.navigation}`}>
-    <button ref={trigger} type="button" className={`${styles.navToggle} ${tools.trigger}`} aria-expanded={open} aria-controls={id} aria-label={`章节导航${active ? `，当前${active.number} ${active.label}` : ''}`} title={active ? `${active.number} ${active.label}` : '章节导航'} onClick={toggle}><span>{active ? `${active.number} ${active.label}` : '章节'}</span><DossierIcon name="chevron" expanded={open}/></button>
-    {open ? <div ref={panel} id={id} className={`${styles.navPanel} ${tools.panel}`} style={position} aria-label="底稿章节与时间">
-      <div className={`${styles.navHead} ${tools.navHead}`}><span>跳转阅读位置</span><button type="button" onClick={() => { const first = sections[0]; if (first) jump(first.ref, true); }}>回到开头</button></div>
-      <nav className={`${styles.navSections} ${tools.sections}`} aria-label="底稿章节">{sections.map(section => <button type="button" key={section.ref} className={`${styles.navSection} ${tools.sectionLink}`} aria-current={current.section === section.ref ? 'location' : undefined} onClick={() => jump(section.ref)}><span>{section.number}</span>{section.label}</button>)}</nav>
-      {times.length ? <><p className={styles.navTimeTitle}>视频口播 · 段落起始时间</p><div className={`${styles.navTimes} ${tools.times}`}>{times.map(time => <button type="button" key={time.ref} aria-current={current.group === time.ref ? 'location' : undefined} onClick={() => jump(time.ref)}>{formatReadingTime(time.startMs)}</button>)}</div></> : null}
+    <button ref={trigger} type="button" className={`${styles.navToggle} ${tools.trigger}`} aria-expanded={open} aria-controls={id} aria-label={`章节导航${active ? `，当前${active.label}` : ''}`} title={active?.label ?? '章节导航'} onClick={toggle}>
+      <span>{active?.label ?? '章节导航'}</span><DossierIcon name="chevron" expanded={open}/>
+    </button>
+    {open ? <div ref={panel} id={id} className={`${styles.navPanel} ${tools.panel}`} style={position} aria-label="章节与口播定位">
+      <div className={`${styles.navHead} ${tools.navHead}`}><button type="button" onClick={() => { const first = sections[0]; if (first) jump(first.ref, true); }}>回到开头</button></div>
+      <nav className={`${styles.navSections} ${tools.sections}`} aria-label="底稿章节">{sections.map(section =>
+        <button type="button" key={section.ref} className={`${styles.navSection} ${tools.sectionLink}`} aria-current={current.section === section.ref ? 'location' : undefined} onClick={() => jump(section.ref)}>{section.label}</button>)}</nav>
+      {times.length ? <><p className={styles.navTimeTitle}>视频口播</p><div className={`${styles.navTimes} ${tools.times}`}>{times.map(time =>
+        <button type="button" key={time.ref} aria-current={current.group === time.ref ? 'location' : undefined} onClick={() => jump(time.ref)}>{formatReadingTime(time.startMs)}</button>)}</div></> : null}
     </div> : null}
   </div>;
 }
