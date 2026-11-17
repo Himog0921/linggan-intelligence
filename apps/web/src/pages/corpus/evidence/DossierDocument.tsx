@@ -103,7 +103,6 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
       {!sections.length && !hasMissing ? <p className={styles.empty}>本次范围没有可读文字。</p> : null}
       {dossier.selection.mode === 'explicit' ? <p className={styles.selectionNote}>当前为选定范围</p> : null}
       <EmptySpeechNotes materials={dossier.materials}/>
-      {dossier.selection.mode === 'explicit' ? <p className={styles.end}>当前为选定范围</p> : null}
     </article>
     {active && exportSnapshot ? <DossierExportDialog payload={exportSnapshot} domain={domain} onClose={closeModal} onUnavailable={onUnavailable}/> : null}
     {active && focus ? <DossierFocusDialog title={focus.title} groups={focus.groups} memoryKey={`${memoryKey}:focus:${focus.ref}`} onClose={closeModal}/> : null}
