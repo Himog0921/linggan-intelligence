@@ -544,3 +544,12 @@
 - 另运行 `saved_core_drives_topic_queue_and_persisted_membership` → `0 passed; 1 failed`：既有 `topic_research_automation/tests.rs` 仍断言 4 个阶段，而当前 `CURRENT_TASKS` 和实际结果为 1。该断言不在此前报告的修复范围，按要求只记录。首次底稿测试使用缺少图片摘要的合成读本导致同图用例失败，修正夹具后底稿 20 项通过。
 - `bash scripts/ci-preflight.sh origin/main` → Node `52 pass; 0 fail`，回填目标检查 `3 tests OK`；改动 Rust 文件的 `rustfmt --edition 2024 --config skip_children=true --check`、`git diff --check` 和相关 shell 语法检查通过。最终提交的独立审阅与远端 CI 状态以 PR 实际回执为准。
 - 本机 0223 已获单独授权但本轮未执行；0224、生产迁移、真实采集和模型外发未获授权。本轮未部署或启动本机运行库。
+
+### 2026-11-16 PR #603 合并与 3001 本机发布
+
+- Mog 确认将新发现的 P2 留作技术债并合并 PR #603；合并提交 `07e1b1f66a9bfb86ca8b1911f4dcff3fb0099217`。P2 为静态审阅发现：不同作品使用相同图片字节时，识读编辑尚未证明材料化版本与当前作品一致，可能影响来源归属和限制传播；尚未通过 API 复现。未在本次发布中扩展修复。
+- Mog 单独授权仅对本机 Intelligence 库执行 0224、0225；0223 已获授权。先停止旧 3001 与后台执行器，确认数据库身份为本机 `linggan_intelligence_dev`，加密备份的完整解密和 PostgreSQL 归档目录检查通过。
+- `./scripts/local-runtime.sh migrate` → `0223_opportunity_card_period_index applied`、`0224_content_understanding_deep_v2 applied`、`0225_content_understanding_deep_outcome applied`。迁移后账本与 226 个迁移文件逐项核对：缺失 0、额外 0、哈希不符 0。
+- 在独立的 3001 发布工作树构建并执行 `LINGGAN_RUNTIME_DIR=<独立发布工作树> zsh scripts/runtime/install.sh --target-sha 07e1b1f66a9bfb86ca8b1911f4dcff3fb0099217` → `迁移台账已是最新`、`revision 07e1b1f6 就绪`、`local-runtime` 已启动；`curl http://127.0.0.1:3001/health` → HTTP 200，数据库与前端版本均为 ready。巡检、媒体和 AI 执行器保持禁用；AI 原本启用，为避免未授权模型外发而临时禁用。
+- 浏览器在 ADHD 领域打开机会首页，用户问题、作品依据、创作者三个入口均可到达，领域仍为 ADHD。`GET /api/local/opportunity/domains/<ADHD领域>/opportunities?includeWeeklyComparison=true&limit=1` → HTTP 200、`items=0`、`hasMore=false`；现有库无通过核验的问题与机会卡，无法验证真实卡片详情和依据分页。
+- 迁移前后 `linggan_model_invocation` 总数均为 239、运行中 0；AI 批任务 pending/running 均为 0；`capture_package` 和 `local_discovery_package` 表计数均为 0。未触发真实采集或模型调用，未迁移生产库。[Delivery 43995181848](https://github.com/Himog0921/linggan-intelligence/actions/runs/43995181848) 对合并提交运行，14 个 job 均成功，工作流结论为 `success`。
