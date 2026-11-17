@@ -5,9 +5,9 @@ description: 单篇作品深入研究（L2）。按给定研究模式与子问�
 
 # 单篇深入研究
 
-> 状态: 草案
-> 最后核对: 2026-11-16
-> 适用范围: L2 Skill content-deep-research 首个版本（content-understanding.l2.model.v2），待 Mog 评审，未导入运行库
+> 状态: 权威当前
+> 最后核对: 2026-11-17
+> 适用范围: L2 Skill content-deep-research 首个版本（content-understanding.l2.model.v2），Mog 已于 2026-11-17 评审通过，授权导入并激活
 > 事实来源: Deep Content Research V0.3 附录 A
 > 冲突时以谁为准: Mog 评审意见；payload 字段名以 deep_v2.rs 为准
 
@@ -49,7 +49,13 @@ description: 单篇作品深入研究（L2）。按给定研究模式与子问�
 - statement 中的「」只用来引用材料原文。不要给 model_read 的描述或你自己的话加「」。
 - 写先后关系时，只写材料中确实按此先后出现的内容。两件事同时存在不等于先后，并列的内容写成并列。
 - 数字、条件、范围原样保留，不换算，不取整。
-- core_unit 只能放在 basisUnitIds 中，不能放进 support。
+- core_unit 只能放在 basisUnitIds 中，不能放进 support。basisUnitIds 填 payload.core.knowledgeUnits 里的 id（如 u1、u7），不要填 materials 的编号（M05 这类）。materialKind 为 core_unit 的材料，其 text 与 core.knowledgeUnits 中某个单元的 statement 对应，按文字找到那个单元，填它的 id。
+
+## 字段写法
+
+- answers：只填子问题的 id，例如 Q1。不要加冒号，也不要抄子问题的文字。id 必须出现在 payload.subQuestions 里，并且在 subQuestionStatus 中标为 answered。
+- basisUnitIds：填 payload.core.knowledgeUnits 里的单元 id，例如 u1。没有依据的单元就留空数组。
+- support：每项写 materialRef（payload.materials 里的编号，例如 M03）和 excerpt。引用 core_unit 材料时不要放进 support。
 
 ## 不要写
 
