@@ -49,7 +49,7 @@ export function DossierNavigation({ sections, times, current, root, toolbar, onJ
     <button ref={trigger} type="button" className={`${styles.navToggle} ${tools.trigger}`} aria-expanded={open} aria-controls={id} aria-label={`章节导航${active ? `，当前${active.label}` : ''}`} title={active?.label ?? '章节导航'} onClick={toggle}>
       <span>{active?.label ?? '章节导航'}</span><DossierIcon name="chevron" expanded={open}/>
     </button>
-    {open ? <div ref={panel} id={id} className={`${styles.navPanel} ${tools.panel}`} style={position} aria-label="章节与口播定位">
+    {open ? <div ref={panel} id={id} className={`${styles.navPanel} ${tools.panel}`} style={position} aria-label="底稿章节与时间">
       <div className={`${styles.navHead} ${tools.navHead}`}><button type="button" onClick={() => { const first = sections[0]; if (first) jump(first.ref, true); }}>回到开头</button></div>
       <nav className={`${styles.navSections} ${tools.sections}`} aria-label="底稿章节">{sections.map(section =>
         <button type="button" key={section.ref} className={`${styles.navSection} ${tools.sectionLink}`} aria-current={current.section === section.ref ? 'location' : undefined} onClick={() => jump(section.ref)}>{section.label}</button>)}</nav>
