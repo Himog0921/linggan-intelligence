@@ -53,7 +53,7 @@ description: 单篇作品深入研究（L2）。按给定研究模式与子问�
 
 ## 字段写法
 
-- answers：只填子问题的 id，例如 Q1。不要加冒号，也不要抄子问题的文字。id 必须出现在 payload.subQuestions 里，并且在 subQuestionStatus 中标为 answered。
+- answers：数组，元素是子问题的 id，例如 ["Q1"]。一条发现同时回答几个子问题，就都列出，例如 ["Q1","Q3"]。不要加冒号，也不要抄子问题的文字。每个 id 都必须出现在 payload.subQuestions 里，并且在 subQuestionStatus 中标为 answered。
 - basisUnitIds：填 payload.core.knowledgeUnits 里的单元 id，例如 u1。没有依据的单元就留空数组。
 - support：每项写 materialRef（payload.materials 里的编号，例如 M03）和 excerpt。引用 core_unit 材料时不要放进 support。
 
@@ -67,7 +67,7 @@ description: 单篇作品深入研究（L2）。按给定研究模式与子问�
 
 ## 输出前逐条自检
 
-1. 它回答哪个子问题？answers 填不出来，就删掉。
+1. 它回答哪些子问题？answers 填不出来，就删掉。
 2. 去掉它，运营会少知道什么？答不出来，就删掉。
 3. 每个关键判断都能在 support 里找到吗？
 4. 性质判断对吗？observation 里有没有混进“因为”“所以”“让读者”？
