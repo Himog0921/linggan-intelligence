@@ -120,7 +120,7 @@ pub async fn load_frozen_in(
         cap.context_tokens,cap.max_output_tokens,cap.max_timeout_seconds,cap.thinking_levels,cap.compat,
         cap.thinking_level_map,cap.output_mode,cap.strict_schema,cap.endpoint_ref,
         current.version_ref,current.secret_ref,current.api,current.base_url,current.local_endpoint,current_model.model_ref AS current_model_ref,
-        connection.enabled,route.endpoint_ref AS current_endpoint
+        connection.enabled,connection.connection_ref,route.endpoint_ref AS current_endpoint
         FROM linggan_model_config config JOIN linggan_model_entry model ON model.model_ref=config.model_ref
         JOIN linggan_model_connection_version original ON original.version_ref=model.connection_version_ref
         JOIN linggan_model_connection connection ON connection.connection_ref=original.connection_ref
@@ -136,6 +136,7 @@ pub async fn load_frozen_in(
             "model_connection_disabled".into(),
         ]));
     }
+    super::billing_pause::check(conn, row.try_get("connection_ref")?).await?;
     if row.try_get::<Uuid, _>("endpoint_ref")? != row.try_get::<Uuid, _>("current_endpoint")? {
         return Err(FoundationError::Conflict);
     }

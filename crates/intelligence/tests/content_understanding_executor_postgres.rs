@@ -31,8 +31,8 @@ use linggan_intelligence::{
     pi_adapter::PiAdapter,
 };
 use linggan_storage_postgres::Database;
-use sha2::{Digest, Sha256};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::{path::PathBuf, sync::Arc, time::Duration};
 use uuid::Uuid;
 
@@ -318,7 +318,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         "content-l1-owned-proof",
         4,
         Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
-        adapter,
+        adapter.clone(),
         drain.clone(),
     ));
     let (saved, old_saved) = tokio::time::timeout(Duration::from_secs(60), async {
@@ -602,7 +602,16 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         packet["resultSchema"],
         linggan_intelligence::content_understanding::response_schema()
     );
-    let raw_draft: Value = serde_json::from_str(&raw).unwrap();
+    assert!(serde_json::from_str::<Value>(&raw).is_err());
+    let repair: String = sqlx::query_scalar(
+        "SELECT result->>'replyRepair' FROM linggan_model_invocation WHERE invocation_ref=$1",
+    )
+    .bind(invocation)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(repair, "removed_one_trailing_brace");
+    let raw_draft: Value = serde_json::from_str(raw.strip_suffix('}').unwrap()).unwrap();
     assert_eq!(
         raw_draft,
         wire::draft(packet),
@@ -738,7 +747,112 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
             .unwrap(),
         calls
     );
+    prove_billing_pause(&db, work, &model, &endpoint, adapter).await;
     endpoint.finish().await;
+}
+
+async fn prove_billing_pause(
+    db: &Database,
+    work: Uuid,
+    model: &setup::Configured,
+    endpoint: &wire::Endpoint,
+    adapter: PiAdapter,
+) {
+    use linggan_intelligence::ai_foundation::{
+        batch_store::{BatchInput, BatchKind, CreateBatch, InputRef, ProbeOperation, create_batch},
+        executor::service,
+    };
+    use std::sync::atomic::Ordering;
+
+    submit_body(db, "新材料仍先摆出材料，再核对。本段只验证余额暂停。").await;
+    let preview = owner::preview(db, dossier::DOMAIN, work).await.unwrap();
+    endpoint.payment_required.store(true, Ordering::SeqCst);
+    let request = owner::start(db, &start_from(&preview, work)).await.unwrap();
+    let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
+    let worker = tokio::spawn(service::run(
+        db.clone(),
+        "l1-billing-pause-proof",
+        4,
+        Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
+        adapter,
+        drain.clone(),
+    ));
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let status: Option<(bool, String, String)> = sqlx::query_as(
+                "SELECT linggan_ai_billing_paused(p.connection_ref), i.result#>>'{diagnostic,httpStatus}', i.usage_state
+                 FROM linggan_ai_connection_billing_pause p
+                 JOIN linggan_model_invocation i USING(invocation_ref)
+                 JOIN linggan_content_understanding_result r USING(invocation_ref)
+                 WHERE p.connection_ref=$1 AND r.request_ref=$2",
+            )
+            .bind(model.connection).bind(request.request_ref)
+            .fetch_optional(db.pool()).await.unwrap();
+            if let Some(status) = status {
+                assert_eq!(status, (true, "402".into(), "unknown_reserved".into()));
+                break;
+            }
+            assert!(!worker.is_finished());
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.unwrap();
+    let blocked = owner::preview(db, dossier::DOMAIN, work).await.unwrap();
+    assert_eq!(blocked["canStart"], false);
+    assert!(
+        blocked["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|x| x == "model_connection_billing_paused")
+    );
+    let (config, revision): (Uuid, i64) = sqlx::query_as(
+        "SELECT current_config_ref,revision FROM linggan_ai_task_setting WHERE task_key='model_probe'",
+    ).fetch_one(db.pool()).await.unwrap();
+    endpoint.payment_required.store(false, Ordering::SeqCst);
+    create_batch(
+        db,
+        &CreateBatch {
+            command_ref: Uuid::new_v4(),
+            task_key: TaskKey::ModelProbe,
+            expected_task_revision: revision,
+            task_config_ref: config,
+            kind: BatchKind::Probe,
+            items: vec![BatchInput {
+                item_key: "billing-resume-probe".into(),
+                input: InputRef::Probe {
+                    sample_ref: Uuid::new_v4(),
+                    connection_version_ref: model.version,
+                    model_ref: Some(model.model),
+                    operation: ProbeOperation::Probe,
+                    profile: None,
+                },
+            }],
+        },
+    )
+    .await
+    .unwrap();
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            let paused: bool = sqlx::query_scalar("SELECT linggan_ai_billing_paused($1)")
+                .bind(model.connection)
+                .fetch_one(db.pool())
+                .await
+                .unwrap();
+            if !paused {
+                break;
+            }
+            assert!(!worker.is_finished());
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        owner::preview(db, dossier::DOMAIN, work).await.unwrap()["canStart"],
+        true
+    );
+    drain.request();
+    worker.await.unwrap().unwrap();
 }
 
 async fn seed_recoverable_failure(db: &linggan_storage_postgres::Database, work: Uuid) -> Uuid {

@@ -14,7 +14,8 @@ pub(crate) async fn check_queue_configuration(
 ) -> Result<(), FoundationError> {
     let row=sqlx::query("SELECT t.lifecycle,t.requires_skill,t.handler_contract,c.execution_contract,c.material_columns,c.model_config_ref,c.skill_version_ref,c.budget_mode,
         m.capability_ref,p.endpoint_ref,cap.endpoint_ref AS frozen_endpoint,b.current_version_ref,
-        connection.enabled AS connection_enabled,probe.state AS probe_state,probe.result AS probe_result
+        connection.enabled AS connection_enabled,probe.state AS probe_state,probe.result AS probe_result,
+        CASE WHEN $3 THEN false ELSE linggan_ai_billing_paused(connection.connection_ref) END AS billing_paused
         FROM linggan_ai_task_config c JOIN linggan_ai_task t USING(task_key)
         JOIN linggan_skill_binding b USING(task_key)
         LEFT JOIN linggan_model_config m ON m.config_ref=c.model_config_ref
@@ -28,7 +29,7 @@ pub(crate) async fn check_queue_configuration(
          WHERE model_ref=current_model.model_ref AND connection_version_ref=v.version_ref AND operation='probe'
          ORDER BY created_at DESC,invocation_ref DESC LIMIT 1)probe ON true
         WHERE c.task_config_ref=$1 AND c.task_key=$2")
-        .bind(config).bind(task.as_str()).fetch_optional(&mut **tx).await?.ok_or(FoundationError::NotFound)?;
+        .bind(config).bind(task.as_str()).bind(trial).fetch_optional(&mut **tx).await?.ok_or(FoundationError::NotFound)?;
     let mut denied = Vec::new();
     if serde_json::from_value::<std::collections::BTreeSet<super::super::task_config::MaterialColumn>>(
         row.get("material_columns"),
@@ -62,6 +63,9 @@ pub(crate) async fn check_queue_configuration(
         denied.push("model_configuration_unqualified".into());
     }
     if task != TaskKey::ModelProbe {
+        if row.get::<bool, _>("billing_paused") {
+            denied.push(super::super::billing_pause::REASON.into());
+        }
         if row.get::<Option<bool>, _>("connection_enabled") == Some(false) {
             denied.push("connection_disabled".into());
         }
