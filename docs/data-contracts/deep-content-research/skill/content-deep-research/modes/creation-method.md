@@ -1,8 +1,8 @@
 # 模式 creation_method：创作方法
 
-> 状态: 草案
-> 最后核对: 2026-11-16
-> 适用范围: L2 Skill content-deep-research 首个版本（content-understanding.l2.model.v2），待 Mog 评审，未导入运行库
+> 状态: 权威当前
+> 最后核对: 2026-11-17
+> 适用范围: L2 Skill content-deep-research 首个版本（content-understanding.l2.model.v2），Mog 已于 2026-11-17 评审通过，授权导入并激活
 > 事实来源: Deep Content Research V0.3 附录 A
 > 冲突时以谁为准: Mog 评审意见；payload 字段名以 deep_v2.rs 为准
 
