@@ -25,7 +25,7 @@ function audioRuns(groups: readonly ResolvedReadingGroup[]) {
   return runs;
 }
 function ImageSource({ unit }: { unit: DossierMaterial }) {
-  return <div className={styles.imageSource}><span>图片资料</span>{unit.originalUrl ? <a className={styles.focusTrigger} href={unit.originalUrl} target="_blank" rel="noreferrer">查看原图</a> : <span>原图尚未取得</span>}</div>;
+  return <div className={styles.imageSource}><span>图片</span>{unit.originalUrl ? <a className={styles.focusTrigger} href={unit.originalUrl} target="_blank" rel="noreferrer">查看原图</a> : <span>原图尚未取得</span>}</div>;
 }
 function readableSnapshot(previous: readonly DossierMaterial[], latest: readonly DossierMaterial[]): boolean {
   const current = new Map(latest.map(unit => [unit.ref, unit]));
@@ -70,7 +70,7 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
     <div ref={toolbar} className={`${styles.toolbar} ${tools.toolbar}`}>
       <div className={styles.toolbarContext}>
           <div className={styles.snapshot}><DossierIcon name="clock"/><span>数据截至</span><time dateTime={dossier.asOf}>{humanMoment(dossier.asOf)}</time></div>
-          <span className={styles.availability} data-complete={gaps.length === 0 && !hasMissingInformation && sections.length > 0}><DossierIcon name={gaps.length || hasMissingInformation ? 'info' : 'check'}/>{gaps.length || hasMissingInformation ? '含待补内容' : sections.length ? '内容就绪' : '暂无可读文字'}</span>
+          {sections.length || gaps.length || hasMissingInformation ? <span className={styles.availability} data-complete={gaps.length === 0 && !hasMissingInformation && sections.length > 0}><DossierIcon name={gaps.length || hasMissingInformation ? 'info' : 'check'}/>{gaps.length || hasMissingInformation ? '含待补内容' : '内容就绪'}</span> : null}
         {showNavigation ? <DossierNavigation sections={navSections} times={times} current={position.current} root={root} toolbar={toolbar} onJump={jump}/> : null}
         <div className={`${styles.actions} ${tools.actions}`}><ActionButton className={`${styles.control} ${styles.quiet}`} aria-label="刷新底稿" title="刷新底稿" disabled={busy} onClick={onRefresh}><DossierIcon name="refresh"/><span className={`${styles.refreshLabel} ${tools.refreshLabel}`}>刷新</span></ActionButton><ActionButton className={`${styles.control} ${styles.primary} ${tools.export}`} onClick={openExport}><DossierIcon name="download"/>导出</ActionButton></div>
       </div>
