@@ -634,3 +634,48 @@
 
 - 其他关联检查：`cargo test -p linggan-contracts --lib --locked` → 25 passed；`cargo test -p linggan-intelligence --lib --locked` → 399 passed、19 ignored；`cargo test -p linggan-evidence --lib --locked` → 194 passed、1 ignored；`npm --prefix apps/pi-adapter test` → 73 passed；离线预览浏览器 `offline_preview_browser_main_path` → 1 passed；`npm --prefix apps/web test -- src/pages/topics` → 124 passed。上述命令均 exit 0，模拟服务仅使用本地回环。
 - W6 锁修正后的 `env -u LINGGAN_OPPORTUNITY_CARD bash scripts/test-opportunity-postgres.sh` → exit 0、25 组 130 passed、0 failed、0 ignored，输出 `Opportunity PostgreSQL proof passed` 和隔离资源清理确认。与 W0 相比没有新增失败；最后一轮所有 CI 选择项以 W10 的结果为准。
+
+- W10：复核 [PROOF_INDEX](PROOF_INDEX.md) 共 32 条：28 条已有仓库内对应测试、4 条历史时序或性能结果无法按原环境复现、0 条待补。对图集记录以 `git show 5ecd684b` 逐名对照，原底稿 13 项和素材读取 7 项均保留在当前测试集中。补齐文档状态头和总索引，更新 HANDOFF §7 并标明历史环境信息；`flagCounts` 汇总重建结果，读取时才产生的 `stale_read_model` 不写入该报告。最终整轮复验结果另记如下。
+- W10 最终复验开始：`env -u LINGGAN_OPPORTUNITY_CARD bash scripts/test-opportunity-postgres.sh` → exit 0，25 组 130 passed、0 failed、0 ignored；输出 `Opportunity PostgreSQL proof passed`，专用容器和卷清理已确认。其余命令仍在串行运行，结果以下续记录为准。
+
+- W10 最终复验：代码基准 `86f76b27`；关闭机会卡开关，隔离数据库和合成数据，`RUST_TEST_THREADS=1`、`CARGO_BUILD_JOBS=2`，无真实采集或模型调用。下列结果均为最后一次执行；相比 W0 新增失败为 0。完整 runner 自报专用容器和卷清理通过。
+
+| 命令 | 退出码 | 输出 |
+|---|---:|---|
+| `env -u LINGGAN_OPPORTUNITY_CARD bash scripts/test-opportunity-postgres.sh` | 0 | 25 组 130 passed、0 failed、0 ignored；隔离资源清理通过 |
+| `bash scripts/test-local-runtime-schema.sh` | 0 | Fresh and repeat runtime schema migration passed; retired tables absent. |
+| `npm --prefix apps/web run verify` | 0 | 172 文件、1796 passed、0 failed |
+| `node --test scripts/ci-select.test.mjs scripts/check-opportunity-clippy.test.mjs` | 0 | 25 passed、0 failed |
+| `node scripts/check-opportunity-clippy.mjs` | 0 | Opportunity diagnostics: 0; other diagnostics: 848; cargo exit: 0 |
+| `bash scripts/test-research-dossier-postgres.sh --ai-foundation` | 0 | 6 组，58 passed、0 failed、0 ignored |
+| `bash scripts/test-research-dossier-postgres.sh --ai-service` | 0 | 8 组，36 passed、0 failed、0 ignored |
+| `bash scripts/test-research-dossier-postgres.sh --ai-install` | 0 | 2 组，15 passed、0 failed、0 ignored |
+| `bash scripts/test-research-dossier-postgres.sh --ai-readonly` | 0 | 3 组，16 passed、0 failed、0 ignored |
+| `bash scripts/test-ocr-recognition-postgres.sh --purge-only` | 0 | 1 组，4 passed、0 failed、0 ignored |
+| `bash scripts/test-ocr-recognition-postgres.sh --reading-only` | 0 | 1 组，7 passed、0 failed、0 ignored |
+| `bash scripts/test-ocr-recognition-postgres.sh --browser` | 0 | 2 组，11 passed、0 failed、0 ignored |
+| `bash scripts/test-comment-study-productization-postgres.sh` | 0 | 11 组，31 passed、0 failed、0 ignored |
+| `bash scripts/test-content-workbench-postgres.sh` | 0 | 8 组，115 passed、0 failed、0 ignored |
+| `bash scripts/test-content-workbench-postgres.sh --browser` | 0 | 1 组，1 passed、0 failed、0 ignored |
+| `bash scripts/test-collection-single-run-postgres.sh` | 0 | 7 组，24 passed、0 failed、0 ignored |
+| `bash scripts/test-research-dossier-postgres.sh --dossier-input` | 0 | 11 组，65 passed、0 failed、0 ignored |
+| `bash scripts/test-research-dossier-postgres.sh --dossier-ui` | 0 | 2 组，2 passed、0 failed、0 ignored |
+| `bash scripts/test-web-app-postgres.sh` | 0 | 11 组，21 passed、0 failed、0 ignored |
+| `cargo test -p linggan-contracts --lib --locked -- --test-threads=1` | 0 | 1 组，25 passed、0 failed、0 ignored |
+| `cargo test -p linggan-intelligence --lib --locked -- --test-threads=1` | 0 | 1 组，399 passed、0 failed、19 ignored |
+| `cargo test -p linggan-evidence --lib --locked -- --test-threads=1` | 0 | 1 组，194 passed、0 failed、1 ignored |
+| `cargo test -p linggan-evidence --test ocr_adoption --locked -- --test-threads=1` | 0 | 1 组，50 passed、0 failed、0 ignored |
+| `cargo test -p linggan-worker --bin linggan-media-worker --locked -- --test-threads=1` | 0 | 1 组，4 passed、0 failed、0 ignored |
+| `cargo test -p linggan-worker --bin linggan-research-dossier --locked -- --test-threads=1` | 0 | 1 组，2 passed、0 failed、0 ignored |
+| `cargo test -p linggan-worker --bin linggan-opportunity --locked -- --test-threads=1` | 0 | 1 组，2 passed、0 failed、0 ignored |
+| `cargo test -p linggan-intelligence --test note_analysis_contract --locked -- --test-threads=1` | 0 | 1 组，10 passed、0 failed、0 ignored |
+| `cargo test -p linggan-intelligence --test note_interpretation_offline --locked -- --test-threads=1` | 0 | 1 组，22 passed、0 failed、0 ignored |
+| `cargo test -p linggan-api --bins --locked -- local_web::offline_preview_tests --test-threads=1` | 0 | 1 组，1 passed、0 failed、1 ignored |
+| `cargo test -p linggan-api --bins --locked offline_preview_browser_main_path -- --ignored --nocapture --test-threads=1` | 0 | 1 组，1 passed、0 failed、0 ignored |
+| `cargo test -p linggan-api --bins --locked -- local_web::web_app_tests local_web::corpus_shell_api local_web::evidence_ local_web::content_workbench_sources_api::tests --test-threads=1` | 0 | 1 组，29 passed、0 failed、5 ignored |
+
+- 其他最终复验：`npm --prefix apps/pi-adapter test` → exit 0、73 passed；`npm --prefix apps/web test -- src/pages/topics` → exit 0、15 文件 / 124 passed；`node scripts/check-web-react-boundary.mjs` → exit 0，`node --test scripts/check-web-react-boundary.test.mjs` → exit 0、1 passed；`npm --prefix apps/web run lids:verify` → exit 0、5 passed；`python3 -B scripts/runtime/tests/test_ai_guard.py MigrationRegistry` → exit 0、1 passed。
+- `LINGGAN_WEB_NODE=<node> bash scripts/runtime/prepare-web.sh --build 86f76b27` 连续两次及 `LINGGAN_WEB_NODE=<node> bash scripts/runtime/prepare-web.sh --check 86f76b27` 均 exit 0，输出 `web: React build for revision 86f76b27 ready`；仅在本 worktree 构建。改动的 Rust 文件逐一执行 `rustfmt --edition 2024 --config skip_children=true --check` → exit 0。`bash scripts/ci-preflight.sh f730df8ab50a36217a0c0073717d3c69000d8af0` → exit 0。
+- W6/W10 的完整最终复验全部退出 0；前述首次工作台失败及其重跑结果仍保留，原因未确定。定向 Clippy 的 848 条为非目标诊断汇总，不代表全仓无告警。运行库和生产的不变量未执行，G1 真实任务未开始。
+
+- 最终主线核对：`git ls-remote origin refs/heads/main` → `11389187177321e8b4ed4ed8f53f09d09cbc5f2c`；`git merge-base --is-ancestor f730df8ab50a36217a0c0073717d3c69000d8af0 11389187177321e8b4ed4ed8f53f09d09cbc5f2c` → exit 0。与基线相比主线改动 13 个文件、与本分支改动重叠 0；主线迁移仍止于 0225，0226 编号未冲突。最终测试在原基线上的代码 `86f76b27` 执行，未声称在新主线整合后通过。最终文档检查前 `bash scripts/ci-preflight.sh f730df8ab50a36217a0c0073717d3c69000d8af0` → exit 0，输出 `Preflight passed; required module proofs and independent review remain separate.`
