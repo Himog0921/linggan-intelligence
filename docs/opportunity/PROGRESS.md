@@ -600,3 +600,5 @@
 - W7：按任务书记录 Q-45，阶段 1 暂不改变提及率口径；同时记录负责人已答复的 Q-49，限定 Clippy 的依赖告警处理。`rg -n '^## Q-(45|49)' docs/opportunity/QUESTIONS.md` 可定位两条记录。
 
 - W8：准备 G1 任务和记录表，真实卡片、授权、不变量与关闭态回归仍为前提；通过标准由负责人填写。`rg -n '阻塞|3–5|通过标准|check-invariants' docs/opportunity/G1.md` 可核对准备包；未对运行库执行检查。
+
+- W9：编写第一张真实卡路径，标出 A1–A4 均待授权、真实研究可能接收的材料、单条研究的三个阶段和全局同步影响。`rg -n '待授权|3N|没有领域参数|totalViolations' docs/opportunity/FIRST_CARD_RUNBOOK.md` 可核对；未迁移、研究、同步、重建或打开开关。
