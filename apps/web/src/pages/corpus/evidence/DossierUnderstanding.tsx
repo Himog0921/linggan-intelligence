@@ -136,7 +136,8 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
         {deepAnalyses?.length ? <div>
           <h3 className={styles.heading}>研究发现</h3>
           {deepAnalyses.map(analysis => <div key={analysis.analysisRef}>
-            <p className={styles.paragraph}>{analysis.researchMode ? `${DEEP_MODE_LABELS[analysis.researchMode] ?? analysis.researchMode}：` : ''}{analysis.question}</p>
+            {analysis.researchMode ? <p className={styles.paragraph}>{`研究模式：${DEEP_MODE_LABELS[analysis.researchMode] ?? analysis.researchMode}`}</p> : null}
+            <p className={styles.paragraph}>{analysis.question}</p>
             {analysis.coreBasis ? <p className={styles.paragraph}>
               {analysis.coreBasis.kind === 'revision' ? '基于某次修订' : '基于原始 Core'}
             </p> : null}
