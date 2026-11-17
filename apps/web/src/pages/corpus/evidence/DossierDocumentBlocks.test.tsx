@@ -156,7 +156,7 @@ it('同图连续文字只标一次类型，切换视觉观察时保留边界和�
     { ...common, ref: 'c', kind: 'paragraph', contentType: 'visual_description', text: '蓝色阅读卡覆盖页面中部。' },
     { ...common, ref: 'd', kind: 'paragraph', text: '不要做' },
   ]);
-  expect(screen.getAllByText('图片文字')).toHaveLength(2);
+  expect(screen.getAllByText('图片文字 · 识别提取')).toHaveLength(2);
   expect(screen.getAllByText('视觉描述 · 非原文')).toHaveLength(1);
   expect(screen.getByRole('columnheader', { name: '时间' })).toBeVisible();
   expect(screen.getByText('蓝色阅读卡覆盖页面中部。')).toBeVisible();
@@ -169,8 +169,8 @@ it('前景与背景文字切换保留归属边界，连续背景不重复标注'
     { ...common, ref: 'b', kind: 'paragraph', text: '书封作者', sourceRole: 'background' },
     { ...common, ref: 'c', kind: 'paragraph', text: '书封出版社', sourceRole: 'background' },
   ]);
-  expect(screen.getAllByText('背景文字')).toHaveLength(1);
-  expect(screen.getAllByText('图片文字')).toHaveLength(1);
+  expect(screen.getAllByText('背景文字 · 识别提取')).toHaveLength(1);
+  expect(screen.getAllByText('图片文字 · 识别提取')).toHaveLength(1);
 });
 
 it('多张图片的页序说明只在文末保留一次，不逐图制造核对入口', () => {
