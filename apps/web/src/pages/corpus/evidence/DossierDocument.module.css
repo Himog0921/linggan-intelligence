@@ -144,8 +144,8 @@
 .navTimes button:hover,.navTimes button[aria-current] { color:var(--lgi-signal-ink);border-color:var(--lgi-border);background:var(--lgi-canvas-low); }
 
 /* Shared dialogs: quiet borders, readable content, stable desktop dimensions. */
-.dialog { padding:0;border:1px solid var(--lgi-ink);box-shadow:var(--lgi-shadow-hard);max-width:calc(100% - var(--lgi-space-8));max-height:calc(100dvh - var(--lgi-space-12)); }
-.dialog::backdrop { background:var(--lgi-canvas-overlay);backdrop-filter:blur(var(--lgi-space-1)); }
+.dialog { padding:0;border:1px solid var(--lgi-ink);background:var(--lgi-canvas);color:var(--lgi-ink);box-shadow:var(--lgi-shadow-hard);max-width:calc(100% - var(--lgi-space-8));max-height:calc(100dvh - var(--lgi-space-12)); }
+.dialog::backdrop { background:color-mix(in srgb,var(--lgi-ink) 36%,transparent);backdrop-filter:blur(var(--lgi-space-1)); }
 .modalHeader { padding:var(--lgi-space-3) var(--lgi-space-5);border-bottom:1px solid var(--lgi-hairline);display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-3); }
 .modalHeader h2 { font:var(--lgi-type-section-weight) var(--lgi-type-section-size)/var(--lgi-type-section-leading) var(--dr-font); }
 .modalHeader p { font:var(--lgi-type-aux-weight) var(--lgi-type-aux-size)/var(--lgi-type-aux-leading) var(--dr-font);color:var(--lgi-muted);margin-top:var(--lgi-space-1); }
