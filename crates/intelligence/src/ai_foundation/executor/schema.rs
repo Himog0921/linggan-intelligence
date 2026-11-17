@@ -38,6 +38,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
     migration!("0179_retire_research_relations"),
     migration!("0191_note_analysis"),
     migration!("0192_reset_image_recognition"),
+    migration!("0226_ai_connection_billing_pause"),
 ];
 
 pub(super) async fn require_ready(db: &Database) -> Result<(), ExecutorError> {

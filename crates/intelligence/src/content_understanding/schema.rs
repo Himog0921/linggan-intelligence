@@ -42,7 +42,7 @@ pub fn response_schema() -> Value {
         ],
     );
     core_fields["summary"]["properties"]["text"]["description"] = json!(
-        "用中立语气概括整篇用途。只由发布者声称的产品范围、效果、期限、售后条款等，在摘要中保留归因，例如「作者称资料可长期访问」。画面样例只支持其中能看到的内容，不能证明全套材料都符合作者描述。"
+        "用中立语言概括整篇用途，并引用支持摘要的知识单元。书名、歌名等确切作品名只有在所列单元引用的证据逐字包含时才写作《…》。主题、活动和转述用普通陈述，不标为作品名或原话。缺少证据时概括已支持的用途。只由发布者声称的产品范围、效果、期限、售后条款等保留归因。画面样例只能支持其中能看到的内容。"
     );
     core_fields["mainTopicUnitId"]["description"] = json!(
         "必填。先为整篇的主要话题或发布目的写一条有依据的知识单元，其 unitType 必须是 discussion。mainTopicUnitId 填这条单元的 id。输出前按 id 找回该单元，确认 unitType 是 discussion。"
@@ -114,7 +114,20 @@ pub fn response_schema() -> Value {
         }))
     }));
     schema["description"] = json!(
-        "片段编号 s1、s2 等由输入指定，证据条目 ID 由本回答编写并以 ev 开头（例如 ev1、ev2）。仅返回一个完整的 JSON 对象，顶层只有 core、imageContributions、evidenceCandidates，所有层级仅填写列出的字段，不添加额外字段或说明文字。字符串正确转义，括号成对闭合，对象结束后不再追加内容。"
+        "仅返回一个完整的 JSON 对象。参考 examples 中的完整结构，内容和编号以本次材料为准。顶层只有 core、imageContributions、evidenceCandidates，证据候选与 core 同级。各层不添加额外字段或说明。字符串正确转义，括号成对闭合，对象结束后不再追加内容。"
     );
+    schema["examples"] = json!([{
+        "core":{
+            "summary":{"text":"作者分享核对材料顺序的方法。","unitIds":["u1"]},
+            "contentType":"practical_guide",
+            "mainTopicUnitId":"u1",
+            "knowledgeUnits":[{"id":"u1","unitType":"discussion","assertionKind":"author_claim",
+                "statement":"作者建议先核对顺序，再摆出材料。","speakerRole":"author","evidenceRefs":["ev1"]}],
+            "candidateLabels":[]
+        },
+        "imageContributions":[],
+        "evidenceCandidates":{"text":[{"id":"ev1","inputCitationId":"s1",
+            "quote":"先核对顺序，再摆出材料"}],"vision":[]}
+    }]);
     schema
 }
