@@ -71,6 +71,7 @@ pub struct CardRebuildReport {
     pub cards_built: usize,
     pub changes_deferred: usize,
     pub voices_excluded: usize,
+    pub flag_counts: BTreeMap<String, usize>,
     pub voice_exclusion_reasons: BTreeMap<String, usize>,
     /// Counts observation rows in this domain snapshot, not distinct comments or creators.
     /// None means the rebuild had no due cards and did not evaluate these diagnostics.
@@ -116,6 +117,7 @@ pub async fn rebuild_opportunity_cards(
         cards_built: 0,
         changes_deferred,
         voices_excluded: 0,
+        flag_counts: BTreeMap::new(),
         voice_exclusion_reasons: BTreeMap::new(),
         unparseable_observations: None,
     };
@@ -161,6 +163,20 @@ pub async fn rebuild_opportunity_cards(
         .fetch_one(&mut *tx)
         .await?;
         let (card, excluded) = assemble_card(&mut tx, problem, &inputs).await?;
+        let flags: std::collections::BTreeSet<&str> = card
+            .flags
+            .iter()
+            .chain(
+                card.demand
+                    .groups
+                    .iter()
+                    .flat_map(|group| group.flags.iter()),
+            )
+            .copied()
+            .collect();
+        for flag in flags {
+            *report.flag_counts.entry(flag.to_owned()).or_default() += 1;
+        }
         touch_sources(&mut tx, problem, &card).await?;
         save(&mut tx, problem, taxonomy, version, &as_of, &card).await?;
         sqlx::query(

@@ -60,9 +60,17 @@ async fn p1(db: &linggan_storage_postgres::Database) -> Value {
 async fn pending_change_is_a_read_only_stale_flag_for_card_and_list() {
     use linggan_intelligence::opportunity::{OpportunityListQuery, read_card, read_opportunities};
     let (db, domain, digest) = prepare().await;
-    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+    let report = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
         .await
         .unwrap();
+    assert_eq!(
+        report.flag_counts.get("not_calibrated"),
+        Some(&report.cards_built)
+    );
+    assert_eq!(
+        serde_json::to_value(&report).unwrap()["flagCounts"]["not_calibrated"],
+        report.cards_built
+    );
     let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
         .fetch_one(db.pool())
         .await
@@ -117,6 +125,137 @@ async fn pending_change_is_a_read_only_stale_flag_for_card_and_list() {
         .await
         .unwrap();
     assert_eq!(stale(&read_card(&db, problem).await.unwrap()), 0);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn invariant_violations_prevent_metric_and_card_commits() {
+    use linggan_intelligence::opportunity::{RebuildMode, rebuild_problem_metrics};
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let original = p1(&db).await;
+    let metric_digest = || async {
+        sqlx::query_scalar::<_, Option<String>>("SELECT md5(string_agg(to_jsonb(metric)::text, ',' ORDER BY to_jsonb(metric)::text)) FROM linggan_opportunity_problem_metric_period metric")
+            .fetch_one(db.pool()).await.unwrap()
+    };
+    let original_metrics = metric_digest().await;
+    let updated = sqlx::query("UPDATE linggan_opportunity_creator_problem_density SET sufficient=true WHERE creator_id='creator-C2' AND protocol_version IS NULL AND metric_def_version=1 AND problem_ref=md5('metric-problem:1')::uuid")
+        .execute(db.pool()).await.unwrap();
+    assert_eq!(updated.rows_affected(), 1);
+    let report = check_invariants(&db).await.unwrap();
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|check| check.id == "I7" && check.violations > 0)
+    );
+    let metrics = rebuild_problem_metrics(
+        &db,
+        domain,
+        "2026-11-10T00:00:00Z",
+        &digest,
+        RebuildMode::Incremental,
+    )
+    .await;
+    assert!(metrics.is_err());
+    let card = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full).await;
+    assert!(card.is_err());
+    assert_eq!(p1(&db).await, original);
+    assert_eq!(metric_digest().await, original_metrics);
+    sqlx::query("UPDATE linggan_opportunity_creator_problem_density SET sufficient=false WHERE creator_id='creator-C2' AND protocol_version IS NULL AND metric_def_version=1 AND problem_ref=md5('metric-problem:1')::uuid").execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_opportunity_problem_lineage(operation_ref,from_problem_ref,to_problem_ref,relation,created_at) VALUES(gen_random_uuid(),md5('metric-problem:1')::uuid,md5('metric-problem:2')::uuid,'rename','2026-11-09T00:00:00Z'),(gen_random_uuid(),md5('metric-problem:2')::uuid,md5('metric-problem:1')::uuid,'rename','2026-11-09T00:00:00Z')").execute(db.pool()).await.unwrap();
+    let report = check_invariants(&db).await.unwrap();
+    assert!(
+        report
+            .checks
+            .iter()
+            .any(|check| check.id == "I8" && check.violations > 0)
+    );
+    let metrics = rebuild_problem_metrics(
+        &db,
+        domain,
+        "2026-11-10T00:00:00Z",
+        &digest,
+        RebuildMode::Incremental,
+    )
+    .await;
+    assert!(metrics.is_err());
+    let card = rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full).await;
+    assert!(card.is_err());
+    assert_eq!(p1(&db).await, original);
+    assert_eq!(metric_digest().await, original_metrics);
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn quality_flags_track_missing_work_metadata() {
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let has =
+        |value: &Value, flag: &str| value["flags"].as_array().unwrap().iter().any(|v| v == flag);
+    let initial = p1(&db).await;
+    assert!(!has(&initial, "period_anchor_missing"));
+    assert!(!has(&initial, "author_unknown_share_high"));
+    sqlx::raw_sql("CREATE TABLE synthetic_detail_backup AS SELECT material_ref,published_at,author_external_id FROM linggan_material_content_detail; ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER; UPDATE linggan_material_content_detail SET published_at=NULL; ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER;").execute(db.pool()).await.unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    assert!(has(&p1(&db).await, "period_anchor_missing"));
+    sqlx::raw_sql("ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER; UPDATE linggan_material_content_detail detail SET published_at=backup.published_at,author_external_id=NULL FROM synthetic_detail_backup backup WHERE detail.material_ref=backup.material_ref; ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER;").execute(db.pool()).await.unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let missing_author = p1(&db).await;
+    assert!(!has(&missing_author, "period_anchor_missing"));
+    assert!(has(&missing_author, "author_unknown_share_high"));
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn quality_flags_track_period_sample_thresholds() {
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let has =
+        |value: &Value, flag: &str| value["flags"].as_array().unwrap().iter().any(|v| v == flag);
+    let initial = p1(&db).await;
+    assert!(has(&initial, "collection_below_target"));
+    assert!(has(&initial, "collection_volume_shift"));
+    assert!(
+        initial["demand"]["groups"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|g| has(g, "insufficient_sample"))
+    );
+    let (minimum, target): (i64, i64) = sqlx::query_as("SELECT (d.params->>'min_n_period')::bigint,(d.params->>'collection_target_per_period')::bigint FROM linggan_opportunity_metric_definition_current c JOIN linggan_opportunity_metric_definition d USING(version) WHERE c.singleton")
+        .fetch_one(db.pool()).await.unwrap();
+    sqlx::raw_sql("ALTER TABLE linggan_material_content_detail DISABLE TRIGGER USER; UPDATE linggan_material_content_detail SET published_at='2026-11-09T00:00:00Z' WHERE published_at IS NOT NULL; ALTER TABLE linggan_material_content_detail ENABLE TRIGGER USER;").execute(db.pool()).await.unwrap();
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let current = p1(&db).await;
+    let groups = current["demand"]["groups"].as_array().unwrap();
+    assert!(
+        groups
+            .iter()
+            .map(|g| g["current"]["n"].as_i64().unwrap())
+            .sum::<i64>()
+            >= target
+    );
+    assert!(!has(&current, "collection_below_target"));
+    assert!(!has(&current, "collection_volume_shift"));
+    assert!(
+        groups
+            .iter()
+            .any(|g| g["current"]["n"].as_i64().unwrap() >= minimum
+                && !has(g, "insufficient_sample"))
+    );
 }
 
 #[tokio::test]

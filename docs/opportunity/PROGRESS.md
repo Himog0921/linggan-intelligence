@@ -579,3 +579,18 @@
 +         WHEN candidate.period_anchor_at IS NULL THEN 'period_anchor_missing'
 +         WHEN candidate.first_observed_at IS NULL THEN 'observed_at_unparseable'
 ```
+
+- W3：`CardRebuildReport.flagCounts` 按卡片汇总提示，每张卡片对同一提示最多计一次。`cargo test -p linggan-intelligence --test opportunity_metrics_postgres --locked -- --ignored --exact card::<测试名> --test-threads=1` 在一次性 PostgreSQL 中分别运行 `pending_change_is_a_read_only_stale_flag_for_card_and_list`、`invariant_violations_prevent_metric_and_card_commits`、`quality_flags_track_missing_work_metadata`、`quality_flags_track_period_sample_thresholds`，均退出 0、各 1 passed。I7、I8 分别阻止两种重建，测试对比卡片和指标结果未变化。阈值从测试库的当前定义读取。Q-48 已确认阶段 1 的 `not_calibrated` 无反向条件。
+
+| 提示或检查 | 产生位置 | 测试（`crates/intelligence/tests/` 下） | 状态 |
+|---|---|---|---|
+| insufficient_sample | `opportunity/card/groups.rs:75` | `opportunity_metrics_postgres/card.rs::quality_flags_track_period_sample_thresholds` | 新增 |
+| no_baseline | `opportunity/card/groups.rs:78` | `opportunity_metrics_postgres.rs::standard_answers_protocol_groups_and_incremental_match` | 已有 |
+| not_calibrated | `opportunity/card/context.rs:58` | `opportunity_metrics_postgres/card.rs::pending_change_is_a_read_only_stale_flag_for_card_and_list` | 新增；反向不适用 |
+| period_anchor_missing、author_unknown_share_high | `opportunity/card/context.rs:60`、`:63` | `opportunity_metrics_postgres/card.rs::quality_flags_track_missing_work_metadata` | 新增 |
+| collection_below_target、collection_volume_shift | `opportunity/card/context.rs:67`、`:81` | `opportunity_metrics_postgres/card.rs::quality_flags_track_period_sample_thresholds` | 新增 |
+| collection_protocol_changed | `opportunity/card/context.rs:75` | `opportunity_metrics_postgres/card.rs::card_keeps_unknown_and_known_protocols_in_separate_groups` | 已有 |
+| engagement_reference_missing | `opportunity/card/context.rs:84` | `opportunity_metrics_postgres/card.rs::card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices` | 已有 |
+| stale_read_model | `opportunity/card/read.rs:260` | `opportunity_metrics_postgres/card.rs::pending_change_is_a_read_only_stale_flag_for_card_and_list` | 新增 |
+| no_eligible_comments、区间为空 | `opportunity/problem_metrics/calculate.rs:138` | `opportunity_metrics_postgres.rs::standard_answers_protocol_groups_and_incremental_match` | 已有 |
+| I7、I8 不变量 | `opportunity/invariants.rs` | `opportunity_metrics_postgres/card.rs::invariant_violations_prevent_metric_and_card_commits` | 新增 |
