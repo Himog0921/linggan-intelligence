@@ -539,6 +539,18 @@
 - 不使用时间阈值。理由：仓库已经有精确的变更队列，比“24 小时”的估计更准，也不需要新增参数（R3）。
 - 因撤回而被删除的卡片，行为不变（直接不可见）。
 
+### D-066 排除原因的优先级
+一条评论只记一个排除原因，按以下顺序取第一个满足的：
+1. `not_in_domain_primary`
+2. `restricted`
+3. `work_author_unknown`
+4. `comment_time_unknown`
+5. `period_anchor_missing`
+6. `observed_at_unparseable`
+7. `creator_self`
+
+理由：撤回是墓碑（R10），优先级必须高于数据质量类原因，否则会污染质量提示。有效评论集合不变，只改变排除计数的归类。
+
 ## 待裁定
 
 - D-057 的影响与可行性验证仍未完成。

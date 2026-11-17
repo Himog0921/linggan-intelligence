@@ -560,3 +560,22 @@
 - `bash scripts/test-opportunity-postgres.sh`：退出 0，25 组共 124 passed、0 failed，隔离容器和卷清理通过。`cd apps/web && npm run verify`：退出 0，172 个文件、1795 项测试通过。`cargo clippy -p linggan-intelligence -p linggan-worker --all-targets --locked`：退出 101，依赖 `linggan-evidence` 有 59 条既有 `too_many_lines` 错误，检查未到达机会卡目标代码。
 - Q-46、Q-47、Q-48 已依负责人答复记录；W1 的事件未处理缺口需要如实保留。
 - W1：卡片级 `flags` 是 `card/read_model.rs:14`；需求分组级是同文件的 `DemandGroup.flags`。单卡与列表在同一快照内批量读取卡片变更，只修改响应。Q-46：来源事件尚未转为变更队列时不显示该标记。`cargo test -p linggan-intelligence --test opportunity_metrics_postgres --locked -- --ignored --exact card::pending_change_is_a_read_only_stale_flag_for_card_and_list --test-threads=1` 使用隔离 PostgreSQL，退出 0、1 passed；`cd apps/web && npm test -- --run src/pages/opportunity/OpportunityPage.test.tsx` 退出 0、11 passed。改动的两个 Rust 文件 `rustfmt --edition 2024 --config skip_children=true --check` 退出 0。
+- W2：新增前向迁移 0226，函数差异仅移动 `restricted` 分支并入队已有问题；未迁移运行库。`cargo test -p linggan-intelligence --test opportunity_postgres --locked -- --ignored --exact restricted_takes_precedence_over_unknown_work_author --test-threads=1` 在隔离库退出 0、1 passed；`bash scripts/test-local-runtime-schema.sh` 退出 0，输出 `Fresh and repeat runtime schema migration passed; retired tables absent.` 修改的 Rust 文件格式检查退出 0。函数差异：
+
+```diff
+          WHEN NOT candidate.in_primary THEN 'not_in_domain_primary'
+-         WHEN candidate.work_author_external_id IS NULL THEN 'work_author_unknown'
+-         WHEN candidate.comment_time_unknown THEN 'comment_time_unknown'
+-         WHEN candidate.period_anchor_at IS NULL THEN 'period_anchor_missing'
+-         WHEN candidate.first_observed_at IS NULL THEN 'observed_at_unparseable'
+          WHEN EXISTS (
+           SELECT 1 FROM linggan_material_comment_restriction restriction
+           WHERE restriction.content_public_ref = candidate.content_ref
+             AND restriction.comment_external_id = candidate.comment_external_id
+             AND restriction.restricted_at <= p_as_of
+          ) THEN 'restricted'
++         WHEN candidate.work_author_external_id IS NULL THEN 'work_author_unknown'
++         WHEN candidate.comment_time_unknown THEN 'comment_time_unknown'
++         WHEN candidate.period_anchor_at IS NULL THEN 'period_anchor_missing'
++         WHEN candidate.first_observed_at IS NULL THEN 'observed_at_unparseable'
+```

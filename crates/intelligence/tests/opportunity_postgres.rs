@@ -211,6 +211,25 @@ async fn seeded_definition_loads_and_invalid_parameters_are_refused() {
 
 #[tokio::test]
 #[ignore = "requires ./scripts/test-opportunity-postgres.sh and an isolated PostgreSQL proof database"]
+async fn restricted_takes_precedence_over_unknown_work_author() {
+    let database = full_database("opportunity_w2_precedence").await;
+    opportunity_dataset::build(&database).await.unwrap();
+    let before = eligible_count(&database, AS_OF).await;
+    let prior = exclusion_counts(&database, AS_OF).await;
+    let inserted = sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,restricted_at,reason) SELECT content_ref,comment_external_id,'2026-11-09T00:00:00Z','synthetic' FROM linggan_opportunity_comment_eligibility($1::uuid,$2::timestamptz,$3,$4) WHERE exclusion_reason='work_author_unknown' LIMIT 1")
+        .bind(DOMAIN).bind(AS_OF).bind(TZ).bind(BASIS).execute(database.pool()).await.unwrap();
+    assert_eq!(inserted.rows_affected(), 1);
+    let after = exclusion_counts(&database, AS_OF).await;
+    assert_eq!(eligible_count(&database, AS_OF).await, before);
+    assert_eq!(after["restricted"], prior["restricted"] + 1);
+    assert_eq!(
+        after["work_author_unknown"],
+        prior["work_author_unknown"] - 1
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires ./scripts/test-opportunity-postgres.sh and an isolated PostgreSQL proof database"]
 async fn playbook_dataset_matches_eligibility_counts_and_the_equality() {
     let database = full_database("opportunity_t02_dataset").await;
     opportunity_dataset::build(&database).await.unwrap();
