@@ -64,6 +64,10 @@ async fn db(name: &str) -> Database {
             "0149_target_inspector_comparison",
             include_str!("../../../database/migrations/0149_target_inspector_comparison.sql"),
         ),
+        (
+            "0222_historical_image_inventory",
+            include_str!("../../../database/migrations/0222_historical_image_inventory.sql"),
+        ),
     ] {
         if let Some(recorded) = sqlx::query_scalar::<_, String>(
             "SELECT migration_sha256 FROM linggan_local_schema_migration WHERE migration_id=$1",
@@ -196,10 +200,16 @@ async fn inspector_material_scope_and_known_image_gaps_are_read_only() {
         .collect();
     assert_eq!(
         observed_images.len(),
-        1,
-        "only the observed image, without page placeholders"
+        0,
+        "the prior empty image set stays visible until its replacement is acquired"
     );
-    assert_eq!(observed_images[0]["sourceState"], "not_acquired");
+    assert!(
+        observed.coverage["issues"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|issue| issue["code"] == "image_update_pending")
+    );
     assert_eq!(
         observed.coverage["sources"]["images"]["state"],
         "not_acquired"

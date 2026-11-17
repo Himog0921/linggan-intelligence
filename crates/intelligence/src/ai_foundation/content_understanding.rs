@@ -17,15 +17,15 @@ use super::{
 };
 use crate::content_understanding::{self as contract, METHOD};
 pub use deep::{DeepReceipt, PublishDeep, publish_deep};
+pub(crate) use deep_manifest::build as build_manifest;
 pub use generate_deep::{GenerateDeep, generate_deep};
 use linggan_storage_postgres::Database;
 pub use offline_recovery::{RecoveryReceipt, recover_saved_replies};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use std::collections::BTreeSet;
-pub(crate) use deep_manifest::build as build_manifest;
 pub(crate) use source::{Packet, frozen_in, images_for_manifest_in, images_in};
 use sqlx::{Postgres, Row, Transaction};
+use std::collections::BTreeSet;
 use uuid::Uuid;
 
 const TASK: TaskKey = TaskKey::ContentUnderstanding;
@@ -237,7 +237,15 @@ pub fn deep_modes() -> Value {
         .map(|mode| {
             let material_kinds: &[&str] = match *mode {
                 "creation_method" => &["core_unit", "core_evidence", "title", "body", "tag", "asr"],
-                _ => &["core_unit", "core_evidence", "title", "body", "tag", "asr", "cover"],
+                _ => &[
+                    "core_unit",
+                    "core_evidence",
+                    "title",
+                    "body",
+                    "tag",
+                    "asr",
+                    "cover",
+                ],
             };
             json!({
                 "researchMode":mode,
@@ -341,11 +349,7 @@ pub async fn latest(
                     .as_array()
                     .into_iter()
                     .flatten()
-                    .filter(|material| {
-                        material["id"]
-                            .as_str()
-                            .is_some_and(|id| refs.contains(id))
-                    })
+                    .filter(|material| material["id"].as_str().is_some_and(|id| refs.contains(id)))
                     .cloned()
                     .collect();
                 analyses.push(json!({
@@ -403,11 +407,15 @@ pub(crate) async fn core_cards_in(
         Err(FoundationError::NotFound) => return Ok(vec![]),
         Err(error) => return Err(error),
     };
+    let ready = packet.coverage["materialReadiness"]["state"] == "ready";
     Ok(rows
         .into_iter()
         .filter(|row| {
-            row.get::<String, _>("material_snapshot_identity")
-                == packet.snapshot.material_snapshot_identity
+            coverage::qualified(
+                &row.get::<String, _>("material_snapshot_identity"),
+                &packet.snapshot.material_snapshot_identity,
+                ready,
+            )
         })
         .map(|row| row.get("card"))
         .collect())

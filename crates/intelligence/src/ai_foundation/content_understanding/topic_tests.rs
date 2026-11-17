@@ -7,25 +7,105 @@ mod support;
 
 #[tokio::test]
 #[ignore = "owned isolated PostgreSQL, synthetic saved Core; no provider"]
+async fn pending_image_update_excludes_the_same_partial_core_from_topic_inputs() {
+    let (db, model_config) = support::setup("pending_partial_core").await;
+    let work = support::work(&db, "dossier-note", "合成正文，用于已有内容理解。").await;
+    support::dossier_fixture::acquired_image_source_with_bytes(&db, Some(vec![b'a'; 12])).await;
+    let cover = Uuid::new_v4();
+    let cover_uri = "https://media.example/synthetic-cover.jpg";
+    support::fixture::submit_package(&db, "media_slots", json!({"contentExternalId":"dossier-note"}),
+        json!({"kind":"media_slot","slotKey":"xhs:dossier-note:cover:1","observationRef":cover,
+            "slot":{"role":"cover","ordinal":1},"observation":{"externalUri":cover_uri,"candidateUris":[cover_uri],"observedAt":"2026-10-14T00:00:00Z"},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"}})).await;
+    let hash = "b".repeat(64);
+    linggan_evidence::admit_media_blob(
+        &db,
+        cover,
+        &hash,
+        "image/jpeg",
+        12,
+        &format!("blobs/{hash}.jpg"),
+    )
+    .await
+    .unwrap();
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    let before = source::load(&mut tx, support::D, work, &cutoff)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(before.snapshot.coverage_mode, "partial");
+    assert_eq!(before.coverage["materialReadiness"]["state"], "ready");
+    configure_tasks_for_test(&db, model_config).await;
+    seed_core(&db, work, model_config, false).await;
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(
+        core_cards_at(&db, support::D, work, &cutoff)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+
+    let records: Vec<_> = (1..=2).map(|page| {
+        let uri = format!("https://media.example/pending-{page}.jpg");
+        json!({"kind":"media_slot","slotKey":format!("xhs:dossier-note:image:{page}"),"observationRef":Uuid::new_v4(),
+            "slot":{"role":"image","ordinal":page,"displayOrdinal":page,"displayOrderBasis":"platform_explicit"},
+            "observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"}})
+    }).collect();
+    let target = json!({"contentExternalId":"dossier-note","imageInventory":{"state":"complete","source":"platform_image_list","expectedPages":2}});
+    support::fixture::submit_custom_package(
+        &db,
+        "xhs",
+        &["media_slots"],
+        json!({"contentExternalId":"dossier-note"}),
+        "media_slots",
+        "xhs",
+        json!({"target":target,"layers":[support::fixture::coverage_layer("media_slots",2)]}),
+        records,
+    )
+    .await;
+    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let mut tx = db.pool().begin().await.unwrap();
+    let pending = source::load(&mut tx, support::D, work, &cutoff)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(pending.snapshot.coverage_mode, "partial");
+    assert_eq!(
+        pending.snapshot.material_snapshot_identity,
+        before.snapshot.material_snapshot_identity
+    );
+    assert_eq!(pending.coverage["materialReadiness"]["state"], "blocked");
+    assert_eq!(
+        scope_coverage(&db, &[work], &cutoff).await.unwrap()["stale"],
+        1
+    );
+    assert!(
+        core_cards_at(&db, support::D, work, &cutoff)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL, synthetic saved Core; no provider"]
 async fn saved_core_drives_topic_queue_and_persisted_membership() {
     roundtrip(false).await;
     roundtrip(true).await;
 }
-async fn roundtrip(image_only: bool) {
-    let (db, model_config) = support::setup(&format!("tm_core_{}", Uuid::new_v4().simple())).await;
-    let work = support::work(
-        &db,
-        "dossier-note",
-        if image_only {
-            ""
-        } else {
-            "合成作者内容：先摆出材料，再把作业拆成几个短步骤。"
-        },
-    )
-    .await;
-    if image_only {
-        support::dossier_fixture::acquired_image_source(&db).await;
-    }
+async fn configure_tasks_for_test(db: &Database, model_config: Uuid) {
     // Seed selected configurations in this isolated fixture, not live settings.
     let settings: Vec<(String,Uuid)> = sqlx::query_as("SELECT task_key,current_config_ref FROM linggan_ai_task_setting WHERE task_key LIKE 'topic_research%' OR task_key='content_understanding'").fetch_all(db.pool()).await.unwrap();
     for (task, previous) in settings {
@@ -67,6 +147,23 @@ async fn roundtrip(image_only: bool) {
         .bind(Uuid::new_v4()).bind(model_config).bind("b".repeat(64)).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_model_egress_event(event_ref,endpoint_ref,task_key,material_class,allowed,actor_kind,reason) SELECT gen_random_uuid(),cap.endpoint_ref,t.task_key,'note_material',true,'human','SYNTHETIC isolated fixture, no network' FROM linggan_ai_task t CROSS JOIN linggan_model_config c JOIN linggan_model_capability cap USING(capability_ref) WHERE c.config_ref=$1 AND (t.task_key LIKE 'topic_research%' OR t.task_key='content_understanding')")
         .bind(model_config).execute(db.pool()).await.unwrap();
+}
+
+async fn roundtrip(image_only: bool) {
+    let (db, model_config) = support::setup(&format!("tm_core_{}", Uuid::new_v4().simple())).await;
+    let work = support::work(
+        &db,
+        "dossier-note",
+        if image_only {
+            ""
+        } else {
+            "合成作者内容：先摆出材料，再把作业拆成几个短步骤。"
+        },
+    )
+    .await;
+    // A Core eligible for a new topic run needs a readable, complete image set.
+    support::dossier_fixture::acquired_image_source_with_bytes(&db, Some(vec![b'a'; 12])).await;
+    configure_tasks_for_test(&db, model_config).await;
     let missing = super::super::topic_research::start(
         &db,
         &super::super::topic_research::Start {

@@ -26,6 +26,11 @@ pub(super) async fn current(
         ));
     }
     let Some(slot) = slot else { return Ok(false) };
+    if kind == "image" {
+        let selected =
+            crate::research_dossier::displayed_image_source_in(conn, work, slot, as_of).await?;
+        return image_current(conn, slot, version, derivative, as_of, selected.as_ref()).await;
+    }
     let Ok(materialization) = Uuid::parse_str(version) else {
         return Ok(false);
     };
@@ -39,6 +44,42 @@ pub(super) async fn current(
         .fetch_one(conn).await
 }
 
+pub(super) async fn image_current(
+    conn: &mut PgConnection,
+    slot: &str,
+    version: &str,
+    derivative: Option<Uuid>,
+    as_of: &str,
+    selected: Option<&(String, String)>,
+) -> Result<bool, sqlx::Error> {
+    let Some((selected_version, sha)) = selected else {
+        return Ok(false);
+    };
+    let matches = selected_version == version || has_image_blob(conn, version, sha, as_of).await?;
+    Ok(matches && media_unrestricted(conn, Some(slot), derivative, version).await?)
+}
+
+// A new receipt for identical bytes can retain the selected reading of the same slot.
+pub(super) async fn has_image_blob(
+    conn: &mut PgConnection,
+    version: &str,
+    sha: &str,
+    as_of: &str,
+) -> Result<bool, sqlx::Error> {
+    let Ok(materialization) = Uuid::parse_str(version) else {
+        return Ok(false);
+    };
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_media_materialization
+         WHERE materialization_ref=$1 AND blob_sha256=$2 AND verified_at<=$3::text::timestamptz)",
+    )
+    .bind(materialization)
+    .bind(sha)
+    .bind(as_of)
+    .fetch_one(conn)
+    .await
+}
+
 pub(super) async fn unrestricted(
     conn: &mut PgConnection,
     unit: &Unit,
@@ -49,11 +90,20 @@ pub(super) async fn unrestricted(
         return sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_material_content_detail d JOIN linggan_runtime_record_disposition r ON r.package_ref=d.package_ref AND r.record_ordinal=d.record_ordinal WHERE d.content_public_ref=$1 AND d.material_ref::text=$2 AND r.disposition='accepted_for_library_content')")
             .bind(unit.work).bind(version).fetch_one(conn).await;
     }
+    media_unrestricted(conn, unit.slot.as_deref(), derivative, version).await
+}
+
+async fn media_unrestricted(
+    conn: &mut PgConnection,
+    slot: Option<&str>,
+    derivative: Option<Uuid>,
+    version: &str,
+) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM linggan_current_material_media_disposition d \
         WHERE d.state='WITHDRAWN_OR_RESTRICTED' AND (d.slot_key=$1 OR d.derivative_ref=$2 \
         OR d.materialization_ref::text=$3 OR d.blob_sha256=(SELECT blob_sha256 FROM linggan_media_materialization WHERE materialization_ref::text=$3))) \
         AND NOT EXISTS(SELECT 1 FROM linggan_media_derivative d JOIN linggan_media_ocr_retirement r ON r.retired_job_ref=d.job_ref WHERE d.derivative_ref=$2)")
-        .bind(&unit.slot).bind(derivative).bind(version).fetch_one(conn).await
+        .bind(slot).bind(derivative).bind(version).fetch_one(conn).await
 }
 
 pub(super) async fn bytes_available(

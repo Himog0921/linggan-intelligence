@@ -140,6 +140,17 @@ pub async fn admit_media_blob(
         .begin()
         .await
         .map_err(ProducerRuntimeError::Internal)?;
+    let image_work = if mime_type.starts_with("image/") {
+        sqlx::query_scalar::<_, Uuid>("SELECT content_public_ref FROM linggan_material_media_origin WHERE observation_ref=$1 AND purpose IN ('body_image','live_photo','cover')")
+            .bind(media_observation_ref).fetch_optional(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?
+    } else {
+        None
+    };
+    if let Some(work) = image_work {
+        crate::material_reading::lock_work(&mut tx, work)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+    }
     crate::media_acquisition::require_retained_component_in(
         &mut tx,
         media_observation_ref,
@@ -237,6 +248,15 @@ pub async fn admit_media_blob(
                 .bind(Uuid::new_v4()).bind(job_ref).execute(&mut *tx).await.map_err(ProducerRuntimeError::Internal)?;
             processing_jobs.push(job_ref);
         }
+    }
+    if let Some(work) = image_work {
+        let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
+        crate::material_reading::activate_deferred_images_in(&mut tx, work, &as_of)
+            .await
+            .map_err(ProducerRuntimeError::Internal)?;
     }
     tx.commit().await.map_err(ProducerRuntimeError::Internal)?;
     Ok(MediaBlobAdmission {

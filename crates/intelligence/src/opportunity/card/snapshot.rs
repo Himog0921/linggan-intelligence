@@ -13,6 +13,7 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_comment_problem_membership",
     "linggan_comment_research_request",
     "linggan_comment_research_stage",
+    "linggan_historical_image_inventory",
     "linggan_local_schema_migration",
     "linggan_material_author_profile",
     "linggan_material_comment",
@@ -181,7 +182,7 @@ pub(super) async fn verify_for(
 
 #[cfg(test)]
 mod tests {
-    use super::{CardError, capture, require_visible_restrictions};
+    use super::{CardError, capture, require_visible_restrictions, verify};
     use sqlx::AssertSqlSafe;
     use uuid::Uuid;
 
@@ -190,6 +191,156 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "/../../apps/api/src/local_web/full_schema_fixture.rs"
         ));
+    }
+    #[allow(dead_code)]
+    mod material_fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../evidence/tests/support/material_fixture.rs"
+        ));
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the disposable opportunity PostgreSQL proof"]
+    async fn actual_image_admission_conflicts_with_snapshot_then_releases() {
+        use serde_json::json;
+        use std::time::Duration;
+        let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("disposable proof URL");
+        let db = linggan_storage_postgres::testing::isolated_proof_schema(
+            &url,
+            "opportunity_image_admission_lock",
+            full_schema::FULL_MIGRATIONS,
+        )
+        .await
+        .unwrap();
+        let id = "synthetic-image-admission";
+        material_fixture::submit_package(&db, "content_detail", json!({"contentExternalId":id}),
+            json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":{"bodyText":"synthetic"}})).await;
+        let observation = Uuid::new_v4();
+        let uri = "https://media.example/lock.jpg";
+        material_fixture::submit_package(&db, "media_slots", json!({"contentExternalId":id}),
+            json!({"kind":"media_slot","slotKey":format!("xhs:{id}:image:1"),"observationRef":observation,
+                "slot":{"role":"image","ordinal":1},"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},
+                "sourceObject":{"platform":"xhs","type":"content","externalId":id}})).await;
+        sqlx::raw_sql("CREATE FUNCTION synthetic_image_admission_barrier() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_advisory_xact_lock(hashtextextended('image-admission-snapshot-proof',0)); RETURN NEW; END $$; CREATE TRIGGER synthetic_image_admission_barrier BEFORE INSERT ON linggan_media_download_attempt FOR EACH ROW EXECUTE FUNCTION synthetic_image_admission_barrier()")
+            .execute(db.pool()).await.unwrap();
+        let mut barrier = db.pool().begin().await.unwrap();
+        sqlx::query(
+            "SELECT pg_advisory_xact_lock(hashtextextended('image-admission-snapshot-proof',0))",
+        )
+        .execute(&mut *barrier)
+        .await
+        .unwrap();
+        let writer_db = db.clone();
+        let writer = tokio::spawn(async move {
+            let hash = "a".repeat(64);
+            linggan_evidence::admit_media_blob(
+                &writer_db,
+                observation,
+                &hash,
+                "image/jpeg",
+                12,
+                &format!("blobs/{hash}.jpg"),
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let waiting: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event='advisory' AND query LIKE 'INSERT INTO linggan_media_download_attempt%')")
+                    .fetch_one(db.pool()).await.unwrap();
+                if waiting { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("the actual image write must reach the held source lock");
+        let mut snapshot = db.pool().begin().await.unwrap();
+        assert!(matches!(
+            capture(&mut snapshot).await,
+            Err(CardError::SourcesBusy)
+        ));
+        snapshot.rollback().await.unwrap();
+        barrier.rollback().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(20), writer)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let mut after = db.pool().begin().await.unwrap();
+        capture(&mut after).await.unwrap();
+        after.rollback().await.unwrap();
+
+        // Reverse order: hold the same source-table SHARE lock as capture,
+        // then confirm an actual image admission waits and resumes.
+        let second = Uuid::new_v4();
+        material_fixture::submit_package(&db, "media_slots", json!({"contentExternalId":id}),
+            json!({"kind":"media_slot","slotKey":format!("xhs:{id}:image:2"),"observationRef":second,
+                "slot":{"role":"image","ordinal":2},"observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},
+                "sourceObject":{"platform":"xhs","type":"content","externalId":id}})).await;
+        let mut snapshot_lock = db.pool().begin().await.unwrap();
+        sqlx::query("LOCK TABLE linggan_media_download_attempt IN SHARE MODE")
+            .execute(&mut *snapshot_lock)
+            .await
+            .unwrap();
+        let writer_db = db.clone();
+        let waiting_writer = tokio::spawn(async move {
+            let hash = "b".repeat(64);
+            linggan_evidence::admit_media_blob(
+                &writer_db,
+                second,
+                &hash,
+                "image/jpeg",
+                12,
+                &format!("blobs/{hash}.jpg"),
+            )
+            .await
+        });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let waiting: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND wait_event_type='Lock' AND wait_event='relation' AND query LIKE 'INSERT INTO linggan_media_download_attempt%')")
+                    .fetch_one(db.pool()).await.unwrap();
+                if waiting { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.expect("image admission must wait for the snapshot source lock");
+        snapshot_lock.rollback().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(20), waiting_writer)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+    }
+
+    #[tokio::test]
+    #[ignore = "requires the disposable opportunity PostgreSQL proof"]
+    async fn historical_image_inventory_is_covered_and_locked() {
+        let url = std::env::var("OPPORTUNITY_PROOF_DATABASE_URL").expect("disposable proof URL");
+        let db = linggan_storage_postgres::testing::isolated_proof_schema(
+            &url,
+            "opportunity_image_inventory_lock",
+            full_schema::FULL_MIGRATIONS,
+        )
+        .await
+        .unwrap();
+        let mut writer = db.pool().begin().await.unwrap();
+        sqlx::query("LOCK TABLE linggan_historical_image_inventory IN ROW EXCLUSIVE MODE")
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+        let mut blocked = db.pool().begin().await.unwrap();
+        assert!(matches!(
+            capture(&mut blocked).await,
+            Err(CardError::SourcesBusy)
+        ));
+        blocked.rollback().await.unwrap();
+        writer.rollback().await.unwrap();
+
+        let mut reader = db.pool().begin().await.unwrap();
+        capture(&mut reader).await.unwrap();
+        sqlx::query("SELECT count(*) FROM linggan_historical_image_inventory")
+            .execute(&mut *reader)
+            .await
+            .unwrap();
+        verify(&mut reader).await.unwrap();
+        reader.rollback().await.unwrap();
     }
 
     #[tokio::test]

@@ -487,3 +487,60 @@
 - `cd apps/web && npm run typecheck && npm run lint && npm test -- --run src/pages/opportunity/OpportunityPage.test.tsx` → `10 passed; 0 failed`。`cd apps/web && npm test` → `Test Files 172 passed (172); Tests 1794 passed (1794)`。
 - `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-t16-t17-browser-final-head CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_TARGET_DIR=/private/tmp/codex-opportunity-card-t1-01a1d4e2-target scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`，P1/P2/P3 和三类依据读取通过，隔离容器和卷已清理；私有截图已更新。
 - 对代码提交 `ccc73a1f` 的独立定点复核确认前述四项问题均已处理；复核未自行运行测试。依据重读成功后父级原声恢复的条件已静态核对，尚无该细节的单独断言。远端 CI 以 PR #597 最终提交的实际结果为准；合并、部署及真实业务验收不由本次测试推断。
+
+## 2026-11-16 PR #597 合并与本机部署预检
+
+- Mog 确认合并 PR #597 的 `d43bdc7e964a01b0be324fb6444844bb4a578e9e`，并要求本机部署与实际页面验证；本机运行库和生产环境迁移、真实采集、模型外发仍需另行授权。
+- `gh pr merge 597 --merge --match-head-commit d43bdc7e964a01b0be324fb6444844bb4a578e9e` → exit 0；`gh pr view 597 --json state,mergedAt,mergeCommit,headRefOid` → `MERGED`，head `d43bdc7e`，merge commit `69adcef7799199e1ce61340f3c47230228c39670`。远端 main 已核验为该 merge commit；此前同一 head 的 Delivery #614 已通过。转 Ready 自动触发的 Delivery #621 以 GitHub 实际结果为准。
+- 本机 PostgreSQL 只读账本对照目标迁移文件：账本 223 条、候选文件 223 个、缺少 `0223_opportunity_card_period_index` 1 个、已匹配迁移 checksum 不一致 0 个。0223 新建卡片周期索引，并将既有卡片加入重建队列；当前卡片和待处理变更均为 0。未执行迁移，也未运行会先停服务再因缺迁移拒绝启动的安装脚本。
+- 当前 3001 的 API 与 AI 执行器运行于 `.worktrees/l1-media-image-cutover-3001`，源码 `bafb7d27554d539bf5febe3006e0b088c4f1884e`；该版本含未合入 main 的 `a49b37fb`、`bafb7d27` 图集改动。`git rev-list --left-right --count 69adcef7799199e1ce61340f3c47230228c39670...bafb7d27554d539bf5febe3006e0b088c4f1884e` → `24 2`。只读合并预览发现 `crates/evidence/src/material_reading/read.rs` 和 `scripts/local-runtime.sh` 冲突；本机库另有该运行版本的 0222 历史图集迁移。直接部署 main 会使当前图集功能暂时失效，故未覆盖运行版本。巡检和媒体 worker 保持 disabled；AI 执行器保持 enabled，只读查询时在途 model invocation 为 0。
+- 只读统计：本机评论 32400 条，评论研究问题定义、归属、机会卡提及、指标、作者密度和卡片均为 0。即使部署成功，现有真实材料也只能先验证空状态；未通过真实采集、模型外发或写入合成业务数据制造卡片。
+- 为评估重启副作用，只读查询 AI 控制：`global=true`、`executor=true`，有 2 个 task 控制开启；查询时无 pending 条目、无 running invocation。这是既有运行状态，不代表新外发获准；后续若切换服务，必须避免因恢复执行器触发未授权外发。
+- 本记录工作树执行 `git diff --check` → exit 0；`bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`。
+- 状态：PR 已合并；本机部署和实际页面／业务链路验收未完成。等待 Mog 决定是否先集成现有图集改动，并单独授权本机 0223 迁移；生产环境迁移、真实采集和模型外发均未执行。
+
+## 2026-11-16 图集修复整合及本机发布准备
+
+- Mog 确认先在独立分支整合本机现有的两项图集修复；整合 PR 的合并仍需单独确认。另授权仅对本机 Intelligence 库执行 0223；生产迁移、真实采集和模型外发未授权。分支 `codex/opportunity-t16-t17-local-delivery`，工作树 `.worktrees/opportunity-t16-t17-local-delivery`。
+- 整合期间 main 已前进到 `1fc1fa344523df3ed543f62f0dab0d3a76c6ada4`，新增 0224。已合入当前 main 及现运行版本的 `a49b37fb`、`bafb7d27`，并在 fixture 与运行迁移清单中按 0222、0223、0224 顺序保留原文件和摘要；整合提交 `5ecd684b`。图集查询增加前置 CTE 后，创作者性能测试的查询匹配一并调整，提交 `2a7a3fd8`。
+- 只读账本查询输出 0222 的摘要为 `fe708de1a048635688031fbdde4918b54985c2e01485e0b2ed384c8ca550acd2`，总计 223 条；0223、0224 均未入账。0224 新增内容深度理解字段及约束，并调整该任务的 Skill 要求，尚无本机运行库迁移授权；部署包含 0224 的当前 main 时不得自动执行它。
+- `bash scripts/test-local-runtime-schema.sh` → `Fresh and repeat runtime schema migration passed; retired tables absent.`；仅在专用合成 PostgreSQL 中执行完整迁移顺序，测试容器和卷已移除。
+- `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_TARGET_DIR=/private/tmp/opportunity-image-integration-01a1d4e2-target bash /private/tmp/opportunity-image-integration-proof-01a1d4e2.sh --integration-proof` → 图集 `13 passed; 0 failed`，素材读取 `7 passed; 0 failed`。该临时脚本基于仓库隔离 runner，仅使用合成库；首次准备时遗漏专用媒体目录，一项测试因此中止，补齐后上述两组通过。
+- 同一隔离回归中的创作者分页性能测试，在整合相关的图集 SQL 匹配修正后仍失败：既有 `current_reads` 断言得到 `0` 而期望 `1`；当前 main 的 SQL 已使用 `SELECT content.*`，断言仍匹配 `SELECT *`。该测试旧断言未在本工作包内扩展修复；因此不能将完整创作者回归称为通过。一次复用其他 worktree 编译目录的基线重跑可能复用了旧产物，不用于判定代码版本。
+- `bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`；对改动的 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`、`git diff --check` 与 `bash -n scripts/local-runtime.sh` 均为 exit 0。main `1fc1fa34` 的 Delivery `43870152072` 为 success；更早 `69adcef7` 的 Delivery `43843751226` 曾在选题浏览器测试失败，两个结果分别记录。
+- 本机 3001 仍运行 `bafb7d27`，health 显示数据库 READY、readiness 和 web ready。本次尚未迁移本机或生产库，未部署、未启动真实采集、未进行模型外发；隔离回归和 CI 不能替代实际页面与业务验收。独立审阅与整合 PR 的最终 CI 以最终提交的实际结果为准。
+
+### 图集版本裁定与整合验证
+
+- 独立审阅发现：新图集未取得完整时，旧版本仍显示，但未提示新图未齐；现有编辑来源判定也可能不同于页面。Mog 确认方案 A：旧版本继续展示，明确提示新图未齐，查看与编辑采用展示版本，所有新图验证后切换。已同步 `docs/data-contracts/research-dossier.md`。
+- 共用资料清单选择展示图片，覆盖信息通过 `image_update_pending` 表达未完成的新版本；目标检查据此标记素材不完整，前端复用该信息显示提示。读本选择、编辑与发布复用同一图片来源；对旧程序已提前选择新图的历史状态，读取可回到仍在展示的旧版选中读本。机会卡短锁与来源覆盖列表加入实际读取的历史图集表。
+- 使用专用构建目录与合成 PostgreSQL 的 `/private/tmp/opportunity-image-integration-proof-01a1d4e2.sh --integration-proof` → 图集切换与旧读本编辑 `1 passed`、素材读取 `7 passed`、历史图集来源锁及覆盖 `1 passed`、目标检查 `4 passed`；专用容器和卷清理已验证。图集测试包含旧程序提前选择新读本的状态、旧版可编辑、新版齐全后切换及旧命令来源失效。
+- `cd apps/web && npm run typecheck && npm run lint && npm test -- --run src/pages/corpus/evidence/DossierReading.test.tsx --maxWorkers=1` → typecheck／lint exit 0，`Tests 27 passed (27)`。方案 A 实施之前的机会卡隔离页面链路 `WEB_APP_PROOF_SCOPE=opportunity ... bash scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`，P1/P2/P3 及三类依据均由真实 Axum 和合成 PostgreSQL 读取；不能将该结果作为后续改动或本机部署的证明。
+- 审阅另指出图集回填脚本仅检查 `PGDATABASE` 非空，并未确认连接目标为本机；使用 `--apply` 时可能写入所连接的远端数据库。该项只记录，未运行或修改脚本。完整创作者性能回归的既有 `current_reads` SQL 匹配不一致也未扩展修复。
+- 最新只读远端检查发现 main 前进到 `6db818bd350ce71aada29c78e3b7cd44cf7db50b`（PR #602），未改动迁移目录、运行迁移清单或本次图集源文件；最终候选须以实际合入基线、审阅与 CI 为准。本机 0223 的授权仍有效；0224、本机部署和业务验收均未执行，生产迁移、真实采集及模型外发未授权。
+- 整合候选 `324762e0bdadb99fc5e4ad13b3ce3799a965c17f` 已创建草稿 [PR #603](https://github.com/Himog0921/linggan-intelligence/pull/603)。`CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_TARGET_DIR=/private/tmp/opportunity-image-integration-01a1d4e2-target bash /private/tmp/opportunity-image-dossier-full-01a1d4e2.sh --integration-proof` → `13 passed; 0 failed`；隔离数据库、容器和卷已清理。
+- 独立增量审阅指出一个尚未修复的切换缺口：新图未齐期间，单页 OCR 可能先完成并存入 reading；由于当时没有被选中，整套新图齐全切换后，该已完成读本可能仍不显示，处理任务也不会自动重跑。当前切换测试通过手工模拟旧程序的选中记录验证历史恢复，不能证明新程序自然流程下该读本会被选中。按不循环修复的要求，该发现只报告；PR 保持草稿，不能声称方案 A 已完整验证或可合并。
+- 同一增量审阅指出内容理解链尚未消费 `image_update_pending`：旧图仍在展示且新图未齐时，该消费者可能保存 `coverageMode=complete`，与已确认的覆盖语义不一致。该发现为静态审阅，未调用模型，也未在本轮扩展修复。
+- 最终代码 `324762e0` 的 `WEB_APP_PROOF_SCOPE=opportunity WEB_APP_PROOF_DIR=/private/tmp/opportunity-image-integration-browser-final-01a1d4e2 WEB_APP_PROOF_NODE=/Users/moglenny/.nvm/versions/node/v24.13.0/bin/node CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_TARGET_DIR=/private/tmp/opportunity-image-integration-01a1d4e2-target bash scripts/test-web-app-postgres.sh` → `1 passed; 0 failed`，P1/P2/P3 卡片与三类依据的合成页面读取通过，隔离容器和卷已清理。此结果不覆盖上述识读选择和内容理解缺口。
+
+### 已授权的两项集中修复
+
+- Mog 授权仅修复上述两项图集问题，并在一次验证后报告。图集未齐时已完成的识读仍保存；新图集取得完整后通过既有读本选择规则接续该识读。旧图在等待期间的人工编辑保留在历史中。内容理解和材料就绪状态复用 `image_update_pending`，待更新期间不再标记完整。没有新增数据库迁移。
+- `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_TARGET_DIR=/private/tmp/opportunity-image-integration-01a1d4e2-target bash /private/tmp/opportunity-image-final-fixes-01a1d4e2.sh --integration-proof` → 资料底稿 `14 passed`、媒体处理并发规则 `6 passed`、内容完整性 `1 passed`、素材读本 `7 passed`、机会卡快照历史图集锁 `1 passed`、目标检查 `4 passed`；均为 `0 failed`。脚本使用一次性合成 PostgreSQL 和目标检查的本地测试端点，末行 `RESEARCH-DOSSIER-V2 PostgreSQL proof cleanup verified; isolated database, container, volume, and any owned ledger assets were removed`。初次尝试因沙箱无权连接 Docker socket，输出 `PostgreSQL proof was not started`，未创建测试资源；取得权限后完成上述隔离测试。
+- `bash scripts/ci-preflight.sh origin/main` → `52 pass; 0 fail`；对改动 Rust 文件执行 `rustfmt --edition 2024 --config skip_children=true --check`，以及 `git diff --check` → exit 0。
+- PR #603 的旧 head `95dd473e84cccfd963f3ecb51b464e875db84bcd` 的 [Delivery 43880360088](https://github.com/Himog0921/linggan-intelligence/actions/runs/43880360088) 最终为 failure：`ai / foundation-foundation` 的旧升级测试重复创建 `linggan_historical_image_inventory`；此项不属于本次两项修复授权，未修改。图集回填脚本连接目标校验和创作者性能测试的旧 SQL 匹配问题继续只记录，不扩大修复。
+- `docker inspect --format '{{.State.Status}} {{.State.FinishedAt}}' linggan-intelligence-postgres-1` → `exited 2026-11-16T13:28:20.521019752Z`；`curl --noproxy '*' --silent --show-error --max-time 3 --output /dev/null --write-out 'health_http=%{http_code}\n' http://127.0.0.1:3001/health` → exit 28、`health_http=000`。数据库停止原因未知，本次未启动它。当前 0223 授权仍仅限本机，0224 未获授权；均未执行，本机部署和业务验收未完成。
+- 独立增量复核 `95dd473e..dfc10cd8` 后，第一项只能证明已覆盖的顺序场景，仍有两处静态发现：① 新图 OCR 先领取、旧图随后编辑、OCR 再完成时可能不记录待接续标记，切换后读本仍不显示（P1）；② 两个新版图集交错时，较早新版的识读可能不记录待接续标记，先齐全后仍不显示（P2）。现有测试没有覆盖这两种顺序。
+- 第二项仍有静态发现：旧材料在待更新前后均为 `partial` 时，材料身份可能不变，话题研究可能继续使用旧 Core，而覆盖统计将其标为 stale（P2）；首次图集未齐且没有旧图时，提示仍可能写“当前展示旧版本”（P3）。独立复核未运行上述场景，也未连接运行库或调用模型；按 Mog 要求只报告，不继续修复。
+- 新增图片入库锁与机会卡短锁未发现直接锁循环，但待选读本较多时重复读取图集可能增加事务和锁持有时间，尚未测量。上述 `6 passed` 的媒体并发测试使用视频素材，未覆盖新增图片锁与 OCR 并发或机会卡签发竞争。`dfc10cd8` 的 [Delivery 43888272111](https://github.com/Himog0921/linggan-intelligence/actions/runs/43888272111) 已启动；最终结果须以该次及最终 head 的实际结果为准。
+
+### 2026-11-16 PR #603 已知问题集中修复
+
+- Mog 授权修复已报告的图集时序、内容资格、CI、回填目标和相关已知问题，并验证图片入库锁竞争；新发现只报告。对未完整图集的识读接续使用同一展示清单中的所有较新版本：旧图在识读开始后被编辑、两个新版交错以及相同图片字节保留人工内容，均有独立合成用例。批量接续复用同一时点的图集读取。
+- 内容理解的 Core 读取与覆盖统计共用材料身份及就绪资格；首次未完整图集的提示不再断言有旧版。回填脚本要求显式 loopback IP、端口和普通数据库名，拒绝 service、hostaddr、连接串及 PGOPTIONS；目标参数由脚本显式传给 psql。loopback 本身不能证明端口没有转发到远端，实际应用仍需要单独核验目标及获得授权；本轮未运行回填。
+- 修正历史写作升级测试的隔离基线，让 0222 在正向升级中只执行一次；没有更改迁移文件。修复已报告的创作者分页查询统计断言，并把该回归、内容资格回归和回填目标负例接入 CI 相关路径。
+- 以 `CARGO_NET_OFFLINE=true CARGO_BUILD_JOBS=2 CARGO_INCREMENTAL=0 CARGO_PROFILE_DEV_DEBUG=0 CARGO_PROFILE_TEST_DEBUG=0 CARGO_TARGET_DIR=/private/tmp/opportunity-image-integration-01a1d4e2-target` 运行 `bash /private/tmp/opportunity-pr603-repair-proof.sh --integration-proof`（第二次）→ 底稿 `20 passed`、素材读本 `7 passed`、媒体并发 `6 passed`、创作者分页 `1 passed`、完整性单元 `1 passed`；随后内容资格测试因合成任务配置不足中止。补齐该测试夹具后，`bash /private/tmp/opportunity-pr603-remaining-proof.sh --integration-proof` → 内容资格 `1 passed`、快照锁 `4 passed`、历史写作升级 `1 passed`、目标检查 `4 passed`。两次测试均使用一次性合成 PostgreSQL，无真实模型外发，容器及卷清理已验证。
+- `bash /private/tmp/opportunity-pr603-snapshot-proof.sh --integration-proof` → `4 passed; 0 failed`；实际图片入库先持锁时快照返回 `SourcesBusy`，快照来源表先持锁时图片入库等待并在释放后完成。底稿测试另验证入库与识读共同等待作品锁；20 页、19 条待接续识读的单次合成切换为 `1 inventory reads, 58 ms`，不是生产负载基准。
+- 另运行 `saved_core_drives_topic_queue_and_persisted_membership` → `0 passed; 1 failed`：既有 `topic_research_automation/tests.rs` 仍断言 4 个阶段，而当前 `CURRENT_TASKS` 和实际结果为 1。该断言不在此前报告的修复范围，按要求只记录。首次底稿测试使用缺少图片摘要的合成读本导致同图用例失败，修正夹具后底稿 20 项通过。
+- `bash scripts/ci-preflight.sh origin/main` → Node `52 pass; 0 fail`，回填目标检查 `3 tests OK`；改动 Rust 文件的 `rustfmt --edition 2024 --config skip_children=true --check`、`git diff --check` 和相关 shell 语法检查通过。最终提交的独立审阅与远端 CI 状态以 PR 实际回执为准。
+- 本机 0223 已获单独授权但本轮未执行；0224、生产迁移、真实采集和模型外发未获授权。本轮未部署或启动本机运行库。

@@ -16,6 +16,7 @@ pub(crate) use read::current_reference_in;
 pub(crate) use read::read_current_from_currents_in;
 pub use read::{read_current_in, read_versions_in};
 pub use review::{review_reading, review_work_reading};
+pub(crate) use write::activate_deferred_images_in;
 pub use write::publish_in;
 
 #[derive(Clone, Copy, Debug)]
@@ -152,7 +153,7 @@ impl Unit {
     }
 }
 
-async fn lock_work(conn: &mut PgConnection, work: Uuid) -> Result<(), sqlx::Error> {
+pub(crate) async fn lock_work(conn: &mut PgConnection, work: Uuid) -> Result<(), sqlx::Error> {
     // Admission and normalization share this lock with their current-source selection.
     sqlx::query("SELECT pg_advisory_xact_lock(420,hashtext($1::text))")
         .bind(work.to_string())

@@ -82,10 +82,15 @@ pub(crate) async fn read_from_currents_in(
 ) -> Result<BTreeMap<Uuid, ResearchDossier>, sqlx::Error> {
     let mut output = BTreeMap::new();
     for batch in currents.chunks(100) {
-        let references: Vec<_> = batch.iter().map(|work| work.public_ref).collect();
-        let mut readings =
-            crate::material_reading::read_current_from_currents_in(&mut **tx, batch, as_of).await?;
-        let mut inventories = inventory::read_in(tx, &references, as_of).await?;
+        let mut inventories = inventory::read_in(&mut **tx, batch, as_of).await?;
+        let image_sources = image_sources(&inventories);
+        let mut readings = crate::material_reading::read_current_from_currents_in(
+            &mut **tx,
+            batch,
+            as_of,
+            &image_sources,
+        )
+        .await?;
         for work in batch {
             let reference = work.public_ref;
             let mut dossier = projection::assemble(
@@ -101,6 +106,72 @@ pub(crate) async fn read_from_currents_in(
         }
     }
     Ok(output)
+}
+
+pub(crate) type DisplayedImageSources = BTreeMap<(Uuid, String), (String, String)>;
+
+fn image_sources(inventories: &BTreeMap<Uuid, inventory::Inventory>) -> DisplayedImageSources {
+    inventories
+        .iter()
+        .flat_map(|(work, inventory)| {
+            inventory.slots.iter().filter_map(|slot| {
+                if slot["component"] != "image" || slot["sourceState"] != "present" {
+                    return None;
+                }
+                Some((
+                    (*work, slot["slotKey"].as_str()?.to_owned()),
+                    (
+                        slot["sourceVersion"].as_str()?.to_owned(),
+                        slot["blobSha256"].as_str()?.to_owned(),
+                    ),
+                ))
+            })
+        })
+        .collect()
+}
+
+pub(crate) async fn displayed_image_sources_in(
+    conn: &mut sqlx::PgConnection,
+    currents: &[&crate::work_resource_current::WorkResourceCurrent],
+    as_of: &str,
+) -> Result<DisplayedImageSources, sqlx::Error> {
+    Ok(image_sources(
+        &inventory::read_in(conn, currents, as_of).await?,
+    ))
+}
+
+/// Resolve the same displayed image source for standalone reading and editing.
+pub(crate) async fn displayed_image_source_in(
+    conn: &mut sqlx::PgConnection,
+    work: Uuid,
+    slot: &str,
+    as_of: &str,
+) -> Result<Option<(String, String)>, sqlx::Error> {
+    let currents =
+        crate::work_resource_current::read_work_resource_currents_in(conn, &[work], as_of).await?;
+    let sources =
+        displayed_image_sources_in(conn, &currents.iter().collect::<Vec<_>>(), as_of).await?;
+    Ok(sources.get(&(work, slot.to_owned())).cloned())
+}
+
+pub(crate) async fn pending_image_source_in(
+    conn: &mut sqlx::PgConnection,
+    work: Uuid,
+    slot: &str,
+    version: &str,
+    as_of: &str,
+) -> Result<bool, sqlx::Error> {
+    let Ok(materialization) = Uuid::parse_str(version) else {
+        return Ok(false);
+    };
+    let currents =
+        crate::work_resource_current::read_work_resource_currents_in(conn, &[work], as_of).await?;
+    let inventories = inventory::read_in(conn, &currents.iter().collect::<Vec<_>>(), as_of).await?;
+    let Some(inventory) = inventories.get(&work).filter(|i| i.pending_image_update) else {
+        return Ok(false);
+    };
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_media_materialization m JOIN linggan_media_download_attempt a USING(download_attempt_ref) JOIN linggan_material_media_origin o ON o.observation_ref=a.media_observation_ref JOIN linggan_runtime_record_disposition d ON d.package_ref=o.package_ref AND d.record_ordinal=o.record_ordinal WHERE m.materialization_ref=$1 AND m.verified_at<=$5::text::timestamptz AND o.content_public_ref=$2 AND o.slot_key=$3 AND o.package_ref=ANY($4::uuid[]) AND o.created_at<=$5::text::timestamptz AND d.disposition='accepted_for_media_identity')")
+        .bind(materialization).bind(work).bind(slot).bind(&inventory.pending_image_packages).bind(as_of).fetch_one(conn).await
 }
 
 pub async fn read(
