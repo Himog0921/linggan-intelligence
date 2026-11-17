@@ -591,7 +591,7 @@
 | collection_below_target、collection_volume_shift | `opportunity/card/context.rs:67`、`:81` | `opportunity_metrics_postgres/card.rs::quality_flags_track_period_sample_thresholds` | 新增 |
 | collection_protocol_changed | `opportunity/card/context.rs:75` | `opportunity_metrics_postgres/card.rs::card_keeps_unknown_and_known_protocols_in_separate_groups` | 已有 |
 | engagement_reference_missing | `opportunity/card/context.rs:84` | `opportunity_metrics_postgres/card.rs::card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices` | 已有 |
-| stale_read_model | `opportunity/card/read.rs:260` | `opportunity_metrics_postgres/card.rs::pending_change_is_a_read_only_stale_flag_for_card_and_list` | 新增 |
+| stale_read_model | `opportunity/card/read.rs:260`（锁范围修正后为 `:261`） | `opportunity_metrics_postgres/card.rs::pending_change_is_a_read_only_stale_flag_for_card_and_list` | 新增 |
 | no_eligible_comments、区间为空 | `opportunity/problem_metrics/calculate.rs:138` | `opportunity_metrics_postgres.rs::standard_answers_protocol_groups_and_incremental_match` | 已有 |
 | I7、I8 不变量 | `opportunity/invariants.rs` | `opportunity_metrics_postgres/card.rs::invariant_violations_prevent_metric_and_card_commits` | 新增 |
 
@@ -604,3 +604,33 @@
 - W9：编写第一张真实卡路径，标出 A1–A4 均待授权、真实研究可能接收的材料、单条研究的三个阶段和全局同步影响。`rg -n '待授权|3N|没有领域参数|totalViolations' docs/opportunity/FIRST_CARD_RUNBOOK.md` 可核对；未迁移、研究、同步、重建或打开开关。
 
 - W5：新增 `scripts/check-opportunity-clippy.mjs` 并接入 AI foundation CI；按 Q-49 将既有 lint 错误限制为警告，机会卡目标路径的警告仍严格失败，编译失败也失败。`node scripts/check-opportunity-clippy.mjs` → exit 0，`Opportunity diagnostics: 0; other diagnostics: 848; cargo exit: 0`；非目标诊断只汇总。`node --test scripts/check-opportunity-clippy.test.mjs scripts/ci-select.test.mjs` → exit 0，25 passed、0 failed。只拆分目标路径的长函数、测试阶段，保留一套业务逻辑；最终完整回归见 W6。改动 Rust 文件的 `rustfmt --edition 2024 --config skip_children=true --check` → exit 0。
+
+- W6（进行中）：D-066 使 2 条撤回评论从 `comment_time_unknown` 转为 `restricted`，修正旧断言；历史影子升级夹具同步排除依赖卡片表的 0226；HTTP 合成夹具模拟完成重建后清除待处理队列。`bash scripts/test-opportunity-postgres.sh` 在开关未设置且使用一次性 PostgreSQL 时重跑 → exit 0，25 组共 129 passed、0 failed，隔离资源清理通过。`bash scripts/test-local-runtime-schema.sh` → exit 0，`Fresh and repeat runtime schema migration passed; retired tables absent.` `cd apps/web && npm run verify` 首次 1 failed、1795 passed：工作台“换一批”用例未找到按钮；该项单独重跑 1 passed，完整重跑 exit 0、172 文件和 1796 项通过，首次失败原因未确定。`node --test scripts/ci-select.test.mjs scripts/check-opportunity-clippy.test.mjs` → exit 0、25 passed。CI 选择器因工作流改动选择全部六类，其他合成链路仍在执行。
+- W6 回归过程：首轮 `comment_published_basis_uses_platform_time_and_never_falls_back` 因 D-066 旧分类断言失败（该组 12 passed、1 failed）；第二轮 `shadow_versions_avoid_existing_numbers_and_follow_current_changes` 因历史夹具缺少对 0226 的排除失败（该组 44 passed、1 failed）；第三轮 API 快照因夹具保留待处理队列失败（该组 0 passed、1 failed）。修正后目标历史升级和 API 测试各 1 passed，第四轮完整隔离回归 129 passed、0 failed。以上失败均为本次规则接入后的测试期望或夹具差异。
+- W6 自查发现 W1 将待重建队列加入共享卡片锁集合后，创作者依据也会被无关队列写入阻塞。隔离测试 `card::creator_evidence_does_not_lock_the_card_change_queue` 修正前 exit 101、0 passed / 1 failed（`SourcesBusy`），收窄创作者依据锁集合后 exit 0、1 passed；卡片与列表仍读取队列。随后补充卡片与列表应等待同一队列的断言，需在最终全量回归再次验证。
+- 扩展后的 `card::creator_evidence_does_not_lock_the_card_change_queue` 在隔离 PostgreSQL 再次执行 → exit 0、1 passed；同一队列写锁下创作者依据成功，而卡片与列表按既有快照规则返回 `SourcesBusy`。最终完整回归需包含该新增用例。
+- 锁范围边界：卡片和列表读取为获得同一快照而锁定变更队列；队列有并发写入时可返回 `SourcesBusy`。该行为有隔离测试，真实运行负载与权限尚未验证。
+- 锁修正后 `node scripts/check-opportunity-clippy.mjs` → exit 0，`Opportunity diagnostics: 0; other diagnostics: 848; cargo exit: 0`；最终完整测试仍需按修正后的代码重跑。
+- 隔离资源边界：仓库内完整 runner 报告其专用容器和卷已清理。本次部分定向测试通过临时容器执行时未显式移除镜像创建的匿名卷；Docker 保留事件已轮转，无法可靠地将遗留卷与本次容器逐一关联。为保护其他工作，未删除无法确认归属的卷。
+
+- W6 首轮附加 CI：选择器因工作流修改选择全部六类。以下脚本均在隔离合成环境退出 0；数字为日志中 Cargo 测试组汇总，不含脚本内 Python 或浏览器子步骤。AI 基础脚本首次输出通过和清理成功，但汇总 shell 使用了保留变量而退出；已单独重跑并取得 exit 0。部分首轮脚本早于队列锁范围修正，最终代码以 W10 复验为准。
+
+| 命令 | Cargo 测试组 | 通过 | 失败 |
+|---|---:|---:|---:|
+| `bash scripts/test-research-dossier-postgres.sh --ai-foundation` | 6 | 58 | 0 |
+| `bash scripts/test-research-dossier-postgres.sh --ai-service` | 8 | 36 | 0 |
+| `bash scripts/test-research-dossier-postgres.sh --ai-install` | 2 | 15 | 0 |
+| `bash scripts/test-research-dossier-postgres.sh --ai-readonly` | 3 | 16 | 0 |
+| `bash scripts/test-ocr-recognition-postgres.sh --purge-only` | 1 | 4 | 0 |
+| `bash scripts/test-ocr-recognition-postgres.sh --reading-only` | 1 | 7 | 0 |
+| `bash scripts/test-ocr-recognition-postgres.sh --browser` | 2 | 11 | 0 |
+| `bash scripts/test-comment-study-productization-postgres.sh` | 11 | 31 | 0 |
+| `bash scripts/test-content-workbench-postgres.sh` | 8 | 115 | 0 |
+| `bash scripts/test-content-workbench-postgres.sh --browser` | 1 | 1 | 0 |
+| `bash scripts/test-collection-single-run-postgres.sh` | 7 | 24 | 0 |
+| `bash scripts/test-research-dossier-postgres.sh --dossier-input` | 11 | 65 | 0 |
+| `bash scripts/test-research-dossier-postgres.sh --dossier-ui` | 2 | 2 | 0 |
+| `bash scripts/test-web-app-postgres.sh` | 11 | 21 | 0 |
+
+- 其他关联检查：`cargo test -p linggan-contracts --lib --locked` → 25 passed；`cargo test -p linggan-intelligence --lib --locked` → 399 passed、19 ignored；`cargo test -p linggan-evidence --lib --locked` → 194 passed、1 ignored；`npm --prefix apps/pi-adapter test` → 73 passed；离线预览浏览器 `offline_preview_browser_main_path` → 1 passed；`npm --prefix apps/web test -- src/pages/topics` → 124 passed。上述命令均 exit 0，模拟服务仅使用本地回环。
+- W6 锁修正后的 `env -u LINGGAN_OPPORTUNITY_CARD bash scripts/test-opportunity-postgres.sh` → exit 0、25 组 130 passed、0 failed、0 ignored，输出 `Opportunity PostgreSQL proof passed` 和隔离资源清理确认。与 W0 相比没有新增失败；最后一轮所有 CI 选择项以 W10 的结果为准。

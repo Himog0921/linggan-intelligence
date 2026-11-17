@@ -10,16 +10,17 @@ use std::collections::{BTreeMap, BTreeSet};
 use uuid::Uuid;
 
 // Each reader signs only the relations it actually reads (D-061).
+const CARD_CHANGE_TABLE: &str = "linggan_opportunity_card_change";
 const CARD_READ_TABLES: &[&str] = &[
     "linggan_material_comment_restriction",
-    "linggan_opportunity_card_change",
+    CARD_CHANGE_TABLE,
     "linggan_opportunity_opportunity_card",
     "linggan_opportunity_problem",
     "linggan_opportunity_problem_lineage",
 ];
 const LIST_READ_TABLES: &[&str] = &[
     "linggan_material_comment_restriction",
-    "linggan_opportunity_card_change",
+    CARD_CHANGE_TABLE,
     "linggan_opportunity_card_period_index",
     "linggan_opportunity_opportunity_card",
     "linggan_opportunity_problem",
@@ -856,8 +857,14 @@ async fn read_evidence_scoped(
     let prior = previous("opportunity-evidence", query.cursor.as_deref(), &scope)?;
     let mut tx = begin(database).await?;
     let evidence_tables = snapshot::evidence_read_tables();
+    // Creator evidence reads the stored card, but does not inspect pending changes.
+    let creator_tables: Vec<_> = CARD_READ_TABLES
+        .iter()
+        .copied()
+        .filter(|table| *table != CARD_CHANGE_TABLE)
+        .collect();
     let tables = if matches!(query.kind, EvidenceKind::Creators) {
-        CARD_READ_TABLES
+        creator_tables.as_slice()
     } else {
         &evidence_tables
     };

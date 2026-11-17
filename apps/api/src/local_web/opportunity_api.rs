@@ -411,6 +411,12 @@ mod tests {
             sqlx::query("INSERT INTO linggan_opportunity_card_period_index(problem_ref,taxonomy_version,metric_def_version,card_fingerprint,period_index) VALUES($1,1,1,$2,$3)")
                 .bind(id).bind(&fingerprint).bind(&index)
                 .execute(db.pool()).await.unwrap();
+            // The fixture represents a completed rebuild, which consumes its queued change.
+            sqlx::query("DELETE FROM linggan_opportunity_card_change WHERE problem_ref=$1")
+                .bind(id)
+                .execute(db.pool())
+                .await
+                .unwrap();
         }
         (first, payload)
     }

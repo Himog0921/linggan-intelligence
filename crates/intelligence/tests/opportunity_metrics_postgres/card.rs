@@ -635,6 +635,51 @@ async fn creator_evidence_is_not_blocked_by_unrelated_model_writes() {
 
 #[tokio::test]
 #[ignore = "requires the disposable opportunity PostgreSQL proof"]
+async fn creator_evidence_does_not_lock_the_card_change_queue() {
+    use linggan_intelligence::opportunity::{
+        EvidenceKind, EvidenceQuery, OpportunityListQuery, OpportunityReadError, read_card,
+        read_evidence, read_opportunities,
+    };
+    let (db, domain, digest) = prepare().await;
+    rebuild_opportunity_cards(&db, domain, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let problem: Uuid = sqlx::query_scalar("SELECT md5('metric-problem:1')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let mut writer = db.pool().begin().await.unwrap();
+    sqlx::query("LOCK TABLE linggan_opportunity_card_change IN ROW EXCLUSIVE MODE")
+        .execute(&mut *writer)
+        .await
+        .unwrap();
+    let result = read_evidence(
+        &db,
+        problem,
+        &EvidenceQuery {
+            kind: EvidenceKind::Creators,
+            cursor: None,
+            limit: Some(1),
+        },
+    )
+    .await;
+    assert!(
+        result.is_ok(),
+        "unrelated queue writes must not block creator evidence: {result:?}"
+    );
+    assert!(matches!(
+        read_card(&db, problem).await,
+        Err(OpportunityReadError::Snapshot(CardError::SourcesBusy))
+    ));
+    assert!(matches!(
+        read_opportunities(&db, domain, &OpportunityListQuery::default()).await,
+        Err(OpportunityReadError::Snapshot(CardError::SourcesBusy))
+    ));
+    writer.rollback().await.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable opportunity PostgreSQL proof"]
 async fn evidence_page_reads_source_context_only_for_the_requested_page() {
     use linggan_intelligence::comment_study_source::{StudySourceRole, selected_source_in};
     use linggan_intelligence::opportunity::{EvidenceKind, EvidenceQuery, read_evidence};

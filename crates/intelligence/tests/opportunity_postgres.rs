@@ -340,7 +340,8 @@ async fn comment_published_basis_uses_platform_time_and_never_falls_back() {
         0
     );
     let exclusions = exclusion_counts_for(&database, AS_OF, "comment_published").await;
-    assert_eq!(exclusions.get("comment_time_unknown"), Some(&5807));
+    assert_eq!(exclusions.get("comment_time_unknown"), Some(&5805));
+    assert_eq!(exclusions.get("restricted"), Some(&2));
     assert_eq!(exclusions.get("period_anchor_missing"), None);
 
     opportunity_dataset::build_platform_times(&database)
