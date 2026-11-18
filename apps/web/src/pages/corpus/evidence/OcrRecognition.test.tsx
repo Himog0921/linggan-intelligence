@@ -247,7 +247,7 @@ describe('读取与设置入口', () => {
 
     failing = false;
     await user.click(screen.getByRole('button', { name: '重新读取状态' }));
-    expect(await screen.findByText('正在识别内页。')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'OCR 识别' })).toBeEnabled());
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 

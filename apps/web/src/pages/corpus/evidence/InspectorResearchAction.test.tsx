@@ -2,7 +2,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { InspectorResearchAction } from './InspectorResearchAction';
-import { deepResearchWatchKey } from './DossierUnderstanding';
+import { deepResearchWatchKey } from './contentUnderstandingApi';
 import { newClient } from './testKit';
 
 const ready = { state: 'ready', kind: 'image_text', gaps: [], scopeNote: null };
@@ -43,7 +43,7 @@ function json(value: unknown, status = 200) {
 function mount(analysis: unknown) {
   const client = newClient();
   const calls: string[] = [];
-  const fetch = vi.fn(async (path: string, init?: RequestInit) => {
+  const fetch = vi.fn(async (path: string) => {
     calls.push(path);
     if (path.includes('/content-understanding/latest')) return json({ ...understanding(), analysis });
     if (path.includes('/deep/modes')) return json(modes);

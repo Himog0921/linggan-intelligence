@@ -6,7 +6,7 @@
 
 .modal {
   box-sizing: border-box;
-  width: min(680px, calc(100vw - var(--lgi-space-8)));
+  width: min(calc(var(--lgi-space-16) * 10), calc(100vw - var(--lgi-space-8)));
   max-height: calc(100dvh - var(--lgi-space-8));
   overflow: auto;
   padding: 0;
