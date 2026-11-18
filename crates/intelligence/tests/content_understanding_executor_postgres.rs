@@ -12,7 +12,9 @@ mod wire;
 
 use base64::Engine as _;
 use linggan_intelligence::{
-    ai_foundation::{TaskKey, content_understanding as owner, store::FoundationError},
+    ai_foundation::{
+        TaskKey, content_understanding as owner, store::FoundationError,
+    },
     content_understanding::METHOD,
     pi_adapter::PiAdapter,
 };
@@ -65,7 +67,7 @@ fn full_schema_fixtures_record_the_actual_deep_v2_migration_digest() {
 
 #[tokio::test]
 #[ignore = "owned PostgreSQL + AI_FOUNDATION_PROOF_NODE + owned LINGGAN_LOCAL_MEDIA_ROOT; no real models"]
-async fn l1_round_trip_reuses_current_core_and_preserves_saved_content() {
+async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
     // The fixture reads LOCAL_001_PROOF_DATABASE_URL itself. Never discover or print a DSN.
     let db = fixture::proof_database(&format!("content_l1_{}", Uuid::new_v4().simple())).await;
     let media_root = PathBuf::from(
@@ -91,6 +93,12 @@ async fn l1_round_trip_reuses_current_core_and_preserves_saved_content() {
     .await
     .unwrap();
     let model = setup::prepare_with_actual_probe(&db, &endpoint.url, &session, &adapter).await;
+    let legacy_config_before: Value = sqlx::query_scalar(
+        "SELECT to_jsonb(s) FROM linggan_ai_task_setting s WHERE task_key='note_interpretation'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
     let l1_config = l1_setup::configure_high(&db, &model).await;
     session.request_drain().await.unwrap();
     session.complete_drain().await.unwrap();
@@ -366,10 +374,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_saved_content() {
             if run["state"] == "succeeded" {
                 break current;
             }
-            assert!(
-                !worker.is_finished(),
-                "executor exited before settling the L1 task"
-            );
+            assert!(!worker.is_finished(), "executor exited before settling L1");
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
@@ -534,6 +539,13 @@ async fn l1_round_trip_reuses_current_core_and_preserves_saved_content() {
         "SELECT (SELECT count(*) FROM linggan_content_understanding_request),(SELECT count(*) FROM linggan_model_invocation WHERE task_key='content_understanding')",
     ).fetch_one(db.pool()).await.unwrap();
     assert_eq!(counts, (2, 1), "one pre-dispatch stop and one saved Core");
+    let legacy_config_after: Value = sqlx::query_scalar(
+        "SELECT to_jsonb(s) FROM linggan_ai_task_setting s WHERE task_key='note_interpretation'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(legacy_config_after, legacy_config_before);
     // Only an admitted new content_detail package changes the body; old immutable results stay put.
     submit_body(
         &db,
@@ -602,11 +614,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_saved_content() {
         1,
         "pending and completed duplicates make no extra model call"
     );
-    assert_eq!(
-        requests.len(),
-        2,
-        "one real probe and one L1 call"
-    );
+    assert_eq!(requests.len(), 2, "one synthetic probe and one L1 call");
     let (request, packet) = &l1_calls[0];
     assert_eq!(
         packet["draftProtocol"],

@@ -127,11 +127,24 @@ DECLARE entry record; predicate text;
 BEGIN
  FOR entry IN SELECT tablename FROM upgrade_proof.baseline_table ORDER BY tablename LOOP
   predicate := CASE
-   WHEN entry.tablename IN ('linggan_ai_task','linggan_ai_control','linggan_ai_task_round_state',
-    'linggan_ai_prompt_version','linggan_ai_task_config','linggan_ai_task_setting','linggan_skill_binding')
+   WHEN entry.tablename IN ('linggan_ai_task','linggan_ai_control','linggan_ai_task_round_state')
+    THEN 'WHERE task_key IS DISTINCT FROM ''content_understanding'' AND task_key IS DISTINCT FROM ''content_understanding_deep'' AND task_key IS DISTINCT FROM ''note_interpretation'''
+   WHEN entry.tablename IN ('linggan_ai_prompt_version','linggan_ai_task_config','linggan_ai_task_setting')
+    THEN 'WHERE task_key IS DISTINCT FROM ''content_understanding'' AND task_key IS DISTINCT FROM ''content_understanding_deep'' AND task_key NOT IN (''topic_research'',''topic_research_extract_review'',''topic_research_resolve'',''topic_research_resolve_review'')'
+   WHEN entry.tablename='linggan_skill_binding'
     THEN 'WHERE task_key IS DISTINCT FROM ''content_understanding'' AND task_key IS DISTINCT FROM ''content_understanding_deep'''
+   WHEN entry.tablename='linggan_ai_batch_control'
+    THEN 'WHERE NOT EXISTS (SELECT 1 FROM linggan_ai_batch b WHERE b.batch_ref=row.batch_ref AND b.task_key=''note_interpretation'')'
+   WHEN entry.tablename='linggan_ai_batch_item_control'
+    THEN 'WHERE NOT EXISTS (SELECT 1 FROM linggan_ai_batch_item i JOIN linggan_ai_batch b USING(batch_ref) WHERE i.item_ref=row.item_ref AND b.task_key=''note_interpretation'')'
+   WHEN entry.tablename='linggan_ai_round'
+    THEN 'WHERE task_key IS DISTINCT FROM ''note_interpretation'''
+   WHEN entry.tablename='linggan_ai_command'
+    THEN 'WHERE operation IS DISTINCT FROM ''task_retire'''
+   WHEN entry.tablename='linggan_ai_control_event'
+    THEN 'WHERE reason IS DISTINCT FROM ''task_retired'''
    WHEN entry.tablename='linggan_ai_failure_code'
-    THEN 'WHERE code NOT IN (''content_understanding_publication_withheld'',''content_understanding_deep_insufficient_evidence'')'
+    THEN 'WHERE code NOT IN (''content_understanding_publication_withheld'',''content_understanding_deep_insufficient_evidence'',''content_understanding_deep_rejected_excess'')'
    ELSE '' END;
   RETURN QUERY EXECUTE format(
    'SELECT %L::text,count(*),md5(COALESCE(string_agg(to_jsonb(row)::text,E''\n'' ORDER BY to_jsonb(row)::text),'''')) FROM public.%I row %s',
@@ -152,6 +165,13 @@ SQL
   cmp "$proof_dir/upgrade-before.jsonl" "$proof_dir/upgrade-after.jsonl"
   psql_in_container > "$proof_dir/upgrade-assertions.log" 2>&1 <<'SQL'
 DO $$ BEGIN
+ IF NOT EXISTS(SELECT 1 FROM linggan_ai_task WHERE task_key='note_interpretation' AND lifecycle='retired')
+  OR NOT EXISTS(SELECT 1 FROM linggan_ai_control WHERE task_key='note_interpretation' AND NOT enabled AND reason='task_retired')
+  OR NOT EXISTS(SELECT 1 FROM linggan_ai_batch b JOIN linggan_ai_batch_control c USING(batch_ref)
+    JOIN linggan_ai_batch_item i USING(batch_ref) JOIN linggan_ai_batch_item_control ic USING(item_ref)
+    WHERE b.task_key='note_interpretation' AND c.state='cancelled' AND c.cancel_requested
+      AND c.last_round_no=1 AND ic.state='cancelled' AND ic.failure_code='task_retired')
+ THEN RAISE EXCEPTION 'retired_task_not_settled'; END IF;
  IF (
   SELECT count(*) FROM linggan_ai_task_setting setting
   JOIN linggan_ai_task_config config ON config.task_config_ref=setting.current_config_ref
@@ -172,7 +192,7 @@ END $$;
 SQL
   migrate > "$proof_dir/upgrade-repeat.log" 2>&1
   psql_in_container -Atc 'SELECT row_to_json(snapshot) FROM upgrade_proof.snapshot()' > "$proof_dir/upgrade-repeat.jsonl"
-  cmp "$proof_dir/upgrade-before.jsonl" "$proof_dir/upgrade-repeat.jsonl"
+  cmp "$proof_dir/upgrade-after.jsonl" "$proof_dir/upgrade-repeat.jsonl"
   [[ "$(psql_in_container -Atc 'SELECT max(migration_id) FROM linggan_local_schema_migration')" == "$expected_head" ]] || exit 1
   python3 - "$proof_dir/result.json" <<'PY'
 import json,sys
