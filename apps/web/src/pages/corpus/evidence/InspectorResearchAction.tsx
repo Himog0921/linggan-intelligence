@@ -22,14 +22,7 @@ export function InspectorResearchAction({ domain, work, revision, asOf, onSubmit
     : undefined;
 
   if (!coreRef) {
-    const title = !revision || !asOf
-      ? '需要先完成 L1 内容理解'
-      : query.isPending
-        ? '正在读取 L1 理解结果'
-        : query.isError
-          ? '暂时无法读取 L1 理解结果'
-          : '需要先完成 L1 内容理解';
-    return <ActionButton variant="primary" disabled title={title}>深入研究</ActionButton>;
+    return <ActionButton variant="primary" disabled>深入研究</ActionButton>;
   }
 
   return <DeepResearchLauncher
