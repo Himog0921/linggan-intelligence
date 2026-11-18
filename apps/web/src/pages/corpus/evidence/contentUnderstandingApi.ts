@@ -87,18 +87,18 @@ export const contentUnderstandingQueryKey = (domain: string, work: string, revis
 export const deepResearchWatchKey = (domain: string, work: string) =>
   ['content-understanding-deep-watch', domain, work] as const;
 
-export function useContentUnderstanding(domain: string, work: string, revision: string, asOf: string, active: boolean, deepWatchCount: number | null = null) {
+export function useContentUnderstanding(domain: string, work: string, revision: string, asOf: string, active: boolean) {
   return useQuery({
     queryKey: contentUnderstandingQueryKey(domain, work, revision, asOf),
     queryFn: ({ signal }) => readContentUnderstanding(domain, work, asOf, signal),
     enabled: active,
     retry: false,
+    placeholderData: (previous, previousQuery) => previousQuery?.queryKey[1] === domain && previousQuery.queryKey[2] === work && previousQuery.queryKey[3] === revision ? previous : undefined,
     gcTime: 0,
     staleTime: 10_000,
     refetchOnWindowFocus: false,
     refetchInterval: query => {
       if (['pending', 'running'].includes(query.state.data?.currentRequest?.state ?? query.state.data?.analysis?.state ?? '')) return 1500;
-      if (deepWatchCount !== null) return 4000;
       return false;
     },
   });

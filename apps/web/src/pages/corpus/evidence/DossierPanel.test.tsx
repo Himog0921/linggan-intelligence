@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { DossierPanel } from './DossierPanel';
 import { parseDossierPayload } from './dossierDecode';
 import { dossierKey } from './evidenceKeys';
+import { deepResearchWatchKey } from './contentUnderstandingApi';
 import * as dossierApi from './dossierApi';
 import { DOMAIN, dossierJson, dossierMaterialJson, workRef } from './evidenceFixtures';
 import { createFetchMock, fail, ok, renderWithProviders, type FetchKit } from './testKit';
@@ -18,6 +19,26 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 function mount(active = true) { return renderWithProviders(<DossierPanel work={workRef(1)} domain={DOMAIN} active={active} />); }
 const source = (state: string, units = 0, readings = 0) => ({ state, units, readings });
 const completeCoverage = { imageInventory: { basis: 'platform_image_list', expectedPages: 0, acquiredPages: 0, processedPages: 0, missingPages: [], unknownOrder: false }, sources: { body: source('known_empty'), images: source('not_applicable'), audio: source('available', 1, 1) }, issues: [] };
+
+it('观察研究时更新底稿截止时间，才显示该时间内的新结果', async () => {
+  const before = dossierJson(1);
+  const after = dossierJson(1);
+  after.dossier.asOf = '2026-10-23T08:01:00Z';
+  kit.route('GET', path, ok(before), ok(after));
+  kit.route('GET', understandingPath, call => {
+    const current = call.search.get('asOf') === after.dossier.asOf;
+    return { status: 200, body: { contract: 'content-understanding.read.v1', workRef: workRef(1),
+      materialReadiness: { state: 'ready', kind: 'image_text', gaps: [], scopeNote: null },
+      analysis: { state: 'succeeded', failureCode: null, result: { card: { schemaVersion: 'content-card.v0.2', workRef: workRef(1), core: { summary: { text: '合成理解' }, knowledgeUnits: [] } } },
+        deepAnalyses: current ? [{ analysisRef: 'new-result', question: '新问题', methodVersion: 'v2', findings: [{ id: 'f', statement: '新研究结果', support: [{ observation: '合成依据' }] }] }] : [] } } };
+  });
+  const view = mount();
+  await screen.findByText('合成理解');
+  expect(screen.queryByText('新研究结果')).toBeNull();
+  view.client.setQueryData(deepResearchWatchKey(DOMAIN, workRef(1)), { count: 0, submittedAt: Date.now() });
+  expect(await screen.findByText('新研究结果', {}, { timeout: 7000 })).toBeVisible();
+  expect(kit.of('GET', understandingPath).map(call => call.search.get('asOf'))).toContain(after.dossier.asOf);
+});
 
 it.each([401,403,404,410])('刷新得到 %i 后撤下旧内容与导出入口', async status => {
   kit.route('GET', path, ok(dossierJson(1, { bodyText: '已有缓存但随后失去权限的正文' })), fail(status, 'source_restricted'));

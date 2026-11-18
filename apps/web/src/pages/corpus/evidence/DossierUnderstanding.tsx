@@ -31,7 +31,7 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
   }, [submittedAt]);
   const watchExpired = waiting !== null && expiredAt === waiting.submittedAt;
   const watching = waiting !== null && !watchExpired;
-  const query = useContentUnderstanding(domain, work, revision, asOf, active, watching ? waiting.count : null);
+  const query = useContentUnderstanding(domain, work, revision, asOf, active);
   const analysis = query.isError ? null : query.data?.analysis;
   const currentRequest = query.data?.currentRequest;
   const result = analysis?.result;
@@ -43,6 +43,7 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
   return <section className={`${styles.section} ${styles.understanding}`} aria-label="整篇内容理解">
     <header className={styles.sectionIndex}><h2>作品概览</h2></header>
     <div className={styles.content}>
+      {query.isPlaceholderData ? <p role="status">正在更新理解结果，暂时显示上一份底稿的结果。</p> : null}
       {query.isPending ? <p role="status">正在读取理解结果…</p> : null}
       {query.isError ? <p role="status">理解结果暂时无法读取，原始材料仍可阅读。<ActionButton className={`${styles.control} ${styles.quiet}`} onClick={() => void query.refetch()}>重试读取</ActionButton></p> : null}
       {!query.isPending && readiness && materialReadiness && (!analysis || materialReadiness.gaps.length > 0) ? <>

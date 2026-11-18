@@ -4,6 +4,7 @@ import { useCallback, useState } from 'react';
 import { hideCachedReading } from './dossierPresent';
 import { fetchDossier } from './dossierApi';
 import { dossierKey } from './evidenceKeys';
+import { deepResearchWatchKey, type DeepResearchWatch } from './contentUnderstandingApi';
 import { DossierDocument } from './DossierDocument';
 import { useToast } from './toastContext';
 import styles from './DossierDocument.module.css';
@@ -13,7 +14,9 @@ interface Props { work: string; domain: string; active: boolean }
 export function DossierPanel({ work, domain, active }: Props) {
   const [activated, setActivated] = useState(active); if (active && !activated) setActivated(true);
   const [revoked, setRevoked] = useState(false);
-  const query = useQuery({ queryKey: dossierKey(domain, work), queryFn: ({ signal }) => fetchDossier(work, domain, signal), enabled: activated, staleTime: 30_000, gcTime: 0 });
+  const watch = useQuery<DeepResearchWatch | null>({ queryKey: deepResearchWatchKey(domain, work), queryFn: async () => null, enabled: false, initialData: null, gcTime: 10 * 60 * 1000 });
+  const query = useQuery({ queryKey: dossierKey(domain, work), queryFn: ({ signal }) => fetchDossier(work, domain, signal), enabled: activated, staleTime: 30_000, gcTime: 0,
+    refetchInterval: () => active && watch.data && Date.now() - watch.data.submittedAt < 10 * 60 * 1000 ? 4000 : false });
   const { refetch } = query;
   const toast = useToast();
   const reload = useCallback((announce: boolean) => {

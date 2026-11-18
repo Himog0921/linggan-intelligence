@@ -544,6 +544,28 @@ async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
     .await
     .unwrap();
     assert_eq!(legacy_config_after, legacy_config_before);
+    // A newly published synthetic finding must not leak into the earlier dossier snapshot.
+    let deep_ref = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt) VALUES($1,'synthetic_deep_cutoff','{}','{}')")
+        .bind(deep_ref).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_content_understanding_deep(analysis_ref,core_ref,domain_ref,method_version,question,findings) VALUES($1,$2,$3,'content-understanding.l2.manual.v1','合成问题','[]')")
+        .bind(deep_ref).bind(receipt.request_ref).bind(dossier::DOMAIN).execute(db.pool()).await.unwrap();
+    let old_snapshot = owner::latest(&db, dossier::DOMAIN, work, Some(&canonical.as_of))
+        .await
+        .unwrap();
+    assert!(
+        old_snapshot["analysis"]["deepAnalyses"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    let current_snapshot = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        current_snapshot["analysis"]["deepAnalyses"][0]["analysisRef"],
+        json!(deep_ref)
+    );
     // Only an admitted new content_detail package changes the body; old immutable results stay put.
     submit_body(
         &db,
