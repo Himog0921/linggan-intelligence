@@ -19,7 +19,6 @@ mod content_understanding;
 mod content_understanding_deep;
 mod creator_account_research;
 mod creator_research;
-mod note_analysis;
 mod opportunity_sync;
 mod research_call;
 mod topic_research;
@@ -197,9 +196,6 @@ async fn fill_slots(
                 TaskKey::ContentUnderstandingDeep => {
                     content_understanding_deep::execute(&db, &item, secrets.as_ref(), &adapter)
                         .await
-                }
-                TaskKey::NoteInterpretation => {
-                    note_analysis::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
                 TaskKey::ModelProbe => {
                     probe::execute_probe(&db, &item, secrets.as_ref(), &adapter).await
