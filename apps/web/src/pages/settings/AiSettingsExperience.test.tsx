@@ -61,6 +61,25 @@ describe('AI 设置正式四视图', () => {
     expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
   });
 
+  it('已退役的单篇分析不再出现在能力卡片和高级配置工作清单', async () => {
+    const data = businessSettingsFixture();
+    const base = data.tasks[0]!;
+    const configuration = { ...base.configuration, taskKey: 'note_interpretation', taskConfigRef: 'legacy-note-config' };
+    data.tasks.unshift({ ...base, taskKey: 'note_interpretation', label: '每篇解读', lifecycle: 'retired', configuration });
+    respond = call => call.method === 'GET' && call.path === '/api/local/ai-settings'
+      ? ok(data) : { status: 503, body: {} };
+    const user = userEvent.setup();
+    mount();
+    await screen.findByRole('heading', { name: '工作能力' });
+    expect(screen.queryByRole('button', { name: /每篇解读/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('link', { name: '高级配置' }));
+    await user.click(screen.getByRole('button', { name: '工作配置与额度' }));
+    expect(await screen.findByRole('heading', { name: '自动化与额度' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: /每篇解读/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('每篇解读 · 历史配置')).not.toBeInTheDocument();
+    expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
+  });
+
   it('关键词、状态和视图切换不改变实际开关或配置', async () => {
     const user = userEvent.setup();
     mount();
