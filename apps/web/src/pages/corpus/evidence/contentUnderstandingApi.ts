@@ -103,4 +103,3 @@ export function useContentUnderstanding(domain: string, work: string, revision: 
     },
   });
 }
-
