@@ -1,4 +1,5 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ApiError, isRecord } from '../../../shared/api';
 import { InlineNotice } from '../../../shared/InlineNotice';
@@ -36,23 +37,40 @@ export function DeepResearchLauncher({ domain, work, coreRef, onSubmitted }: {
   const [questions, setQuestions] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  // A write may only change identity once the server has answered; an unanswered retry reuses it.
   const identities = useRef(new RequestIdentities());
 
   const choose = (modes: Mode[], next: string) => {
-    setMode(next); setQuestions(modes.find(item => item.researchMode === next)?.defaultSubQuestions ?? []);
+    setMode(next);
+    setQuestions(modes.find(item => item.researchMode === next)?.defaultSubQuestions ?? []);
   };
-  const toggle = async () => {
-    if (open) { setOpen(false); return; }
-    setOpen(true); setMessage(null);
-    if (setup) return;
+  const load = async () => {
     setLoadError(false);
     try {
       const loaded = await loadSetup(domain, work);
       setSetup(loaded);
       choose(loaded.modes, loaded.modes.find(item => item.researchMode === 'content_design')?.researchMode ?? loaded.modes[0]?.researchMode ?? '');
-    } catch { setLoadError(true); }
+    } catch {
+      setLoadError(true);
+    }
   };
+  const toggle = () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    setMessage(null);
+    if (!setup) void load();
+  };
+  useEffect(() => {
+    if (!open) return;
+    const dismiss = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setOpen(false);
+      }
+    };
+    document.addEventListener('keydown', dismiss);
+    return () => document.removeEventListener('keydown', dismiss);
+  }, [open]);
+
   const current = setup?.modes.find(item => item.researchMode === mode);
   const trimmed = questions.map(text => text.trim());
   const valid = trimmed.length >= 1 && trimmed.length <= MAX_QUESTIONS && trimmed.every(text => text !== '' && [...text].length <= MAX_QUESTION_LENGTH);
@@ -64,54 +82,70 @@ export function DeepResearchLauncher({ domain, work, coreRef, onSubmitted }: {
       taskConfigRef: setup.taskConfigRef, taskRevision: setup.taskRevision,
     };
     const commandRef = identities.current.keyFor('deep-generate', JSON.stringify(content));
-    setBusy(true); setMessage(null);
+    setBusy(true);
+    setMessage(null);
     try {
       await submitDeepRequest({ commandRef, ...content });
       identities.current.settle('deep-generate');
-      setMessage('已提交。完成后结果会出现在下方的“研究发现”中。');
+      setOpen(false);
       onSubmitted();
     } catch (error) {
       if (error instanceof ApiError && error.answered) identities.current.settle('deep-generate');
       setMessage(failureCopy(error));
-    } finally { setBusy(false); }
+    } finally {
+      setBusy(false);
+    }
   };
 
   const quiet = `${docStyles.control} ${docStyles.quiet}`;
-  return <div>
-    <ActionButton className={quiet} aria-expanded={open} onClick={() => void toggle()}>
-      {open ? '收起深入研究' : '发起深入研究'}
-    </ActionButton>
-    {open ? <div className={styles.panel} role="group" aria-label="发起深入研究">
-      {loadError ? <InlineNotice tone="error" action={<ActionButton className={quiet} onClick={() => { setOpen(false); void toggle(); }}>重试</ActionButton>}>暂时无法读取深入研究的设置。</InlineNotice> : null}
-      {!setup && !loadError ? <p role="status">正在读取设置…</p> : null}
-      {setup ? <>
-        {setup.unavailable ? <InlineNotice tone="warning">{setup.unavailable}</InlineNotice> : null}
-        <SelectField label="研究模式" value={mode} onChange={next => choose(setup.modes, next)}
-          options={setup.modes.map(item => ({ value: item.researchMode, label: DEEP_MODE_LABELS[item.researchMode] ?? item.researchMode }))}/>
-        {current ? <>
-          <p className={docStyles.paragraph}>
-            将使用的材料：{current.defaultMaterialKinds.map(kind => MATERIAL_LABELS[kind] ?? kind).join('、')}
-            {current.defaultMaterialKinds.includes('cover') ? `（图片 ${Math.min(setup.imageCount, setup.imageLimit)} 张，最多 ${setup.imageLimit} 张）` : ''}
-          </p>
-          <fieldset className={styles.group}>
-            <legend className={styles.label}>子问题（最多 {MAX_QUESTIONS} 个，每个不超过 {MAX_QUESTION_LENGTH} 字）</legend>
-            {questions.map((text, index) => <div className={styles.row} key={index}>
-              <input className={styles.question} aria-label={`子问题 ${index + 1}`} value={text} maxLength={MAX_QUESTION_LENGTH}
-                onChange={event => setQuestions(questions.map((item, at) => at === index ? event.target.value : item))}/>
-              <ActionButton className={quiet} disabled={questions.length <= 1}
-                onClick={() => setQuestions(questions.filter((_, at) => at !== index))}>删除</ActionButton>
-            </div>)}
-            <div className={styles.row}>
-              <ActionButton className={quiet} disabled={questions.length >= MAX_QUESTIONS}
-                onClick={() => setQuestions([...questions, ''])}>添加子问题</ActionButton>
+  return (
+    <>
+      <ActionButton variant="primary" className={styles.trigger} aria-expanded={open} onClick={toggle}>
+        深入研究
+      </ActionButton>
+      {open ? createPortal(
+        <div className={styles.modalLayer} onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false); }}>
+          <section id="deep-research-dialog" className={styles.modal} role="dialog" aria-modal="true" aria-label="深入研究">
+            <header className={styles.modalHeader}>
+              <h2>深入研究</h2>
+              <button type="button" className={styles.close} aria-label="关闭深入研究" onClick={() => setOpen(false)}>×</button>
+            </header>
+            <div className={styles.modalBody}>
+              {loadError ? <InlineNotice tone="error" action={<ActionButton className={quiet} onClick={() => void load()}>重试</ActionButton>}>暂时无法读取深入研究的设置。</InlineNotice> : null}
+              {!setup && !loadError ? <p role="status">正在读取设置…</p> : null}
+              {setup ? <>
+                {setup.unavailable ? <InlineNotice tone="warning">{setup.unavailable}</InlineNotice> : null}
+                <SelectField label="研究模式" value={mode} onChange={next => choose(setup.modes, next)}
+                  options={setup.modes.map(item => ({ value: item.researchMode, label: DEEP_MODE_LABELS[item.researchMode] ?? item.researchMode }))}/>
+                {current ? <>
+                  <p className={docStyles.paragraph}>
+                    将使用的材料：{current.defaultMaterialKinds.map(kind => MATERIAL_LABELS[kind] ?? kind).join('、')}
+                    {current.defaultMaterialKinds.includes('cover') ? `（图片 ${Math.min(setup.imageCount, setup.imageLimit)} 张，最多 ${setup.imageLimit} 张）` : ''}
+                  </p>
+                  <fieldset className={styles.group}>
+                    <legend className={styles.label}>子问题（最多 {MAX_QUESTIONS} 个，每个不超过 {MAX_QUESTION_LENGTH} 字）</legend>
+                    {questions.map((text, index) => <div className={styles.row} key={index}>
+                      <input className={styles.question} aria-label={`子问题 ${index + 1}`} value={text} maxLength={MAX_QUESTION_LENGTH}
+                        onChange={event => setQuestions(questions.map((item, at) => at === index ? event.target.value : item))}/>
+                      <ActionButton className={quiet} disabled={questions.length <= 1}
+                        onClick={() => setQuestions(questions.filter((_, at) => at !== index))}>删除</ActionButton>
+                    </div>)}
+                    <div className={styles.row}>
+                      <ActionButton className={quiet} disabled={questions.length >= MAX_QUESTIONS}
+                        onClick={() => setQuestions([...questions, ''])}>添加子问题</ActionButton>
+                    </div>
+                  </fieldset>
+                  <div className={styles.row}>
+                    <ActionButton variant="primary" busy={busy} disabled={!valid || setup.unavailable !== null} onClick={() => void submit()}>提交</ActionButton>
+                  </div>
+                </> : null}
+              </> : null}
+              {message ? <InlineNotice>{message}</InlineNotice> : null}
             </div>
-          </fieldset>
-          <div className={styles.row}>
-            <ActionButton busy={busy} disabled={!valid || setup.unavailable !== null} onClick={() => void submit()}>提交</ActionButton>
-          </div>
-        </> : null}
-      </> : null}
-      {message ? <InlineNotice>{message}</InlineNotice> : null}
-    </div> : null}
-  </div>;
+          </section>
+        </div>,
+        document.body,
+      ) : null}
+    </>
+  );
 }
