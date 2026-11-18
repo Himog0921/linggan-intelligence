@@ -23,6 +23,7 @@ function parseReview(row: Json): ReadingReviewSummary | null {
 }
 function parseMaterial(row: Json): DossierMaterial {
   const reading = optObj(row, 'reading');
+  if (reading && reading.formattedOrigin !== undefined && typeof reading.formattedOrigin !== 'boolean') throw new ShapeError('formattedOrigin');
   const processing = optObj(row, 'processing');
   const pageSource = optObj(row, 'pageSource');
   if (pageSource && ['sourceRef', 'sourceVersion', 'slotKey'].some(key => str(pageSource, key) === '')) throw new ShapeError('pageSource');
@@ -33,7 +34,7 @@ function parseMaterial(row: Json): DossierMaterial {
     sourceRef: optStr(row, 'sourceRef'), sourceVersion: optStr(row, 'sourceVersion'), currentRevisionRef: optStr(row, 'currentRevisionRef'),
     originalUrl: mediaPath(row.originalUrl), blocks: parseBlocks(row), issues: list(row, 'issues', parseIssue),
     processing: processing === null ? null : { state: choice(processing.state, ['pending', 'running', 'completed', 'failed', 'cancelled', 'invalidated'], 'processing.state'), reason: optStr(processing, 'reason') },
-    reading: reading === null ? null : { generatedBy: choice(reading.generatedBy, PRODUCERS, 'generatedBy'), adoption: choice(reading.adoption, ADOPTIONS, 'adoption'), verification: choice(reading.verification, VERIFICATIONS, 'verification'), ruleVersion: str(reading, 'ruleVersion'), review: parseReview(reading) },
+    reading: reading === null ? null : { generatedBy: choice(reading.generatedBy, PRODUCERS, 'generatedBy'), adoption: choice(reading.adoption, ADOPTIONS, 'adoption'), verification: choice(reading.verification, VERIFICATIONS, 'verification'), ruleVersion: str(reading, 'ruleVersion'), ...(reading.formattedOrigin === true ? { formattedOrigin: true } : {}), review: parseReview(reading) },
   };
 }
 function parseCoverage(row: Json): DossierCoverage {

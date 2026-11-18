@@ -7,6 +7,7 @@ import { DossierFocusDialog } from './DossierFocusDialog';
 import { DossierIcon } from './DossierIcon';
 import { DossierNavigation } from './DossierNavigation';
 import { DossierUnderstanding } from './DossierUnderstanding';
+import { isUnverifiedL1ImageReading } from './dossierPresent';
 import { endingGroupAttribution, groupTime, readingAnchor, readingGaps, resolveReadingSections, SECTION_LABELS, type ResolvedReadingGroup } from './dossierDocumentModel';
 import { jumpReading, useDossierReadingPosition, type ReadingPosition } from './useDossierReadingPosition';
 import type { DossierMaterial, DossierPayload } from './dossierTypes';
@@ -81,6 +82,8 @@ export function DossierDocument({ payload, domain, active, busy, refreshFailed, 
       {sections.map(({ section, groups }) => <section key={section.ref} className={styles.section} id={readingAnchor(prefix, section.ref)} data-section-ref={section.ref} data-reading-anchor={section.ref} tabIndex={-1} aria-labelledby={readingAnchor(prefix, `${section.ref}:title`)}>
         <header className={styles.sectionIndex}><h2 id={readingAnchor(prefix, `${section.ref}:title`)}>{SECTION_LABELS[section.kind]}</h2></header>
         <div className={`${styles.content} ${section.kind === 'publication' && groups.every(group => group.group.mode === 'tags' || group.entries.every(entry => entry.unit.kind === 'tags')) ? styles.onlyTags : ''}`}>
+          {section.kind === 'images' && groups.some(group => group.entries.some(entry => isUnverifiedL1ImageReading(entry.unit)))
+            ? <p className={styles.notice}>部分图片文字由模型识读整理，引用前请对照原图。</p> : null}
           {section.kind === 'audio' ? audioRuns(groups).map((run, runIndex, runs) => {
             const canFocus = run.groups.some(group => group.group.mode === 'transcript_paragraph');
             return <div key={run.groups[0]?.group.ref} className={styles.audioRun}>
