@@ -96,7 +96,7 @@ export const contentUnderstandingQueryKey = (domain: string, work: string, revis
 export const deepResearchWatchKey = (domain: string, work: string) =>
   ['content-understanding-deep-watch', domain, work] as const;
 
-export function useContentUnderstanding(domain: string, work: string, revision: string, asOf: string, active: boolean) {
+export function useContentUnderstanding(domain: string, work: string, revision: string, asOf: string, active: boolean, deepWatchCount: number | null = null) {
   return useQuery({
     queryKey: contentUnderstandingQueryKey(domain, work, revision, asOf),
     queryFn: ({ signal }) => readContentUnderstanding(domain, work, asOf, signal),
@@ -105,11 +105,15 @@ export function useContentUnderstanding(domain: string, work: string, revision: 
     gcTime: 0,
     staleTime: 10_000,
     refetchOnWindowFocus: false,
+    refetchInterval: query => {
+      if (['pending', 'running'].includes(query.state.data?.currentRequest?.state ?? query.state.data?.analysis?.state ?? '')) return 1500;
+      if (deepWatchCount !== null && (query.state.data?.deepAnalyses?.length ?? 0) <= deepWatchCount) return 4000;
+      return false;
+    },
   });
 }
 
 export function DossierUnderstanding({ domain, work, revision, asOf, active }: { domain: string; work: string; revision: string; asOf: string; active: boolean }) {
-  const query = useContentUnderstanding(domain, work, revision, asOf, active);
   // The header owns the L2 launch action. This shared cache signal lets the dossier
   // poll for the published finding even when the launch happened from another tab.
   const watchQuery = useQuery<DeepResearchWatch | null>({
@@ -129,6 +133,7 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
     return () => window.clearTimeout(timer);
   }, [waiting?.submittedAt]);
   const watching = waiting !== null && !watchExpired;
+  const query = useContentUnderstanding(domain, work, revision, asOf, active, watching ? waiting.count : null);
   const analysis = query.isError ? null : query.data?.analysis;
   const currentRequest = query.data?.currentRequest;
   const result = analysis?.result;
