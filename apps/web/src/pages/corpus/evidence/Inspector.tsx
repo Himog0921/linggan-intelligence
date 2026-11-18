@@ -15,6 +15,7 @@ import { AuthorFact, Engagement } from './WorkParts';
 import { publishedCopy } from './evidencePresent';
 import { SourceNote } from './Primitives';
 import { ReadingPanel, type PanelContext } from './ReadingPanel';
+import { InspectorResearchAction } from './InspectorResearchAction';
 import { errorCode } from './evidenceFeedback';
 import { useToast } from './toastContext';
 import { apiPath } from './evidencePaths';
@@ -250,6 +251,16 @@ export function Inspector(props: InspectorProps) {
             </button>
           </div>
         )}
+        {work ? <div className={styles.researchAction}>
+          <InspectorResearchAction
+            key={`${domain}:${work.ref}`}
+            domain={domain}
+            work={work.ref}
+            revision={dossier?.revision}
+            asOf={dossier?.asOf}
+            onSubmitted={() => onTab('dossier')}
+          />
+        </div> : null}
         {work ? <div className={styles.workSummary}>
           {drawer ? originalLink : null}
           <h3 className={styles.workTitle} title={title} data-work-title>{title}</h3>
