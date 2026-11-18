@@ -351,31 +351,40 @@ export function segmentTitle(segment: MaterialSegment): string {
   return `${segment.label}：${segmentReading(segment)}`;
 }
 
-/** 侧栏徽标：本次读取 N 个作品，及三个读数（作品总数不是库里的总数——读模型不给总数）。 */
+/** 侧栏只统计本次已读取的作品，不推断整个证据库的数量。 */
 export interface ReadoutFacts {
   works: number;
-  commentsRetained: number | null;
-  localObjects: number;
-  gaps: number;
+  titles: number;
+  bodies: number;
+  media: number;
+  comments: number;
 }
 
-export function readoutFacts(items: readonly Pick<WorkItem, 'media' | 'lanes'>[]): ReadoutFacts {
-  let commentsRetained: number | null = null;
-  let localObjects = 0;
-  let gaps = 0;
+type AvailabilityItem = Pick<WorkItem, 'materialTitleState' | 'bodyState' | 'bodyHasText' | 'media' | 'retainedComments'>;
+
+function obtained(item: AvailabilityItem) {
+  return {
+    title: item.materialTitleState === 'KNOWN',
+    body: item.bodyState === 'KNOWN' && item.bodyHasText === true,
+    media: item.media.localObjectCount > 0,
+    comments: item.retainedComments !== null && item.retainedComments > 0,
+  };
+}
+
+export function readoutFacts(items: readonly AvailabilityItem[]): ReadoutFacts {
+  const facts: ReadoutFacts = { works: items.length, titles: 0, bodies: 0, media: 0, comments: 0 };
   for (const item of items) {
-    const comments = laneSummary(item.lanes, 'comments');
-    if (comments?.valueState === 'KNOWN' && comments.retained !== null) commentsRetained = (commentsRetained ?? 0) + comments.retained;
-    const summary = materialSummary(item);
-    localObjects += summary.localObjectCount;
-    if (summary.hasGap || summary.failed) gaps += 1;
+    const status = obtained(item);
+    facts.titles += Number(status.title);
+    facts.bodies += Number(status.body);
+    facts.media += Number(status.media);
+    facts.comments += Number(status.comments);
   }
-  return { works: items.length, commentsRetained, localObjects, gaps };
+  return facts;
 }
 
 export function readoutTitle(facts: ReadoutFacts): string {
-  const retained = facts.commentsRetained === null ? '未知' : compactCount(facts.commentsRetained);
-  return `本次读取 ${facts.works} 个作品 · 已留存评论 ${retained} · 本地材料 ${facts.localObjects} · 部分或缺口 ${facts.gaps}`;
+  return `本次读取 ${facts.works} 个作品 · 标题已取得 ${facts.titles} 篇 · 正文已取得 ${facts.bodies} 篇 · 媒体已取得 ${facts.media} 篇 · 评论已取得 ${facts.comments} 篇`;
 }
 
 // ───────────────────────── 原声 ─────────────────────────
@@ -479,10 +488,11 @@ export function receiptRows(receipt: Receipt | null): FactRowData[] {
 
 /** Facts about material obtained, independent of collection completeness and L1 readiness. */
 export function materialAvailability(item: WorkItem): string[] {
-  const title = item.materialTitleState === 'KNOWN' ? '已取得' : '未知';
-  const body = item.bodyState !== 'KNOWN' ? '未知' : item.bodyHasText === true ? '已取得' : item.bodyHasText === false ? '来源为空' : '已观察';
-  const media = item.media.localObjectCount > 0 ? '已取得' : '未知';
-  const comments = item.retainedComments !== null && item.retainedComments > 0
+  const status = obtained(item);
+  const title = status.title ? '已取得' : '未知';
+  const body = item.bodyState !== 'KNOWN' ? '未知' : status.body ? '已取得' : item.bodyHasText === false ? '来源为空' : '已观察';
+  const media = status.media ? '已取得' : '未知';
+  const comments = status.comments
     ? `已取得 ${item.retainedComments} 条` : '未知';
   return [`标题 ${title}`, `正文 ${body}`, `媒体 ${media}`, `评论 ${comments}`];
 }

@@ -29,11 +29,11 @@ describe('语料侧栏', () => {
   });
 
   it('证据库页填写计数：徽标显示本次读取的作品数，悬停说明三个读数；零作品仍隐藏', () => {
-    const { container, rerender } = render(<CorpusSideNav active="evidence" domain={D} foot="" evidenceCount={{ count: 57, title: '本次读取 57 个作品 · 已留存评论 1.5K · 本地材料 12 · 部分或缺口 3' }} />);
+    const { container, rerender } = render(<CorpusSideNav active="evidence" domain={D} foot="" evidenceCount={{ count: 57, title: '本次读取 57 个作品 · 标题已取得 50 篇 · 正文已取得 40 篇 · 媒体已取得 30 篇 · 评论已取得 20 篇' }} />);
     const badge = container.querySelector('#ev-rail-count');
     expect(badge).not.toHaveAttribute('hidden');
     expect(badge).toHaveTextContent('57');
-    expect(badge).toHaveAttribute('title', '本次读取 57 个作品 · 已留存评论 1.5K · 本地材料 12 · 部分或缺口 3');
+    expect(badge).toHaveAttribute('title', '本次读取 57 个作品 · 标题已取得 50 篇 · 正文已取得 40 篇 · 媒体已取得 30 篇 · 评论已取得 20 篇');
     expect(badge?.closest('a')).toHaveAttribute('href', `/corpus/evidence?domain=${D}`);
     rerender(<CorpusSideNav active="evidence" domain={D} foot="" evidenceCount={{ count: 0, title: '本次读取 0 个作品' }} />);
     expect(container.querySelector('#ev-rail-count')).toHaveAttribute('hidden');
