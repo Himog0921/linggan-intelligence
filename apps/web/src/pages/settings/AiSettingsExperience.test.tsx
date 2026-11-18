@@ -65,7 +65,7 @@ describe('AI 设置正式四视图', () => {
     const data = businessSettingsFixture();
     const base = data.tasks[0]!;
     const configuration = { ...base.configuration, taskKey: 'note_interpretation', taskConfigRef: 'legacy-note-config' };
-    data.tasks.unshift({ ...base, taskKey: 'note_interpretation', label: '每篇解读', lifecycle: 'retired', configuration });
+    data.tasks.unshift({ ...base, taskKey: 'note_interpretation', label: '每篇解读', lifecycle: 'retired', requiresSkill: true, skillAllowed: true, configuration });
     respond = call => call.method === 'GET' && call.path === '/api/local/ai-settings'
       ? ok(data) : { status: 503, body: {} };
     const user = userEvent.setup();
@@ -77,6 +77,8 @@ describe('AI 设置正式四视图', () => {
     expect(await screen.findByRole('heading', { name: '自动化与额度' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /每篇解读/ })).not.toBeInTheDocument();
     expect(screen.queryByText('每篇解读 · 历史配置')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '做法与试跑' }));
+    expect(screen.queryByRole('link', { name: /每篇解读/ })).not.toBeInTheDocument();
     expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
   });
 
