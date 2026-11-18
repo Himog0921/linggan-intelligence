@@ -5,32 +5,8 @@ SET lifecycle = 'retired'
 WHERE task_key = 'note_interpretation'
   AND lifecycle <> 'retired';
 
--- Record the task-control shutdown through the normal immutable command/event contract.
-WITH retirement_command AS (
-    INSERT INTO linggan_ai_command (command_ref, operation, payload, receipt)
-    SELECT gen_random_uuid(),
-           'task_retire',
-           jsonb_build_object('taskKey', 'note_interpretation'),
-           jsonb_build_object('taskKey', 'note_interpretation', 'enabled', false)
-    WHERE EXISTS (
-        SELECT 1
-        FROM linggan_ai_control
-        WHERE scope_key = 'task:note_interpretation'
-          AND enabled
-    )
-    RETURNING command_ref
-)
-UPDATE linggan_ai_control AS control
-SET enabled = false,
-    revision = control.revision + 1,
-    actor_kind = 'system',
-    reason = 'task_retired',
-    command_ref = retirement_command.command_ref,
-    updated_at = scope_001_now()
-FROM retirement_command
-WHERE control.scope_key = 'task:note_interpretation'
-  AND control.enabled;
-
+-- The retired lifecycle is the dispatch gate. Keep the historical control row and
+-- immutable task configuration so old requests and audit records remain readable.
 -- Cancel queued items that have no in-flight provider invocation. Do not rewrite
 -- running items or an unresolved invocation; the batch cancellation fence stops
 -- further claims and lets the existing executor/recovery path settle them.
