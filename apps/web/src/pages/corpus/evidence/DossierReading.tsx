@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { DossierGroup, EmptySpeechNotes, TranscriptGroups } from './DossierDocumentBlocks';
 import { endingGroupAttribution, readingGaps, resolveReadingSections, SECTION_LABELS } from './dossierDocumentModel';
-import { materialLabel } from './dossierPresent';
+import { isUnverifiedL1ImageReading, materialLabel } from './dossierPresent';
 import type { Dossier, DossierMaterial } from './dossierTypes';
 import styles from './Dossier.module.css';
 import readingStyles from './DossierDocument.module.css';
@@ -13,12 +13,17 @@ export function DossierReading({ dossier, titleRendered = false, onSource }: { d
   const sections = resolveReadingSections(dossier).map(section => ({ ...section,
     groups: section.groups.filter(group => group.entries.some(entry => entry.block.kind !== 'gap') && !group.entries.every(entry => titleRefs.has(entry.block.ref))),
   })).filter(section => section.groups.length > 0);
+  const titleFromModel = titleRendered && dossier.materials.some(unit => isUnverifiedL1ImageReading(unit)
+    && unit.blocks.some(block => titleRefs.has(block.ref)));
   const gaps = readingGaps(dossier);
   const imageNumbers = new Map(dossier.materials.filter(unit => unit.kind === 'image').map((unit, index) => [unit.ref, index + 1]));
   return <div className={`${styles.materials} ${readingStyles.surface}`}>
+    {titleFromModel ? <p className={styles.note}>封面标题由模型识读整理，引用前请对照原图。</p> : null}
     {!dossier.note.displayTitle?.trim() && sections.length === 0 ? <p className={styles.note}>暂无可读文字。</p> : null}
     {sections.map(({ section, groups }) => <section key={section.ref} aria-label={SECTION_LABELS[section.kind]} className={styles.readingGroup}>
       <h3 className={styles.readingHeading}>{SECTION_LABELS[section.kind]}</h3>
+      {section.kind === 'images' && groups.some(group => group.entries.some(entry => isUnverifiedL1ImageReading(entry.unit)))
+        ? <p className={styles.note}>部分图片文字由模型识读整理，引用前请对照原图。</p> : null}
       {section.kind === 'audio' ? <TranscriptGroups groups={groups} prefix={prefix}/> : groups.map((value, index) => <DossierGroup key={value.group.ref} value={value} prefix={prefix} previousRole={endingGroupAttribution(groups[index - 1])} previousBlock={value.entries[0]?.unit.ref === groups[index - 1]?.entries.at(-1)?.unit.ref ? groups[index - 1]?.entries.at(-1)?.block : undefined}/>)}
     </section>)}
     {gaps.length ? <section aria-label="待补内容">{gaps.map(gap => <p key={gap.key} className={styles.note}>{gap.label}：{gap.state}。{gap.message}</p>)}</section> : null}

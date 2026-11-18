@@ -9,6 +9,7 @@ pub mod model_draft;
 pub(crate) mod reply;
 mod schema;
 pub use schema::response_schema;
+pub(crate) use schema::response_schema_for_images;
 #[cfg(test)]
 mod tests;
 

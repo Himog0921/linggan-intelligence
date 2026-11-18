@@ -241,3 +241,18 @@ it.each(['works', 'document'])('%s 保留两张原图来源与后台冲突数据
     expect(screen.getAllByRole('link', { name: '查看原图' }).map(link => link.getAttribute('href'))).toEqual(['/api/local/media/a', '/api/local/media/b']);
   }
 });
+
+it.each(['works', 'dossier'] as const)('%s 中显示模型整理来源提示', surface => {
+  const reading = { generatedBy: 'cloud_vision', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'content-understanding.image-reading.v1', review: null };
+  const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { reading })] }));
+  renderWithProviders(surface === 'works' ? <DossierReading dossier={payload.dossier}/> : <DossierDocument payload={payload} domain={DOMAIN} active={false} busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/>);
+  expect(screen.getByText('部分图片文字由模型识读整理，引用前请对照原图。')).toBeVisible();
+});
+
+it('仅显示模型整理的封面标题时仍标明来源', () => {
+  const reading = { generatedBy: 'cloud_vision', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'content-understanding.image-reading.v1', review: null };
+  const material = dossierMaterialJson(1, { reading, blocks: [{ ref: 'cover-only', kind: 'heading', text: '模型识别封面' }] });
+  const dossier = parseDossierPayload(dossierJson(1, { materials: [material], note: { displayTitle: '模型识别封面', titleBlockRefs: ['cover-only'] }, readingView: { mainBlockRefs: ['cover-only'], supplementBlockRefs: [] } })).dossier;
+  render(<DossierReading dossier={dossier} titleRendered/>);
+  expect(screen.getByText('封面标题由模型识读整理，引用前请对照原图。')).toBeVisible();
+});

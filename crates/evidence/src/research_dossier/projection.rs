@@ -98,6 +98,11 @@ fn current_image_readings(mut readings: Vec<Value>) -> Vec<Value> {
 }
 
 pub(super) fn public_material(mut value: Value) -> Value {
+    // Keep the origin across human edits even when their unresolved-issue list
+    // changes; raw sourceLocation remains private.
+    if value["sourceLocation"]["formattedReading"] == true && value["reading"].is_object() {
+        value["reading"]["formattedOrigin"] = json!(true);
+    }
     if let Some(object) = value.as_object_mut() {
         for key in [
             "derivativeRef",

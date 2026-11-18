@@ -15,8 +15,10 @@ use crate::{
 };
 use linggan_storage_postgres::Database;
 use serde_json::json;
-use sqlx::Row;
+use sqlx::{Acquire, Row};
 use uuid::Uuid;
+
+mod image_readings;
 
 struct Prepared {
     invocation: Uuid,
@@ -47,6 +49,14 @@ async fn prepare(
     }
     let packet = owner::frozen_in(&mut tx, request_ref).await?;
     let images = owner::images_in(&mut tx, &packet).await?;
+    let output_limit: i32 = sqlx::query_scalar("SELECT model.output_token_limit FROM linggan_ai_task_config task JOIN linggan_model_config model ON model.config_ref=task.model_config_ref WHERE task.task_config_ref=$1")
+        .bind(item.task_config_ref).fetch_one(&mut *tx).await?;
+    let schema = contract::response_schema_for_images(
+        images.len(),
+        usize::try_from(output_limit).map_err(|_| ExecutorError::Invalid)?,
+    );
+    let mut payload = owner::payload(&packet);
+    payload["resultSchema"] = schema.clone();
     let call = super::research_call::prepare_with_images_in(
         &mut tx,
         item,
@@ -55,10 +65,10 @@ async fn prepare(
             contract: METHOD,
             reference: request_ref,
             fingerprint: &packet.hash(),
-            payload: owner::payload(&packet),
+            payload,
             response_schema: ResponseSchema {
                 name: "content_understanding".into(),
-                schema: contract::response_schema(),
+                schema,
             },
             material_class: "note_material",
         },
@@ -138,11 +148,13 @@ async fn settle(
                 contract::reply::parse(reply.text.as_deref().unwrap_or_default(), complete)
                     .and_then(|(draft, repair)| {
                         reply_repair = repair;
-                        contract::model_draft::accept_model_draft(
+                        let readings = image_readings::prepare(&draft, packet);
+                        let result = contract::model_draft::accept_model_draft(
                             draft,
                             &packet.snapshot,
                             &generation,
-                        )
+                        )?;
+                        Ok((result, readings))
                     });
             match checked {
                 Ok(result) => Some(result),
@@ -188,8 +200,54 @@ async fn settle(
     metadata["promptVersion"] = json!(prepared.prompt_version_ref);
     metadata["draftProtocol"] = json!(contract::model_draft::PROTOCOL);
     sqlx::query("INSERT INTO linggan_content_understanding_result(request_ref,work_ref,material_snapshot_identity,method_version,invocation_ref,result,raw_output,failure_code) SELECT request_ref,work_ref,material_snapshot_identity,method_version,$2,$3,$4,$5 FROM linggan_content_understanding_request WHERE request_ref=$1")
-        .bind(prepared.request_ref).bind(prepared.invocation).bind(if success { parsed.as_ref() } else { None })
+        .bind(prepared.request_ref).bind(prepared.invocation).bind(parsed.as_ref().filter(|_| success).map(|(card, _)| card))
         .bind(if allowed { response.and_then(|r| r.text.as_deref()) } else { None }).bind(failure).execute(&mut *tx).await?;
+    if let Some((_, readings)) = parsed.filter(|_| success) {
+        match readings {
+            Err(code) => metadata["imageReadings"] = json!({"state":"invalid","code":code}),
+            Ok(image_batch) if image_batch.readings.is_empty() => {
+                let state = if !image_batch.missing.is_empty()
+                    || !image_batch.invalid.is_empty()
+                    || !image_batch.deferred.is_empty()
+                {
+                    "incomplete"
+                } else if !image_batch.unreadable.is_empty() {
+                    "unreadable"
+                } else if !image_batch.no_text.is_empty() {
+                    "no_text_observed"
+                } else {
+                    "empty"
+                };
+                metadata["imageReadings"] = json!({"state":state,"unreadable":image_batch.unreadable,"noTextObserved":image_batch.no_text,"deferred":image_batch.deferred,"missing":image_batch.missing,"invalid":image_batch.invalid});
+            }
+            Ok(image_batch) => {
+                // A failed optional reading must not roll back the paid model reply
+                // or its invocation receipt. A savepoint also avoids partial publication.
+                let mut image_tx = tx.begin().await?;
+                match image_readings::publish(
+                    &mut image_tx,
+                    prepared.request_ref,
+                    image_batch.readings,
+                )
+                .await
+                {
+                    Ok(receipts) => {
+                        image_tx.commit().await?;
+                        let partial = !image_batch.unreadable.is_empty()
+                            || !image_batch.no_text.is_empty()
+                            || !image_batch.missing.is_empty()
+                            || !image_batch.invalid.is_empty()
+                            || !image_batch.deferred.is_empty();
+                        metadata["imageReadings"] = json!({"state":if partial {"partial"} else {"published"},"receipts":receipts,"unreadable":image_batch.unreadable,"noTextObserved":image_batch.no_text,"deferred":image_batch.deferred,"missing":image_batch.missing,"invalid":image_batch.invalid});
+                    }
+                    Err(_) => {
+                        image_tx.rollback().await?;
+                        metadata["imageReadings"] = json!({"state":"failed","code":"image_reading_write_failed","unreadable":image_batch.unreadable,"noTextObserved":image_batch.no_text,"deferred":image_batch.deferred,"missing":image_batch.missing,"invalid":image_batch.invalid});
+                    }
+                }
+            }
+        }
+    }
     receipt::observe_in(&mut tx, prepared.invocation, response).await?;
     finish_invocation_in(
         &mut tx,

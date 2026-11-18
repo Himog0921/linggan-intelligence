@@ -69,3 +69,10 @@ export function blockText(block: DossierBlock): string {
     default: return block.text;
   }
 }
+
+/** This L1 reading is machine-formatted and has not been verified against the image. */
+export function isUnverifiedL1ImageReading(unit: DossierMaterial): boolean {
+  return unit.kind === 'image' && unit.reading?.verification !== 'verified'
+    && (unit.reading?.formattedOrigin === true || unit.reading?.ruleVersion === 'content-understanding.image-reading.v1'
+      || unit.issues.some(issue => issue.code === 'model_formatted_reading'));
+}

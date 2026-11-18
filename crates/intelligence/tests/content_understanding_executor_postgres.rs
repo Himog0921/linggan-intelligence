@@ -551,6 +551,26 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         )
     );
 
+    // This synthetic provider intentionally omits optional imageReadings.
+    // A usable Core and its raw model receipt must still be preserved.
+    let image_outcome: Value = sqlx::query_scalar(
+        "SELECT result->'imageReadings' FROM linggan_model_invocation WHERE invocation_ref=$1",
+    )
+    .bind(invocation)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(image_outcome["state"], "invalid");
+    assert_eq!(image_outcome["code"], "l1_image_readings_invalid");
+    let stored_raw: Option<String> = sqlx::query_scalar(
+        "SELECT raw_output FROM linggan_content_understanding_result WHERE request_ref=$1",
+    )
+    .bind(receipt.request_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(stored_raw.is_some());
+
     let current_preview = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
     let success_reuse = owner::start(&db, &start_from(&current_preview, work))
         .await
@@ -675,10 +695,20 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     }
     assert_eq!(request["reasoning_effort"], "high");
     assert_eq!(request["response_format"]["type"], "json_object");
+    let schema = &packet["resultSchema"];
+    let baseline = linggan_intelligence::content_understanding::response_schema();
+    assert_eq!(schema["properties"]["core"], baseline["properties"]["core"]);
     assert_eq!(
-        packet["resultSchema"],
-        linggan_intelligence::content_understanding::response_schema()
+        schema["properties"]["evidenceCandidates"],
+        baseline["properties"]["evidenceCandidates"]
     );
+    let image_count = packet["material"]["images"].as_array().unwrap().len();
+    let max_chars =
+        schema["properties"]["imageReadings"]["items"]["properties"]["text"]["maxLength"]
+            .as_u64()
+            .unwrap() as usize;
+    assert!(image_count > 0 && max_chars * image_count <= 4096 / 3);
+    assert!(schema["description"].as_str().unwrap().contains("deferred"));
     assert!(serde_json::from_str::<Value>(&raw).is_err());
     let repair: String = sqlx::query_scalar(
         "SELECT result->>'replyRepair' FROM linggan_model_invocation WHERE invocation_ref=$1",
@@ -857,6 +887,193 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         .unwrap();
     assert!(after_withdrawal["analysis"]["result"].is_null());
     endpoint.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "owned PostgreSQL + synthetic Node endpoint only"]
+async fn optional_image_reading_failure_keeps_l1_and_invocation_receipt() {
+    for scenario in ["new", "write_failure", "existing"] {
+        let reject_reading = scenario == "write_failure";
+        let db = fixture::proof_database(&format!("l1_img_{}", Uuid::new_v4().simple())).await;
+        let endpoint = wire::Endpoint::start().await;
+        endpoint
+            .include_image_readings
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let adapter = PiAdapter::configured_with_test_command(
+            std::env::var_os("AI_FOUNDATION_PROOF_NODE").unwrap().into(),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/pi-adapter/src/adapter.mjs"),
+        );
+        let mut session = linggan_intelligence::ai_foundation::executor::ExecutorSession::acquire(
+            &db,
+            "image-reading-synthetic-probe",
+            4,
+        )
+        .await
+        .unwrap();
+        let model = setup::prepare_with_actual_probe(&db, &endpoint.url, &session, &adapter).await;
+        l1_setup::configure_high(&db, &model).await;
+        session.request_drain().await.unwrap();
+        session.complete_drain().await.unwrap();
+        drop(session);
+        let package = submit_body(&db, BODY).await;
+        let work: Uuid = sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='dossier-note'").fetch_one(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
+            .bind(Uuid::new_v4()).bind(work).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+        let image = base64::engine::general_purpose::STANDARD
+            .decode(PNG)
+            .unwrap();
+        if scenario == "existing" {
+            dossier::current_image_reading_with_bytes(&db, Some(image)).await;
+        } else {
+            dossier::acquired_image_source_with_bytes(&db, Some(image)).await;
+        }
+        if reject_reading {
+            sqlx::query("CREATE FUNCTION reject_synthetic_l1_reading() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.rule_version='content-understanding.image-reading.v1' THEN RAISE EXCEPTION 'synthetic reading failure'; END IF; RETURN NEW; END $$")
+                .execute(db.pool()).await.unwrap();
+            sqlx::query("CREATE TRIGGER reject_synthetic_l1_reading BEFORE INSERT ON linggan_material_reading FOR EACH ROW EXECUTE FUNCTION reject_synthetic_l1_reading()")
+                .execute(db.pool()).await.unwrap();
+        }
+        let preview = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
+        assert_eq!(preview["canStart"], true);
+        let receipt = owner::start(&db, &start_from(&preview, work))
+            .await
+            .unwrap();
+        let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
+        let worker = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
+            db.clone(),
+            "image-reading-synthetic",
+            4,
+            Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
+            adapter,
+            drain.clone(),
+        ));
+        let result = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let current = owner::latest(&db, dossier::DOMAIN, work, None)
+                    .await
+                    .unwrap();
+                let state = current["analysis"]["state"].as_str().unwrap_or("");
+                assert_ne!(state, "failed", "{current}");
+                if state == "succeeded" {
+                    break current;
+                }
+                assert!(!worker.is_finished());
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap();
+        drain.request();
+        worker.await.unwrap().unwrap();
+        assert!(result["analysis"]["result"].is_object());
+        let (raw, metadata, invocation_state): (Option<String>, Value, String) = sqlx::query_as(
+            "SELECT r.raw_output,i.result,i.state FROM linggan_content_understanding_result r JOIN linggan_model_invocation i USING(invocation_ref) WHERE r.request_ref=$1"
+        ).bind(receipt.request_ref).fetch_one(db.pool()).await.unwrap();
+        assert!(raw.is_some());
+        assert_eq!(invocation_state, "succeeded");
+        let dossier = linggan_evidence::research_dossier::read(&db, work)
+            .await
+            .unwrap()
+            .unwrap();
+        if reject_reading {
+            assert_eq!(metadata["imageReadings"]["state"], "failed");
+            assert_eq!(
+                metadata["imageReadings"]["code"],
+                "image_reading_write_failed"
+            );
+            assert!(
+                !dossier
+                    .materials
+                    .iter()
+                    .any(|m| m["blocks"].to_string().contains("合成图片文字"))
+            );
+        } else if scenario == "existing" {
+            assert_eq!(metadata["imageReadings"]["state"], "published");
+            assert_eq!(metadata["imageReadings"]["receipts"][0]["current"], false);
+            assert!(
+                dossier
+                    .materials
+                    .iter()
+                    .any(|m| m["blocks"].to_string().contains("连续的图片正文"))
+            );
+            assert!(
+                !dossier
+                    .materials
+                    .iter()
+                    .any(|m| m["blocks"].to_string().contains("合成图片文字"))
+            );
+        } else {
+            assert_eq!(metadata["imageReadings"]["state"], "published");
+            assert_eq!(metadata["imageReadings"]["receipts"][0]["current"], true);
+            let image_material = dossier
+                .materials
+                .iter()
+                .find(|m| m["blocks"].to_string().contains("合成图片文字"))
+                .unwrap();
+            assert_eq!(image_material["reading"]["generatedBy"], "cloud_vision");
+            assert_eq!(image_material["reading"]["verification"], "unchecked");
+            assert!(
+                image_material["issues"]
+                    .to_string()
+                    .contains("model_formatted_reading")
+            );
+            assert!(
+                linggan_evidence::research_dossier::markdown(&dossier)
+                    .contains("图片文字由模型识读整理，引用前请对照原图。")
+            );
+            // A human may edit and resolve the issue without claiming verification.
+            // The immutable model origin must still reach readers and exports.
+            let unit_ref: Uuid =
+                serde_json::from_value(metadata["imageReadings"]["receipts"][0]["unitRef"].clone())
+                    .unwrap();
+            let edit = linggan_evidence::material_reading::ReviewReadingRequest {
+                command_ref: Uuid::new_v4(),
+                unit_ref: unit_ref.to_string(),
+                expected_current_revision_ref: image_material["currentRevisionRef"]
+                    .as_str()
+                    .map(|v| v.parse().unwrap()),
+                source_version: image_material["sourceVersion"].as_str().unwrap().into(),
+                action: "edit".into(),
+                actor: "synthetic-editor".into(),
+                reason: "整理后尚未核对".into(),
+                edited_blocks: Some(vec![
+                    json!({"kind":"paragraph","text":"编辑后的图片文字","speaker":"unconfirmed"}),
+                ]),
+                verified: false,
+                resolved_issue_keys: vec!["model-formatted-image-reading".into()],
+            };
+            linggan_evidence::material_reading::review_reading(&db, unit_ref, &edit)
+                .await
+                .unwrap();
+            let edited = linggan_evidence::research_dossier::read(&db, work)
+                .await
+                .unwrap()
+                .unwrap();
+            let edited_image = edited
+                .materials
+                .iter()
+                .find(|m| m["blocks"].to_string().contains("编辑后的图片文字"))
+                .unwrap();
+            assert_eq!(edited_image["reading"]["formattedOrigin"], true);
+            assert_eq!(edited_image["reading"]["verification"], "unchecked");
+            assert!(
+                !edited_image["issues"]
+                    .to_string()
+                    .contains("model_formatted_reading")
+            );
+            assert!(
+                linggan_evidence::research_dossier::markdown(&edited)
+                    .contains("图片文字由模型识读整理，引用前请对照原图。")
+            );
+            assert!(
+                dossier
+                    .materials
+                    .iter()
+                    .any(|m| m["blocks"].to_string().contains("合成图片文字"))
+            );
+        }
+        endpoint.finish().await;
+    }
 }
 
 async fn prove_billing_pause(
