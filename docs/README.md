@@ -64,7 +64,7 @@
 
 ## 2026-11-03 · AI 中期质量历史实验（2026-11-18 退役）
 
-- [切片 A 结果规范与接口设计](data-contracts/ai-midterm-quality-002/slice-a-result-and-api.md)：N02保存/展示/下游投影，四接口与两表；切片A本地候选已实现，未部署。
+- [切片 A 结果规范与接口设计](data-contracts/ai-midterm-quality-002/slice-a-result-and-api.md)：旧单篇分析的 N02 保存/展示/下游投影设计及历史隔离验证记录；对应独立任务已退役。
 
 - [单篇分析历史实施方案](archive/plans/single-note-analysis-minimal-implementation.md)：旧两层结果规范、实现与隔离验收记录；2026-11-18 已由 L1 Content Card + L2 深入研究替代。
 
