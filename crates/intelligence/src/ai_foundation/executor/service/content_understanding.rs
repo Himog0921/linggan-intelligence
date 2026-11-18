@@ -18,6 +18,8 @@ use serde_json::json;
 use sqlx::Row;
 use uuid::Uuid;
 
+mod image_readings;
+
 struct Prepared {
     invocation: Uuid,
     request: PiRequest,
@@ -138,11 +140,13 @@ async fn settle(
                 contract::reply::parse(reply.text.as_deref().unwrap_or_default(), complete)
                     .and_then(|(draft, repair)| {
                         reply_repair = repair;
-                        contract::model_draft::accept_model_draft(
+                        let readings = image_readings::prepare(&draft, packet)?;
+                        let result = contract::model_draft::accept_model_draft(
                             draft,
                             &packet.snapshot,
                             &generation,
-                        )
+                        )?;
+                        Ok((result, readings))
                     });
             match checked {
                 Ok(result) => Some(result),
@@ -188,8 +192,11 @@ async fn settle(
     metadata["promptVersion"] = json!(prepared.prompt_version_ref);
     metadata["draftProtocol"] = json!(contract::model_draft::PROTOCOL);
     sqlx::query("INSERT INTO linggan_content_understanding_result(request_ref,work_ref,material_snapshot_identity,method_version,invocation_ref,result,raw_output,failure_code) SELECT request_ref,work_ref,material_snapshot_identity,method_version,$2,$3,$4,$5 FROM linggan_content_understanding_request WHERE request_ref=$1")
-        .bind(prepared.request_ref).bind(prepared.invocation).bind(if success { parsed.as_ref() } else { None })
+        .bind(prepared.request_ref).bind(prepared.invocation).bind(parsed.as_ref().filter(|_| success).map(|(card, _)| card))
         .bind(if allowed { response.and_then(|r| r.text.as_deref()) } else { None }).bind(failure).execute(&mut *tx).await?;
+    if let Some((_, readings)) = parsed.filter(|_| success) {
+        image_readings::publish(&mut tx, prepared.request_ref, readings).await?;
+    }
     receipt::observe_in(&mut tx, prepared.invocation, response).await?;
     finish_invocation_in(
         &mut tx,

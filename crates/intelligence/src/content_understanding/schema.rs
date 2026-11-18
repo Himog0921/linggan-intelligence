@@ -108,13 +108,18 @@ pub fn response_schema() -> Value {
     let mut schema = object(json!({
         "core":object(core_fields),
         "imageContributions":{"type":"array","items":contribution},
+        "imageReadings":{"type":"array","items":object(json!({
+            "inputCitationId":vision["inputCitationId"],
+            "state":{"type":"string","enum":["readable","no_text","unreadable"]},
+            "text":{"type":"string","maxLength":30000,"description":"按原图阅读顺序整理本图所有可辨认的实质文字，连起排版断行，允许修正有上下文依据的错字，保留标题、段落、清单和表格。跨页句子保持本图范围，可用上下文补明显掉字。看不清的字标［无法辨认］。保留作者观点、数字和限定条件，不写摘要，不添加新观点。readable 填整理后的 Markdown；no_text 表示确实没有文字，unreadable 表示有字但无法读取，两者的 text 为空。"}
+        })),"description":"material.images 中的每张图片正好一条。无图时返回空数组。"} ,
         "evidenceCandidates":object(json!({
             "text":array(object(text_fields),0,64),
             "vision":array(object(vision_fields),0,64)
         }))
     }));
     schema["description"] = json!(
-        "仅返回一个完整的 JSON 对象。参考 examples 中的完整结构，内容和编号以本次材料为准。顶层只有 core、imageContributions、evidenceCandidates，证据候选与 core 同级。各层不添加额外字段或说明。字符串正确转义，括号成对闭合，对象结束后不再追加内容。"
+        "仅返回一个完整的 JSON 对象。参考 examples 中的完整结构，内容和编号以本次材料为准。顶层只有 core、imageContributions、imageReadings、evidenceCandidates，证据候选与 core 同级。各层不添加额外字段或说明。字符串正确转义，括号成对闭合，对象结束后不再追加内容。"
     );
     schema["examples"] = json!([{
         "core":{
@@ -126,6 +131,7 @@ pub fn response_schema() -> Value {
             "candidateLabels":[]
         },
         "imageContributions":[],
+        "imageReadings":[],
         "evidenceCandidates":{"text":[{"id":"ev1","inputCitationId":"s1",
             "quote":"先核对顺序，再摆出材料"}],"vision":[]}
     }]);
