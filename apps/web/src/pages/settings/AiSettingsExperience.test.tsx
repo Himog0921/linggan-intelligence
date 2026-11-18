@@ -234,7 +234,7 @@ describe('AI 设置正式四视图', () => {
         return ok({ taskKey: 'content_understanding', taskConfigRef: 'next-config', modelConfigRef: 'model-config', revision: ++revision, applied: true });
       }
       return call.path === '/api/local/ai-settings' ? ok({ ...base, models: [...base.models, { ...model, capability }],
-        tasks: [{ ...base.tasks[0]!, taskKey: 'content_understanding', label: '整篇内容理解', configuration, revision, skillAllowed: false, requiresSkill: false }] }) : { status: 503, body: {} };
+        tasks: [{ ...base.tasks[0]!, taskKey: 'content_understanding', label: '整篇内容理解', configuration, revision, skillAllowed: true, requiresSkill: false }] }) : { status: 503, body: {} };
     };
     const user = userEvent.setup();
     const page = mount('/settings/models?view=advanced&area=work&task=content_understanding');
