@@ -415,7 +415,7 @@ fn router_with_public_access(
         ))
         .merge(model_settings::routes())
         .merge(ai_settings::routes())
-                .merge(content_understanding_api::routes())
+        .merge(content_understanding_api::routes())
         .merge(offline_preview::routes())
         .merge(ops_auth::routes())
         .merge(web_app::routes())
