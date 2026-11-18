@@ -117,6 +117,74 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     session.complete_drain().await.unwrap();
     drop(session);
 
+    let no_slot_package = fixture::submit_package(&db, "content_detail", json!({"contentExternalId":"video-no-slot"}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"video-no-slot"},
+            "payload":{"title":"合成视频","bodyText":BODY,"type":"video"}})).await;
+    let no_slot_work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='video-no-slot'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
+        .bind(Uuid::new_v4()).bind(no_slot_work).bind(dossier::DOMAIN).bind(no_slot_package).execute(db.pool()).await.unwrap();
+    let no_slot_preview = owner::preview(&db, dossier::DOMAIN, no_slot_work)
+        .await
+        .unwrap();
+    assert_eq!(no_slot_preview["materialReadiness"]["kind"], "video");
+    assert_eq!(no_slot_preview["canStart"], false);
+    assert!(
+        no_slot_preview["materialReadiness"]["gaps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|gap| gap["code"] == "video_transcript_required")
+    );
+
+    // An incomplete later capture can default to normal; it must not erase an
+    // earlier explicit video fact for the same platform work.
+    fixture::submit_package(&db, "content_detail", json!({"contentExternalId":"video-no-slot"}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"video-no-slot"},
+            "payload":{"title":"合成视频新版本","bodyText":BODY,"type":"normal"}})).await;
+    let recaptured = owner::preview(&db, dossier::DOMAIN, no_slot_work)
+        .await
+        .unwrap();
+    assert_eq!(recaptured["materialReadiness"]["kind"], "video");
+    assert_eq!(recaptured["canStart"], false);
+
+    for (external, media) in [
+        (
+            "video-url-no-slot",
+            json!({"type":"normal","video":"https://media.example/video.mp4"}),
+        ),
+        (
+            "video-stream-no-slot",
+            json!({"type":"normal","videoStreams":[{"url":"https://media.example/stream.mp4"}]}),
+        ),
+    ] {
+        let mut payload = json!({"title":"合成视频","bodyText":BODY});
+        payload
+            .as_object_mut()
+            .unwrap()
+            .extend(media.as_object().unwrap().clone());
+        let package = fixture::submit_package(&db, "content_detail", json!({"contentExternalId":external}),
+            json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":external},"payload":payload})).await;
+        let source_work: Uuid = sqlx::query_scalar(
+            "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+        )
+        .bind(external)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
+            .bind(Uuid::new_v4()).bind(source_work).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+        let preview = owner::preview(&db, dossier::DOMAIN, source_work)
+            .await
+            .unwrap();
+        assert_eq!(preview["materialReadiness"]["kind"], "video", "{external}");
+        assert_eq!(preview["canStart"], false, "{external}");
+    }
+
     let package = submit_body(&db, BODY).await;
     let work: Uuid = sqlx::query_scalar(
         "SELECT public_ref FROM linggan_material_content WHERE content_external_id='dossier-note'",
@@ -198,14 +266,24 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
             .unwrap()
             .contains("不包含视频画面")
     );
-    let stopped = owner::start(&db, &start_from(&video_ready, work)).await.unwrap();
+    let stopped = owner::start(&db, &start_from(&video_ready, work))
+        .await
+        .unwrap();
     // The original video is not in the frozen model input. Its loss must not
     // make the queued task disappear from the current status.
-    let video_sha = canonical.media_inventory.iter().find(|s| s["purpose"] == "video").unwrap()["blobSha256"].as_str().unwrap();
+    let video_sha = canonical
+        .media_inventory
+        .iter()
+        .find(|s| s["purpose"] == "video")
+        .unwrap()["blobSha256"]
+        .as_str()
+        .unwrap();
     let video_path = media_root.join(format!("blobs/{video_sha}.mp4"));
     let held_video = video_path.with_extension("held");
     std::fs::rename(&video_path, &held_video).unwrap();
-    let during = owner::latest(&db, dossier::DOMAIN, work, None).await.unwrap();
+    let during = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
     assert_eq!(during["currentRequest"]["state"], "pending");
     std::fs::rename(&held_video, &video_path).unwrap();
     // Removing a frozen image prevents sending bytes that the model input used.
@@ -748,12 +826,35 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         calls
     );
     prove_billing_pause(&db, work, &model, &endpoint, adapter).await;
+    // A newly observed video without a transcript blocks new L1, but must not
+    // make a previously saved result disappear.
+    let uri = "https://media.example/synthetic-second-video";
+    fixture::submit_package(&db, "media_slots", json!({"contentExternalId":"dossier-note"}),
+        json!({"kind":"media_slot","slotKey":"xhs:dossier-note:video:2","observationRef":Uuid::new_v4(),
+            "slot":{"role":"video","ordinal":2},
+            "observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"}})).await;
+    let after_new_video = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
+    assert!(after_new_video["analysis"]["result"].is_object());
+    assert_eq!(after_new_video["materialReadiness"]["state"], "blocked");
+    let blocked = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
+    assert_eq!(blocked["canStart"], false);
     // A later withdrawal must hide results based on those bytes, including
     // results recovered from an older material snapshot.
-    linggan_evidence::record_blob_disposition(&db, &image_sha,
+    linggan_evidence::record_blob_disposition(
+        &db,
+        &image_sha,
         linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
-        "synthetic-proof", "synthetic withdrawal").await.unwrap();
-    let after_withdrawal = owner::latest(&db, dossier::DOMAIN, work, None).await.unwrap();
+        "synthetic-proof",
+        "synthetic withdrawal",
+    )
+    .await
+    .unwrap();
+    let after_withdrawal = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
     assert!(after_withdrawal["analysis"]["result"].is_null());
     endpoint.finish().await;
 }
@@ -937,6 +1038,21 @@ async fn saved_video_and_cover(db: &Database, work: Uuid, image: &[u8], image_sh
     }).collect();
     fixture::submit_custom_package(db,"xhs",&["media_slots"],json!({"contentExternalId":"dossier-note"}),"media_slots","xhs",
         json!({"target":{"contentExternalId":"dossier-note"},"layers":[fixture::coverage_layer("media_slots",2)]}),records).await;
+    // A video title, body and cover are not a substitute for its speech transcript.
+    let before_transcript = owner::preview(db, dossier::DOMAIN, work).await.unwrap();
+    assert_eq!(before_transcript["materialReadiness"]["kind"], "video");
+    assert_eq!(before_transcript["canStart"], false);
+    assert!(
+        before_transcript["materialReadiness"]["gaps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|gap| gap["code"] == "video_transcript_required")
+    );
+    assert!(matches!(
+        owner::start(db, &start_from(&before_transcript, work)).await,
+        Err(FoundationError::AdmissionDenied(_))
+    ));
     admit_media_blob(
         db,
         observations[0],
