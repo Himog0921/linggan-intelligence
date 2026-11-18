@@ -20,12 +20,12 @@ async fn ai_foundation_task_config_is_cas_frozen_capability_bounded_and_does_not
     let capability = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_model_capability(capability_ref,identity_ref,endpoint_ref,source_kind,source_version,context_tokens,max_output_tokens,max_timeout_seconds,thinking_levels,compat,thinking_level_map,output_mode) VALUES($1,$2,$3,'manual','config-proof',1000000,384000,600,'[\"off\",\"high\"]','{\"supportsReasoningEffort\":true}','{}','prompt_only')")
         .bind(capability).bind(selected).bind(route).execute(db.pool()).await.unwrap();
-    let seed=sqlx::query("SELECT c.budget_mode,s.revision FROM linggan_ai_task_setting s JOIN linggan_ai_task_config c ON c.task_config_ref=s.current_config_ref WHERE s.task_key='note_interpretation'").fetch_one(db.pool()).await.unwrap();
-    assert_eq!(seed.get::<String, _>("budget_mode"), "unlimited");
+    let seed=sqlx::query("SELECT c.budget_mode,s.revision FROM linggan_ai_task_setting s JOIN linggan_ai_task_config c ON c.task_config_ref=s.current_config_ref WHERE s.task_key='writing_legacy'").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(seed.get::<String, _>("budget_mode"), "unconfigured");
     let base_revision = seed.get::<i64, _>("revision");
     let first = SaveTaskConfig {
         command_ref: Uuid::new_v4(),
-        task_key: TaskKey::NoteInterpretation,
+        task_key: TaskKey::WritingLegacy,
         expected_revision: base_revision,
         model: Some(ModelSelection {
             model_ref: selected,

@@ -159,7 +159,7 @@ pub async fn save_task_config(
             .is_some_and(|m| m.limits.attempts != 1))
         || (matches!(
             request.task_key,
-            TaskKey::NoteInterpretation | TaskKey::DirectionListDraft | TaskKey::DirectionProposal
+            TaskKey::DirectionListDraft | TaskKey::DirectionProposal
         ) && request.material_columns.is_empty())
     {
         return Err(FoundationError::Invalid);

@@ -38,6 +38,15 @@
   gap: calc(var(--lgi-space-1) * 1.5);
 }
 
+.researchAction {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  min-height: var(--lgi-space-8);
+  margin-top: var(--lgi-space-1);
+  padding-bottom: var(--lgi-space-1);
+}
+
 .widths {
   display: flex;
   height: var(--lgi-space-8);

@@ -95,16 +95,20 @@ BEGIN
   VALUES(gen_random_uuid(),version,target.task,target.material,true,'human','Synthetic pre-upgrade permission');
  END LOOP;
  FOR target IN SELECT * FROM (VALUES
-  ('note_interpretation','interactive'),('creation_title','interactive'),('model_probe','probe')
- ) AS pairs(task,kind) LOOP
+  ('note_interpretation','interactive',51,false),('note_interpretation','interactive',1,true),
+  ('creation_title','interactive',1,false),('model_probe','probe',1,false)
+ ) AS pairs(task,kind,items,already_cancelled) LOOP
   command := gen_random_uuid(); batch := gen_random_uuid();
   SELECT current_config_ref INTO STRICT config FROM linggan_ai_task_setting WHERE task_key=target.task;
   INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt)
   VALUES(command,'synthetic_upgrade_seed','{}','{}');
   INSERT INTO linggan_ai_batch(batch_ref,task_key,task_config_ref,kind,inputs_sha256,item_count,command_ref)
-  VALUES(batch,target.task,config,target.kind,repeat('a',64),1,command);
+  VALUES(batch,target.task,config,target.kind,repeat('a',64),target.items,command);
   INSERT INTO linggan_ai_batch_item(item_ref,batch_ref,position,item_key,input_ref)
-  VALUES(gen_random_uuid(),batch,0,'synthetic-upgrade','{"kind":"synthetic_upgrade"}');
+  SELECT gen_random_uuid(),batch,n,n::text,'{"kind":"synthetic_upgrade"}'::jsonb FROM generate_series(0,target.items-1) n;
+  IF target.already_cancelled THEN
+   UPDATE linggan_ai_batch_control SET cancel_requested=true,revision=revision+1,stop_reason='human_cancelled' WHERE batch_ref=batch;
+  END IF;
  END LOOP;
  command := gen_random_uuid();
  INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt)
@@ -121,17 +125,36 @@ COMMIT;
 CREATE SCHEMA upgrade_proof;
 CREATE TABLE upgrade_proof.baseline_table AS
  SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename<>'linggan_local_schema_migration';
+CREATE TABLE upgrade_proof.topic_prompts AS
+ SELECT to_jsonb(p) AS row FROM linggan_ai_prompt_version p WHERE task_key LIKE 'topic_research%';
+CREATE TABLE upgrade_proof.topic_configs AS
+ SELECT to_jsonb(c) AS row FROM linggan_ai_task_config c WHERE task_key LIKE 'topic_research%';
+CREATE TABLE upgrade_proof.topic_settings AS
+ SELECT task_key, current_config_ref, revision FROM linggan_ai_task_setting WHERE task_key LIKE 'topic_research%';
 CREATE FUNCTION upgrade_proof.snapshot() RETURNS TABLE(table_name text,row_count bigint,row_hash text)
  LANGUAGE plpgsql AS $$
 DECLARE entry record; predicate text;
 BEGIN
  FOR entry IN SELECT tablename FROM upgrade_proof.baseline_table ORDER BY tablename LOOP
   predicate := CASE
-   WHEN entry.tablename IN ('linggan_ai_task','linggan_ai_control','linggan_ai_task_round_state',
-    'linggan_ai_prompt_version','linggan_ai_task_config','linggan_ai_task_setting','linggan_skill_binding')
+   WHEN entry.tablename IN ('linggan_ai_task','linggan_ai_control','linggan_ai_task_round_state')
+    THEN 'WHERE task_key IS DISTINCT FROM ''content_understanding'' AND task_key IS DISTINCT FROM ''content_understanding_deep'' AND task_key IS DISTINCT FROM ''note_interpretation'''
+   WHEN entry.tablename IN ('linggan_ai_prompt_version','linggan_ai_task_config','linggan_ai_task_setting')
+    THEN 'WHERE task_key IS DISTINCT FROM ''content_understanding'' AND task_key IS DISTINCT FROM ''content_understanding_deep'' AND task_key NOT IN (''topic_research'',''topic_research_extract_review'',''topic_research_resolve'',''topic_research_resolve_review'')'
+   WHEN entry.tablename='linggan_skill_binding'
     THEN 'WHERE task_key IS DISTINCT FROM ''content_understanding'' AND task_key IS DISTINCT FROM ''content_understanding_deep'''
+   WHEN entry.tablename='linggan_ai_batch_control'
+    THEN 'WHERE NOT EXISTS (SELECT 1 FROM linggan_ai_batch b WHERE b.batch_ref=row.batch_ref AND b.task_key=''note_interpretation'')'
+   WHEN entry.tablename='linggan_ai_batch_item_control'
+    THEN 'WHERE NOT EXISTS (SELECT 1 FROM linggan_ai_batch_item i JOIN linggan_ai_batch b USING(batch_ref) WHERE i.item_ref=row.item_ref AND b.task_key=''note_interpretation'')'
+   WHEN entry.tablename='linggan_ai_round'
+    THEN 'WHERE task_key IS DISTINCT FROM ''note_interpretation'''
+   WHEN entry.tablename='linggan_ai_command'
+    THEN 'WHERE operation IS DISTINCT FROM ''task_retire'''
+   WHEN entry.tablename='linggan_ai_control_event'
+    THEN 'WHERE reason IS DISTINCT FROM ''task_retired'''
    WHEN entry.tablename='linggan_ai_failure_code'
-    THEN 'WHERE code NOT IN (''content_understanding_publication_withheld'',''content_understanding_deep_insufficient_evidence'')'
+    THEN 'WHERE code NOT IN (''content_understanding_publication_withheld'',''content_understanding_deep_insufficient_evidence'',''content_understanding_deep_rejected_excess'')'
    ELSE '' END;
   RETURN QUERY EXECUTE format(
    'SELECT %L::text,count(*),md5(COALESCE(string_agg(to_jsonb(row)::text,E''\n'' ORDER BY to_jsonb(row)::text),'''')) FROM public.%I row %s',
@@ -139,8 +162,8 @@ BEGIN
  END LOOP;
 END $$;
 DO $$ BEGIN
- IF (SELECT count(*) FROM linggan_ai_batch)<>3
-  OR (SELECT count(*) FROM linggan_ai_batch_item)<>3
+ IF (SELECT count(*) FROM linggan_ai_batch)<>4
+  OR (SELECT count(*) FROM linggan_ai_batch_item)<>54
   OR (SELECT count(*) FROM linggan_model_egress_event)<>4
   OR to_regclass('public.linggan_content_understanding_request') IS NOT NULL
  THEN RAISE EXCEPTION 'populated_upgrade_baseline_invalid'; END IF;
@@ -152,6 +175,22 @@ SQL
   cmp "$proof_dir/upgrade-before.jsonl" "$proof_dir/upgrade-after.jsonl"
   psql_in_container > "$proof_dir/upgrade-assertions.log" 2>&1 <<'SQL'
 DO $$ BEGIN
+ IF EXISTS(SELECT row FROM upgrade_proof.topic_prompts EXCEPT SELECT to_jsonb(p) FROM linggan_ai_prompt_version p)
+  OR EXISTS(SELECT row FROM upgrade_proof.topic_configs EXCEPT SELECT to_jsonb(c) FROM linggan_ai_task_config c)
+  OR EXISTS(SELECT 1 FROM upgrade_proof.topic_settings old LEFT JOIN linggan_ai_task_setting current USING(task_key)
+    WHERE current.task_key IS NULL OR current.revision < old.revision OR NOT EXISTS (SELECT 1 FROM linggan_ai_task_config c WHERE c.task_config_ref=old.current_config_ref))
+ THEN RAISE EXCEPTION 'topic_history_not_preserved'; END IF;
+ IF NOT EXISTS(SELECT 1 FROM linggan_ai_task WHERE task_key='note_interpretation' AND lifecycle='retired')
+  OR NOT EXISTS(SELECT 1 FROM linggan_ai_control WHERE task_key='note_interpretation' AND NOT enabled AND reason='task_retired')
+  OR (SELECT count(*) FROM linggan_ai_batch b JOIN linggan_ai_batch_control c USING(batch_ref)
+    WHERE b.task_key='note_interpretation' AND c.state='cancelled') <> 2
+  OR NOT EXISTS(SELECT 1 FROM linggan_ai_batch b JOIN linggan_ai_batch_control c USING(batch_ref)
+    WHERE b.task_key='note_interpretation' AND c.stop_reason='human_cancelled')
+  OR (SELECT count(*) FROM linggan_ai_batch b JOIN linggan_ai_batch_control c USING(batch_ref)
+    JOIN linggan_ai_batch_item i USING(batch_ref) JOIN linggan_ai_batch_item_control ic USING(item_ref)
+    WHERE b.task_key='note_interpretation' AND c.state='cancelled' AND c.cancel_requested
+      AND c.last_round_no=(b.item_count+49)/50 AND ic.state='cancelled' AND ic.failure_code='task_retired') <> 52
+ THEN RAISE EXCEPTION 'retired_task_not_settled'; END IF;
  IF (
   SELECT count(*) FROM linggan_ai_task_setting setting
   JOIN linggan_ai_task_config config ON config.task_config_ref=setting.current_config_ref
@@ -172,16 +211,16 @@ END $$;
 SQL
   migrate > "$proof_dir/upgrade-repeat.log" 2>&1
   psql_in_container -Atc 'SELECT row_to_json(snapshot) FROM upgrade_proof.snapshot()' > "$proof_dir/upgrade-repeat.jsonl"
-  cmp "$proof_dir/upgrade-before.jsonl" "$proof_dir/upgrade-repeat.jsonl"
+  cmp "$proof_dir/upgrade-after.jsonl" "$proof_dir/upgrade-repeat.jsonl"
   [[ "$(psql_in_container -Atc 'SELECT max(migration_id) FROM linggan_local_schema_migration')" == "$expected_head" ]] || exit 1
   python3 - "$proof_dir/result.json" <<'PY'
 import json,sys
 path=sys.argv[1]
 with open(path) as f:result=json.load(f)
 result.update(populatedUpgradePassed=True,baselineHead='0195_observation_transition_immutable',
-    syntheticBatches=3,syntheticItems=3,syntheticEgressPermissions=4,
+    syntheticBatches=4,syntheticItems=54,syntheticEgressPermissions=4,
     scope='fresh, repeat and populated synthetic upgrade; no production data or external calls')
 with open(path,'w') as f:json.dump(result,f,ensure_ascii=False,indent=2);f.write('\n')
 PY
-  echo 'Populated content-understanding upgrade and repeat passed; prior rows unchanged, new tasks disabled and no work dispatched.'
+  echo 'Populated upgrade and repeat passed; scoped rows preserved, retired task settled, new tasks disabled and no work dispatched.'
 fi

@@ -118,14 +118,13 @@ try {
   const model = settings.models.find(m => m.modelId === modelId);
   const version = settings.skills.find(s => s.name === 'browser-example').versions[0];
   assert.ok(model.capability); assert.equal(model.price.input, '0'); assert.equal(model.price.output, null);
-  await step('single-note analysis saves high thinking and reloads it from PostgreSQL', async () => {
+  await step('L1 content understanding saves high thinking and reloads it from PostgreSQL', async () => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await goto('?view=advanced&area=work&task=note_interpretation');
+    await goto('?view=advanced&area=work&task=content_understanding');
     await page.getByLabel('选择模型', { exact: true }).selectOption(model.identityRef);
     await page.getByLabel('输入 token 上限', { exact: true }).fill('1024');
     await page.getByLabel('输出 token 上限', { exact: true }).fill('128');
     await page.getByLabel('单次等待秒数', { exact: true }).fill('5');
-    await page.getByRole('checkbox', { name: '标题', exact: true }).check();
     await page.getByLabel('思考开关', { exact: true }).selectOption('on');
     await page.getByLabel('思考等级', { exact: true }).selectOption({ label: '高' });
     await page.getByRole('button', { name: '保存配置', exact: true }).click();
@@ -134,7 +133,7 @@ try {
     assert.equal(await page.getByLabel('思考开关', { exact: true }).inputValue(), 'on');
     assert.equal(await page.getByLabel('思考等级', { exact: true }).inputValue(), 'high');
     await page.getByLabel('思考开关', { exact: true }).scrollIntoViewIfNeeded();
-    const name = 'settings-note-analysis-thinking.png';
+    const name = 'settings-content-understanding-thinking.png';
     await page.screenshot({ path: path.join(directory, name) });
     report.screenshots.push(name);
   });

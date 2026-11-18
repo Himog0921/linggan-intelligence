@@ -218,6 +218,13 @@ function renderWithToast(element: ReactElement) {
 }
 
 describe('读取与设置入口', () => {
+  it('就绪时不显示冗余图组提示', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ ...ready, currentStage: '' })));
+    renderWithToast(<OcrRecognition workRef="work-a"/>);
+    expect(await screen.findByRole('button', { name: 'OCR 识别' })).toBeEnabled();
+    expect(screen.queryByText('确认当前图组后可开始。')).toBeNull();
+  });
+
   it('读取中写「正在读取状态」，不把未知写成无资格', async () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => undefined)));
     renderWithToast(<OcrRecognition workRef="work-a"/>);
@@ -240,7 +247,7 @@ describe('读取与设置入口', () => {
 
     failing = false;
     await user.click(screen.getByRole('button', { name: '重新读取状态' }));
-    expect(await screen.findByText('正在识别内页。')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'OCR 识别' })).toBeEnabled());
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 

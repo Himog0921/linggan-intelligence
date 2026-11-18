@@ -166,7 +166,6 @@ pub(crate) async fn check_queue_input_scope(
                 "manual_ocr_image"
             }
             TaskKey::ContentUnderstanding
-            | TaskKey::NoteInterpretation
             | TaskKey::ContentUnderstandingDeep
             | TaskKey::DirectionListDraft
             | TaskKey::DirectionProposal => "note_material",

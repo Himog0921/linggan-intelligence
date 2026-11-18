@@ -539,6 +539,7 @@ migrate() {
   apply_migration_once "0225_content_understanding_deep_outcome" "$project_root/database/migrations/0225_content_understanding_deep_outcome.sql"
   apply_migration_once "0226_ai_connection_billing_pause" "$project_root/database/migrations/0226_ai_connection_billing_pause.sql"
   apply_migration_once "0227_opportunity_exclusion_precedence" "$project_root/database/migrations/0227_opportunity_exclusion_precedence.sql"
+  apply_migration_once "0229_retire_note_interpretation" "$project_root/database/migrations/0229_retire_note_interpretation.sql"
 }
 
 case "$command_name" in

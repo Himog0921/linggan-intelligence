@@ -83,6 +83,25 @@ it.each(['revision', 'domain'])('切换%s立即移除旧结果，再读取当前
   resolve(response(null));
   expect(await screen.findByText(/这篇尚无当前材料的理解结果/)).toBeVisible();
 });
+it('同一材料推进截止时间时保留阅读位置，读取失败后隐藏旧结果', async () => {
+  let resolve!: (value: Response) => void;
+  const analysis = { ...saved(), deepAnalyses: [{ analysisRef: 'deep-1', question: '研究问题', methodVersion: 'v2', findings: [{ id: 'f', statement: '合成研究结论', support: [{ observation: '合成依据' }] }] }] };
+  const fetch = vi.fn().mockResolvedValueOnce(response(analysis)).mockImplementationOnce(() => new Promise<Response>(done => { resolve = done; }));
+  vi.stubGlobal('fetch', fetch);
+  const view = mount();
+  await screen.findByText('合成研究结论');
+  fireEvent.click(screen.getByText('引用依据'));
+  const details = screen.getByText('引用依据').closest('details');
+  expect(details).toHaveAttribute('open');
+  view.change('domain', 'r1', '2026-11-10T15:00:00Z');
+  expect(screen.getByText('合成研究结论')).toBeVisible();
+  expect(details).toHaveAttribute('open');
+  expect(screen.getByText('正在更新理解结果，暂时显示上一份底稿的结果。')).toBeVisible();
+  await waitFor(() => expect(fetch).toHaveBeenCalledTimes(2));
+  resolve(new Response('{}', { status: 403 }));
+  await screen.findByText(/理解结果暂时无法读取/);
+  expect(screen.queryByText('合成研究结论')).toBeNull();
+});
 it('材料未变但底稿重新读取后，空理解重新读取为已保存结果', async () => {
   const fetch = vi.fn().mockResolvedValueOnce(response(null)).mockResolvedValueOnce(response(saved()));
   vi.stubGlobal('fetch', fetch);
@@ -191,16 +210,11 @@ it('底稿不活跃时不请求', () => {
   const fetch = vi.fn(); vi.stubGlobal('fetch', fetch); mount(false);
   expect(fetch).not.toHaveBeenCalled();
 });
-it('已有核心理解时提供深入研究入口，展开前不发出额外请求；缺少编号时不提供', async () => {
+it('研究底稿只展示 L1/L2 结果，不再重复提供 L2 发起入口', async () => {
   const withRef = saved();
   (withRef.result.card as Record<string, unknown>).analysisRef = 'core-1';
-  const fetch = vi.fn(async () => response(withRef)); vi.stubGlobal('fetch', fetch);
+  vi.stubGlobal('fetch', vi.fn(async () => response(withRef)));
   mount();
-  expect(await screen.findByRole('button', { name: '发起深入研究' })).toBeVisible();
-  expect(fetch).toHaveBeenCalledTimes(1);
-  cleanup();
-  vi.stubGlobal('fetch', vi.fn(async () => response(saved())));
-  mount();
-  await screen.findByText('来自同一张卡片的整篇摘要。');
-  expect(screen.queryByRole('button', { name: '发起深入研究' })).not.toBeInTheDocument();
+  expect(await screen.findByText('来自同一张卡片的整篇摘要。')).toBeVisible();
+  expect(screen.queryByRole('button', { name: '深入研究' })).not.toBeInTheDocument();
 });

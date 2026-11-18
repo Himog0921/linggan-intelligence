@@ -55,6 +55,7 @@ pub enum RuleError {
 pub enum TaskKey {
     ContentUnderstanding,
     ContentUnderstandingDeep,
+    /// Legacy key retained only to decode historical batch records; the task is retired.
     NoteInterpretation,
     DirectionListDraft,
     DirectionProposal,
@@ -129,10 +130,7 @@ impl TaskKey {
     pub fn uses_automatic_brake(self) -> bool {
         matches!(
             self,
-            Self::NoteInterpretation
-                | Self::DirectionListDraft
-                | Self::DirectionProposal
-                | Self::AuthorOrgIdentity
+            Self::DirectionListDraft | Self::DirectionProposal | Self::AuthorOrgIdentity
         )
     }
 }
@@ -141,4 +139,3 @@ pub mod ocr_recognition;
 
 mod billing_pause;
 pub mod content_understanding;
-pub mod note_analysis;

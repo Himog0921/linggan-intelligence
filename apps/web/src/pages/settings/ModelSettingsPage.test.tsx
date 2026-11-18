@@ -37,7 +37,7 @@ describe('AI 设置四区', () => {
     expect(within(side).getByRole('link', { name: '账户安全' })).toHaveAttribute('href', '/settings/account');
     expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent('设置/AI 设置/模型连接');
   });
-  it.each(['ocr_recognition', 'note_interpretation'])('%s 提示词可编辑、保存、启用和回退，保存不运行模型', async taskKey => {
+  it.each(['ocr_recognition'])('%s 提示词可编辑、保存、启用和回退，保存不运行模型', async taskKey => {
     const seed = settingsFixture();
     const config = { ...seed.configurations[0]!, taskKey, taskConfigRef: 'ocr-config' };
     const settings = { ...seed, tasks: [{ ...seed.tasks[0]!, taskKey, label: taskKey === 'note_interpretation' ? '笔记解读' : '图片文字识别', skillAllowed: true, configuration: config }], configurations: [config] };
@@ -161,7 +161,7 @@ describe('AI 设置四区', () => {
     expect(posts()).toHaveLength(1);
     expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/skills/switch', body: { taskKey: 'writing_legacy', versionRef: 'version-2', expectedTaskRevision: 0, expectedBindingRevision: 0 } });
   });
-  it.each(['note_interpretation','comment_study','comment_problem_resolution','comment_problem_pair_review','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research'])('研究阶段 %s 可编辑提示词与切换做法', async taskKey => {
+  it.each(['comment_study','comment_problem_resolution','comment_problem_pair_review','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research'])('研究阶段 %s 可编辑提示词与切换做法', async taskKey => {
     const seed = settingsFixture();
     const config = { ...seed.configurations[0]!, taskKey, skillVersionRef: null, executionContract: null };
     const version = { versionRef: 'version-1', versionNo: 1, description: 'Synthetic', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, createdAt: config.createdAt, fileCount: 1 };
