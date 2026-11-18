@@ -179,33 +179,7 @@ describe('AI 设置正式四视图', () => {
     expect(calls.find(call => call.method === 'POST')).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'ocr_recognition', budget: { mode: 'unlimited' }, model: { modelRef: 'second-model', limits: { attempts: 1, thinkingLevel: 'off' } } } });
   });
 
-  it('材料范围沿用底稿五类字段，旧配置里的视频画面文字在保存时移除', async () => {
-    const base = settingsFixture();
-    const capability = { capabilityRef: 'cap-text', source: 'manual', sourceVersion: 'synthetic-only', probeInvocationRef: null, contextTokens: 8192, maxOutputTokens: 2048, maxTimeoutSeconds: 60, thinkingLevels: ['off'], compat: {}, thinkingLevelMap: { off: null }, outputMode: 'json_object', strictSchema: false };
-    const config = { ...base.tasks[0]!.configuration, taskKey: 'note_interpretation', materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript', 'frame_text'],
-      model: { modelConfigRef: 'model-config', modelRef: 'old-model-ref', identityRef: 'identity-1', modelId: 'synthetic-model',
-        connectionRef: 'connection-1', connectionVersionRef: 'version-1', capabilityRef: 'cap-text',
-        limits: { inputTokens: 2048, outputTokens: 512, timeoutSeconds: 30, attempts: 1, thinkingLevel: 'off' } } };
-    const data = { ...base, models: [{ ...base.models[0]!, capability }],
-      tasks: [{ ...base.tasks[0]!, taskKey: 'note_interpretation', label: '笔记解读', configuration: config }] };
-    respond = call => call.method === 'GET' ? ok(data) : call.path === '/api/local/ai-settings/task-configs'
-      ? ok({ taskKey: 'note_interpretation', taskConfigRef: 'next-config', modelConfigRef: 'model-config', revision: 1, applied: true })
-      : { status: 503, body: {} };
-    const user = userEvent.setup(); mount();
-    await user.click(await screen.findByRole('button', { name: /笔记解读/ }));
-    await user.click(screen.getByRole('link', { name: '查看工作配置' }));
-    expect(screen.queryByRole('checkbox', { name: '封面文字' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('checkbox', { name: '视频画面文字' })).not.toBeInTheDocument();
-    expect(screen.getByRole('checkbox', { name: '音频转录' })).toBeChecked();
-    expect(calls.filter(call => call.method === 'POST')).toHaveLength(0);
-    await user.click(screen.getByRole('button', { name: '保存配置' }));
-    await screen.findByText(/配置已保存，用于后续批次/);
-    const writes = calls.filter(call => call.method === 'POST');
-    expect(writes).toHaveLength(1);
-    expect(writes[0]).toMatchObject({ path: '/api/local/ai-settings/task-configs', body: { taskKey: 'note_interpretation', expectedRevision: 0, materialColumns: ['title', 'body', 'tags', 'ocr', 'transcript'] } });
-  });
-
-  it('单篇分析可补齐 DeepSeek 思考能力，再开启思考、选择高并读回', async () => {
+  it('L1 内容理解可补齐 DeepSeek 思考能力，再开启思考、选择高并读回', async () => {
     const base = settingsFixture();
     base.connections[0]!.name = 'DeepSeek';
     const modelId = 'deepseek-v4-flash';
@@ -219,7 +193,7 @@ describe('AI 设置正式四视图', () => {
       probeInvocationRef: null, maxTimeoutSeconds: 60, thinkingLevels: ['off'], compat: preset.compat,
       thinkingLevelMap: preset.thinkingLevelMap, outputMode: preset.outputMode, strictSchema: false };
     const model = { ...base.models[0]!, identityRef: 'deepseek-flash', modelId };
-    let configuration = { ...base.tasks[0]!.configuration, taskKey: 'note_interpretation',
+    let configuration = { ...base.tasks[0]!.configuration, taskKey: 'content_understanding',
       model: { modelConfigRef: 'model-config', modelRef: 'old-model-ref', identityRef: model.identityRef, modelId,
         connectionRef: model.connectionRef, connectionVersionRef: 'version-1', capabilityRef: 'cap-off',
         limits: { inputTokens: 2048, outputTokens: 512, timeoutSeconds: 30, attempts: 1, thinkingLevel: 'off' } } };
@@ -236,13 +210,13 @@ describe('AI 设置正式四视图', () => {
         const thinkingLevel = (call.body.model as { limits: { thinkingLevel: string } }).limits.thinkingLevel;
         configuration = { ...configuration, taskConfigRef: 'next-config',
           model: { ...configuration.model, capabilityRef: capability.capabilityRef, limits: { ...configuration.model.limits, thinkingLevel } } };
-        return ok({ taskKey: 'note_interpretation', taskConfigRef: 'next-config', modelConfigRef: 'model-config', revision: ++revision, applied: true });
+        return ok({ taskKey: 'content_understanding', taskConfigRef: 'next-config', modelConfigRef: 'model-config', revision: ++revision, applied: true });
       }
       return call.path === '/api/local/ai-settings' ? ok({ ...base, models: [...base.models, { ...model, capability }],
-        tasks: [{ ...base.tasks[0]!, taskKey: 'note_interpretation', label: '单篇分析', configuration, revision, skillAllowed: true, requiresSkill: true }] }) : { status: 503, body: {} };
+        tasks: [{ ...base.tasks[0]!, taskKey: 'content_understanding', label: '整篇内容理解', configuration, revision, skillAllowed: true, requiresSkill: true }] }) : { status: 503, body: {} };
     };
     const user = userEvent.setup();
-    const page = mount('/settings/models?view=advanced&area=work&task=note_interpretation');
+    const page = mount('/settings/models?view=advanced&area=work&task=content_understanding');
     expect(await screen.findByRole('combobox', { name: '思考开关' })).toHaveValue('off');
     expect(screen.queryByRole('option', { name: '开启' })).not.toBeInTheDocument();
     await user.click(screen.getByRole('link', { name: '编辑模型能力声明' }));
@@ -264,7 +238,7 @@ describe('AI 设置正式四视图', () => {
     } });
 
     page.unmount();
-    const reopened = mount('/settings/models?view=advanced&area=work&task=note_interpretation');
+    const reopened = mount('/settings/models?view=advanced&area=work&task=content_understanding');
     const toggle = await screen.findByRole('combobox', { name: '思考开关' });
     expect(toggle).toHaveValue('off');
     await user.selectOptions(toggle, 'on');
@@ -274,9 +248,9 @@ describe('AI 设置正式四视图', () => {
     await screen.findByText(/配置已保存，用于后续批次/);
     const writes = calls.filter(call => call.method === 'POST');
     expect(writes.map(call => call.path)).toEqual(['/api/local/ai-settings/capabilities', '/api/local/ai-settings/task-configs']);
-    expect(writes[1]?.body).toMatchObject({ taskKey: 'note_interpretation', skillVersionRef: null, model: { capabilityRef: 'cap-reasoning', limits: { thinkingLevel: 'high' } } });
+    expect(writes[1]?.body).toMatchObject({ taskKey: 'content_understanding', skillVersionRef: null, model: { capabilityRef: 'cap-reasoning', limits: { thinkingLevel: 'high' } } });
     reopened.unmount();
-    mount('/settings/models?view=advanced&area=work&task=note_interpretation');
+    mount('/settings/models?view=advanced&area=work&task=content_understanding');
     expect(await screen.findByRole('combobox', { name: '思考开关' })).toHaveValue('on');
     expect(screen.getByRole('combobox', { name: '思考等级' })).toHaveValue('high');
   });
