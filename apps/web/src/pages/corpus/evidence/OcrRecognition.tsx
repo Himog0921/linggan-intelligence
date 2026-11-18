@@ -24,6 +24,7 @@ function actionCopy(run: OcrRecognitionRun | null) {
   return '核对结果中';
 }
 function stageCopy(run: OcrRecognitionRun) {
+  if (run.state === 'ready') return '';
   if (run.state === 'unavailable') return run.unavailableReason ?? '当前不可执行识别，原因未返回。';
   if (run.state === 'succeeded') return '';
   if (run.state === 'unknown') return '结果暂未确认；只核对原任务，不重复发送图片。';
@@ -146,7 +147,7 @@ export function OcrRecognition({ workRef, workLabel, active = true, onApplied, c
   </ActionButton>{run?.runRef ? <span className={styles.progressSemantics} role="progressbar" aria-label="图片文字识别进度" aria-valuemin={0} aria-valuemax={100} aria-valuenow={value} aria-valuetext={value + '%'}/> : null}{settings}</span>;
   return <Section title={children ? mediaTitle : "图片文字"} badge={mediaCount !== undefined ? <span className={styles.mediaCount}>{String(mediaCount).padStart(2, '0')} 个本地媒体对象</span> : null} actions={action}>
     <div className={styles.module} data-ocr-recognition data-state={run?.state ?? 'loading'}>
-      {run?.state !== 'succeeded' || loading || readFailed ? <div ref={result} className={styles.feedbackRow}><p className={styles.status} role="status" aria-live="polite">{statusText}</p>
+      {(run?.state !== 'succeeded' && run?.state !== 'ready') || loading || readFailed || message !== '' || unconfirmed ? <div ref={result} className={styles.feedbackRow}><p className={styles.status} role="status" aria-live="polite">{statusText}</p>
         <span className={styles.statusActions}>
           {readFailed ? <button type="button" className={styles.source} onClick={() => { setReadFailed(false); setLoading(true); setRefresh(value => value + 1); }}>重新读取状态</button> : null}
           {run && ['succeeded', 'stopped'].includes(run.state) ? <button type="button" className={styles.source} disabled={!canStart} onClick={chooseScope}>选择图片重新识读</button> : null}
