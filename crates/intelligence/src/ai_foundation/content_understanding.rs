@@ -274,7 +274,8 @@ pub async fn latest(
         .await?;
     let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut tx, as_of).await?;
     let p = source::load(&mut tx, domain, work, &cutoff).await?;
-    let row = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,
+    let row = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,r.input_manifest,r.material_snapshot_identity,
+        r.created_at::text || r.request_ref::text AS request_order, (r.knowledge_cutoff <= $5::timestamptz) AS input_before_cutoff,
         CASE WHEN result.offline_recovery THEN 'succeeded' ELSE c.state END AS state,
         CASE WHEN result.offline_recovery THEN NULL ELSE c.failure_code END AS failure_code,
         COALESCE(review.result,result.result) AS result, review.revision_ref,
@@ -302,10 +303,41 @@ pub async fn latest(
           LEFT JOIN linggan_ai_batch_item_control ic ON ic.item_ref=q.item_ref
           WHERE d.core_ref=result.request_ref AND d.domain_ref=$4 AND d.created_at<=$5::timestamptz
         ) deeps ON true
-        WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3
-        ORDER BY (result.result IS NOT NULL) DESC,r.created_at DESC,r.request_ref DESC LIMIT 1")
+        WHERE r.work_ref=$1 AND r.method_version=$3
+        ORDER BY (result.result IS NOT NULL) DESC,(r.material_snapshot_identity=$2) DESC,r.created_at DESC,r.request_ref DESC")
         .bind(work).bind(&p.snapshot.material_snapshot_identity).bind(METHOD).bind(domain).bind(&cutoff)
-        .fetch_optional(&mut *tx).await?;
+        .fetch_all(&mut *tx).await?;
+    // Track a request whose frozen inputs remain usable even if extra material arrived.
+    let current_inputs: Vec<bool> = row
+        .iter()
+        .map(|r| {
+            r.get::<String, _>("material_snapshot_identity")
+                == p.snapshot.material_snapshot_identity
+                || (r.get::<bool, _>("input_before_cutoff")
+                    && serde_json::from_value::<source::Packet>(r.get("input_manifest"))
+                        .is_ok_and(|saved| source::saved_sources_available(&saved, &p)))
+        })
+        .collect();
+    let current_request = row.iter().zip(&current_inputs).filter(|(_, usable)| **usable)
+        .map(|(r, _)| r).max_by_key(|r| r.get::<String, _>("request_order"))
+        .filter(|r| r.get::<Option<Value>, _>("result").is_none())
+        .map(|r| json!({"state": r.get::<String, _>("state"), "failureCode": r.get::<Option<String>, _>("failure_code")}));
+    let mut selected = None;
+    for (r, usable) in row.into_iter().zip(current_inputs) {
+        if usable
+            || (r.get::<Option<Value>, _>("result").is_some()
+                && match serde_json::from_value::<source::Packet>(r.get("input_manifest")) {
+                    Ok(saved) => {
+                        source::saved_result_available(&mut tx, work, &cutoff, &saved, &p).await?
+                    }
+                    Err(_) => false,
+                })
+        {
+            selected = Some(r);
+            break;
+        }
+    }
+    let row = selected;
     let result = match row {
         Some(r) => {
             let result = r.get::<Option<Value>, _>("result");
@@ -314,6 +346,10 @@ pub async fn latest(
                 "itemRef":r.get::<Uuid,_>("item_ref"),"state":r.get::<String,_>("state"),
                 "failureCode":r.get::<Option<String>,_>("failure_code"),"result":result
             });
+            analysis["sourceChanged"] = json!(
+                r.get::<String, _>("material_snapshot_identity")
+                    != p.snapshot.material_snapshot_identity
+            );
             if r.get::<bool, _>("offline_recovery") {
                 analysis["recoveredFromSavedReply"] = json!(true);
             }
@@ -370,7 +406,7 @@ pub async fn latest(
     };
     tx.commit().await?;
     Ok(
-        json!({"contract":"content-understanding.read.v1","workRef":work,"analysis":result,"materialReadiness":p.coverage["materialReadiness"]}),
+        json!({"contract":"content-understanding.read.v1","workRef":work,"analysis":result,"currentRequest":current_request,"materialReadiness":p.coverage["materialReadiness"]}),
     )
 }
 
@@ -397,7 +433,7 @@ pub(crate) async fn core_cards_in(
     work: Uuid,
     cutoff: &str,
 ) -> Result<Vec<Value>, FoundationError> {
-    let rows = sqlx::query("SELECT result->'card' AS card,material_snapshot_identity FROM linggan_content_understanding_saved_core WHERE work_ref=$1 AND method_version=$2 AND result IS NOT NULL AND created_at<=$3::timestamptz ORDER BY created_at DESC,request_ref DESC")
+    let rows = sqlx::query("SELECT core.result->'card' AS card,core.material_snapshot_identity,request.input_manifest FROM linggan_content_understanding_saved_core core JOIN linggan_content_understanding_request request USING(request_ref) WHERE core.work_ref=$1 AND core.method_version=$2 AND core.result IS NOT NULL AND core.created_at<=$3::timestamptz ORDER BY core.created_at DESC,core.request_ref DESC")
         .bind(work).bind(METHOD).bind(cutoff).fetch_all(&mut **tx).await?;
     if rows.is_empty() {
         return Ok(vec![]);
@@ -408,17 +444,22 @@ pub(crate) async fn core_cards_in(
         Err(error) => return Err(error),
     };
     let ready = packet.coverage["materialReadiness"]["state"] == "ready";
-    Ok(rows
-        .into_iter()
-        .filter(|row| {
-            coverage::qualified(
-                &row.get::<String, _>("material_snapshot_identity"),
-                &packet.snapshot.material_snapshot_identity,
-                ready,
-            )
-        })
-        .map(|row| row.get("card"))
-        .collect())
+    let mut cards = Vec::new();
+    for row in rows {
+        let same = coverage::qualified(
+            &row.get::<String, _>("material_snapshot_identity"),
+            &packet.snapshot.material_snapshot_identity,
+            ready,
+        );
+        let usable = match serde_json::from_value::<source::Packet>(row.get("input_manifest")) {
+            Ok(saved) => source::saved_result_available(tx, work, cutoff, &saved, &packet).await?,
+            Err(_) => false,
+        };
+        if same || usable {
+            cards.push(row.get("card"));
+        }
+    }
+    Ok(cards)
 }
 
 #[cfg(test)]

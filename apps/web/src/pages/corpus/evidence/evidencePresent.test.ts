@@ -12,6 +12,8 @@ import {
   effectiveAuthor,
   knownText,
   limitationCopy,
+  materialAvailability,
+  compactAvailability,
   materialFill,
   materialSummary,
   metricReading,
@@ -205,5 +207,21 @@ describe('原声高亮（E04）', () => {
     expect(quoteParts({ text: '合成', matchOffset: null, matchLength: null })).toBeNull();
     expect(quoteParts({ text: '合成', matchOffset: 1, matchLength: 5 })).toBeNull();
     expect(quoteParts({ text: '合成', matchOffset: 0, matchLength: 0 })).toBeNull();
+  });
+});
+
+describe('材料取得情况', () => {
+  it('列表接口独立返回正文状态和已留存评论时正确解码', () => {
+    const raw = { ...listItemJson(1), materialAvailability: { titleState: 'KNOWN', bodyState: 'KNOWN', bodyHasText: true, retainedComments: 12 } };
+    const work = parseWorkList(listJson([raw])).items[0]!;
+    expect(materialAvailability(work)).toContain('正文 已取得');
+    expect(materialAvailability(work)).toContain('评论 已取得 12 条');
+  });
+  it('分别显示标题、正文、本地媒体和已留存评论；未知不当作零', () => {
+    const work = item({ media: { images: 1 } });
+    const lines = materialAvailability({ ...work, bodyState: 'KNOWN', bodyHasText: true, retainedComments: 3 });
+    expect(lines).toEqual(['标题 已取得', '正文 已取得', '媒体 已取得', '评论 已取得 3 条']);
+    expect(compactAvailability(lines)).toBe('标题✓ 正文✓ 媒体✓ 评论✓');
+    expect(materialAvailability({ ...work, bodyState: 'UNKNOWN', retainedComments: null })[1]).toBe('正文 未知');
   });
 });

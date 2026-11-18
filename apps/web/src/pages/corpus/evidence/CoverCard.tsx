@@ -1,14 +1,11 @@
 import { useId, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { GEOMETRY_SHAPES, coverGeometryKind, coverKindLabel, type GeometryKind } from './coverGeometry';
 import { MediaImage } from './Media';
-import { StateLine } from './Primitives';
 import {
+  compactAvailability,
   coverObservationMoment,
   coverPublishedCopy,
-  laneSummary,
-  materialReadinessCopy,
-  materialSummary,
-  segmentTitle,
+  materialAvailability,
   stateMeta,
   workTitle,
 } from './evidencePresent';
@@ -113,27 +110,12 @@ function Visual({ item, title, index, titleTip }: { item: WorkItem; title: strin
   );
 }
 
-/** 五维状态：铭牌上的悬停提示，同一份文字也作为选择控件的补充说明给读屏。评论维度写「保留数 / 平台数」。 */
-function statusLines(item: WorkItem): string[] {
-  const summary = materialSummary(item);
-  const comments = laneSummary(item.lanes, 'comments');
-  const platform = item.display.engagement.comment;
-  return summary.segments.map(segment => {
-    if (segment.key === 'comments' && comments?.valueState === 'KNOWN' && comments.retained !== null && platform.state === 'KNOWN' && platform.value !== null) {
-      return `评论 ${comments.retained.toLocaleString('zh-CN')} / ${platform.value.toLocaleString('zh-CN')}`;
-    }
-    return segmentTitle(segment);
-  });
-}
-
 /** 封面排版的一张卡：翻转面＋常驻铭牌。铭牌上盖一个隐形的选择按钮，给键盘与读屏用；鼠标点整张卡都选中。 */
 export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked, onSelect, onCheck }: RowProps & { ordinal: number }) {
   const statusId = useId();
   const title = workTitle(item);
   const titleTip = useTitleTooltip<HTMLHeadingElement>(title, 'lines');
-  const detail = laneSummary(item.lanes, 'detail')?.state ?? 'UNKNOWN';
-  const readiness = materialReadinessCopy(item.materialReadiness);
-  const lines = [...(readiness ? [readiness.title] : []), ...statusLines(item)];
+  const lines = materialAvailability(item);
   return (
     <li className={styles.item} data-selected={selected} data-checked={canCheck && checked} data-selection-active={canCheck} data-platform={item.platform.toLowerCase()} data-work-ref={item.ref} onClick={() => onSelect(item)}>
       <div className={styles.card}>
@@ -150,8 +132,7 @@ export function CoverCard({ item, ordinal, selected, tabStop, canCheck, checked,
           <Engagement engagement={item.display.engagement} />
           <div className={styles.facts}>
             <span className={styles.status}>
-              <StateLine state={detail} />
-              {readiness ? <> · <span className={styles.readiness} title={readiness.title}>{readiness.label}</span></> : null}
+              {compactAvailability(lines)}
               <span className={styles.tooltip} aria-hidden="true">
                 {lines.map(line => (
                   <span key={line}>{line}</span>

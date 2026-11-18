@@ -51,19 +51,20 @@ try {
       await page.goto(`${origin}/corpus/evidence?domain=${domain}&panel=closed&layout=${layout}`);
       const readyRow = page.locator(`[data-layout="${layout}"] [data-work-ref="${work}"]`);
       const blockedRow = page.locator(`[data-layout="${layout}"] [data-work-ref="${unprocessed}"]`);
-      await readyRow.getByText('材料已准备', { exact: true }).first().waitFor();
-      await blockedRow.getByText('材料待补齐', { exact: true }).first().waitFor();
+      const statusFor = (row, label) => layout === 'cover' ? row.locator('span').filter({ hasText: label }).last() : row.getByText(label, { exact: true }).first();
+      await statusFor(readyRow, '标题✓ 正文✓ 媒体✓ 评论?').waitFor();
+      await statusFor(blockedRow, '标题✓ 正文✓ 媒体? 评论?').waitFor();
       await page.evaluate(() => document.fonts.ready);
       await page.screenshot({ path: path.join(directory, `materials-list-${layout}.png`) });
       if (layout === 'cover') {
         for (const width of [1363, 640, 390]) {
           await page.setViewportSize({ width, height: 844 });
-          for (const [row, label] of [[readyRow, '材料已准备'], [blockedRow, '材料待补齐']]) {
-            const status = row.getByText(label, { exact: true }).first();
+          for (const [row, label] of [[readyRow, '标题✓ 正文✓ 媒体✓ 评论?'], [blockedRow, '标题✓ 正文✓ 媒体? 评论?']]) {
+            const status = statusFor(row, label);
             await status.scrollIntoViewIfNeeded();
             const readable = await status.evaluate(node => {
               const range = document.createRange();
-              range.selectNodeContents(node);
+              range.selectNode(node.firstChild);
               const rects = [...range.getClientRects()];
               for (let parent = node.parentElement; parent; parent = parent.parentElement) {
                 const style = getComputedStyle(parent);
@@ -78,21 +79,21 @@ try {
                 || rect.left >= observed.right - 1 || rect.bottom <= observed.top + 1 || rect.top >= observed.bottom - 1));
             });
             assert.ok(readable, `${width}宽度下${label}不可裁切或与观察时间重叠`);
-            if (width === 390) await row.screenshot({ path: path.join(directory, `materials-list-cover-narrow-${label === '材料已准备' ? 'ready' : 'blocked'}.png`) });
+            if (width === 390) await row.screenshot({ path: path.join(directory, `materials-list-cover-narrow-${row === readyRow ? 'ready' : 'blocked'}.png`) });
           }
           assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
         }
         await page.setViewportSize({ width: 1363, height: 936 });
       }
     }
-    report.steps.push('真实列表接口：研读、表格和封面均区分材料已准备与待补齐，封面窄屏可读。');
+    report.steps.push('真实列表接口：研读、表格和封面逐项呈现标题、正文、媒体和评论，封面窄屏可读。');
   }
   await open(work);
   await understanding.getByText('这篇尚无当前材料的理解结果，以下保留原始材料。', { exact: true }).waitFor();
   await checkOriginal();
   assert.equal(report.writes.length, 0);
-  if (!fixture.live) await understanding.getByText('材料已准备', { exact: true }).waitFor();
-  report.steps.push('材料已准备但未分析时不写理解完成，原文完整，打开页面不自动生成。');
+  if (!fixture.live) await understanding.getByText('可进行内容理解', { exact: true }).waitFor();
+  report.steps.push('材料可分析但未分析时不写理解完成，原文完整，打开页面不自动生成。');
   const preview = await call(`/api/local/content-understanding/preview?${selection(work)}`);
   assert.equal(preview.status, 200);
   assert.equal(preview.body.canStart, true, JSON.stringify(preview.body.reasons));
@@ -152,10 +153,9 @@ try {
   assert.ok((await original.textContent()).includes('这篇合成原文尚未经过理解，仍可完整阅读。'));
   assert.ok(!(await understanding.textContent()).includes(summary));
   if (!fixture.live) {
-    await understanding.getByText('材料待补齐', { exact: true }).waitFor();
-    await understanding.getByText('原始媒体清单尚未确认，暂不能判断图文或视频材料是否齐全。', { exact: true }).waitFor();
+    await understanding.getByText('可进行内容理解', { exact: true }).waitFor();
   }
-  report.steps.push('切换未分析笔记不会串入上篇理解，未知媒体清单显示具体缺项。');
+  report.steps.push('切换未分析笔记不会串入上篇理解，已有正文可分析。');
   await open(work);
   await checkResult();
   assert.deepEqual((await call(latest)).body.analysis.result, report.result);
@@ -182,13 +182,13 @@ try {
   if (!fixture.live) {
     const scopeNote = '本次依据口播，不包含视频画面内容。';
     for (const [state, label, message] of [
-      ['preparing', '材料准备中', '正在处理口播。'],
-      ['blocked', '材料待补齐', '原视频本地副本暂不可读取。'],
+      ['preparing', '材料处理中', '正在处理口播。'],
+      ['blocked', '暂无可分析材料', '尚无可供分析的正文、口播或图片。'],
     ]) {
       await page.route('**/api/local/content-understanding/latest?**', route => route.fulfill({
         status: 200, contentType: 'application/json', body: JSON.stringify({
           ...saved.body, analysis: null, materialReadiness: { state, kind: 'video',
-            gaps: [{ code: 'synthetic_presentation', state, message, slotKey: 'video:1' }], scopeNote },
+            gaps: [{ code: state === 'blocked' ? 'no_readable_material' : 'synthetic_presentation', state, message, slotKey: 'video:1' }], scopeNote },
         }),
       }));
       await page.reload();
@@ -211,7 +211,7 @@ try {
     assert.equal(await understanding.getByText('本次按已取得的材料理解，材料缺口见下方原始材料。', { exact: true }).count(), 0);
     await page.screenshot({ path: path.join(directory, 'materials-video-scope.png') });
     await page.unroute('**/api/local/content-understanding/latest?**');
-    report.steps.push('仅展示层模拟：准备和缺原件提示正确，已保存结果不插入处理范围说明，390宽度可读且不新增生成请求。');
+    report.steps.push('仅展示层模拟：处理中和无可分析材料的提示正确，已保存结果不插入处理范围说明，390宽度可读且不新增生成请求。');
 
     const card = report.result.card;
     const question = '开头怎样说明练习的用途？';

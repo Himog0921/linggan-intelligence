@@ -381,17 +381,17 @@
   border-top: 1px solid var(--lgi-hairline);
 }
 
-.plate:has(.readiness) {
+.plate:has(.status) {
   grid-template-rows: var(--lgi-space-6) var(--lgi-space-6) auto;
   aspect-ratio: auto;
 }
 
-.facts:has(.readiness) {
+.facts:has(.status) {
   display: flex;
   flex-wrap: wrap;
 }
 
-.readiness {
+.status {
   white-space: nowrap;
 }
 

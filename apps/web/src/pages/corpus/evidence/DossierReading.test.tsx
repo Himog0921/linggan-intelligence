@@ -10,11 +10,11 @@ import { DOMAIN, dossierJson, dossierMaterialJson, workRef } from './evidenceFix
 import { createFetchMock, ok, renderWithProviders } from './testKit';
 
 it('新图集未齐时保留旧内容并显示服务端提示', () => {
-  const issue = { key: 'image_update_pending', code: 'image_update_pending', message: '新图集尚未全部取得，当前显示已取得的版本。', resolution: 'source_refresh' };
+  const issue = { key: 'image_update_pending', code: 'image_update_pending', message: '新图集尚未全部取得。', resolution: 'source_refresh' };
   const dossier = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { blocks: [{ ref: 'old-image', kind: 'paragraph', text: '旧图文字' }] })], coverage: { issues: [issue] } })).dossier;
   render(<DossierReading dossier={dossier} />);
   expect(screen.getByText('旧图文字')).toBeVisible();
-  expect(screen.getByText(/新图集尚未全部取得，当前显示已取得的版本/)).toBeVisible();
+  expect(screen.getByText(/新图集尚未全部取得/)).toBeVisible();
 });
 
 it('按后端规范章节引用顺序读取，不按材料数组重新排序；相同文字在不同图片保留', () => {

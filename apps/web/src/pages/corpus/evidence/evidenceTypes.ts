@@ -88,6 +88,10 @@ export interface WorkItem {
   /** 服务器原样给出的详情地址；使用前必须经过 `detailPath` 校验。 */
   detailUrl: string | null;
   display: WorkDisplay;
+  bodyState: string;
+  materialTitleState: string;
+  bodyHasText: boolean | null;
+  retainedComments: number | null;
   context: CollectionContext;
   /** `primary` 或 `reference`。 */
   role: string | null;

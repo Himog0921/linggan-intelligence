@@ -21,25 +21,11 @@ function renderList(overrides: Partial<Parameters<typeof WorkList>[0]> = {}, lis
 
 const targets = () => [...document.querySelectorAll<HTMLElement>('[data-select-target]')];
 
-describe.each(['research', 'table', 'cover'] as const)('材料就绪提示（%s）', layout => {
-  it.each([
-    ['ready', '材料已准备', []],
-    ['preparing', '材料准备中', [{ code: 'asr_pending', state: 'preparing', message: '口播转写正在处理。', slotKey: 'video' }]],
-    ['blocked', '材料待补齐', [{ code: 'image_missing', state: 'blocked', message: '第 2 张正文原图尚未取得。', slotKey: 'image_2' }]],
-  ])('%s 采用后端状态，详情采集状态保留，原因可查看', (state, label, gaps) => {
-    const list = parseWorkList(listJson([{ ...listItemJson(1), materialReadiness: { state, kind: 'image_text', gaps, scopeNote: null } }])).items;
-    renderList({ layout }, list);
-    expect(screen.getByText(label, { selector: 'span[title]' })).toBeVisible();
-    expect(screen.getAllByText('可检索').length).toBeGreaterThan(0);
-    if (gaps.length) {
-      expect(screen.getAllByTitle(new RegExp(gaps[0]!.message)).length).toBeGreaterThan(0);
-    }
-    expect(screen.queryByText(/理解已完成/)).not.toBeInTheDocument();
-  });
-
-  it('缺少就绪合同不从媒体计数补成已准备', () => {
-    renderList({ layout }, items([1, { media: { images: 5, videos: 1 } }]));
-    expect(screen.queryByText('材料已准备')).not.toBeInTheDocument();
+describe.each(['research', 'table', 'cover'] as const)('材料取得情况（%s）', layout => {
+  it('逐项显示材料，未知不显示为零，也不显示旧的总体就绪状态', () => {
+    const base = items([1, { media: { images: 1 } }])[0]!;
+    renderList({ layout }, [{ ...base, bodyState: 'KNOWN', bodyHasText: true, retainedComments: 3 }]);
+    expect(screen.getByText('标题✓ 正文✓ 媒体✓ 评论✓')).toBeInTheDocument();
     expect(screen.queryByText('材料待补齐')).not.toBeInTheDocument();
   });
 });
@@ -56,30 +42,16 @@ describe('研读排版', () => {
     expect(row.querySelector('q')).toHaveTextContent('合成正文 1：先做两分钟，再决定要不要继续。');
     for (const name of ['点赞', '评论', '收藏', '分享']) expect(within(row).getByRole('img', { name })).toBeInTheDocument();
     expect(within(row).getByText('1,201')).toBeInTheDocument();
-    expect(within(row).getByRole('button', { name: /^材料说明：正文 可检索；评论 .*转录 本作品不适用$/ })).toBeInTheDocument();
+    expect(within(row).getByText(/标题✓ 正文\? 媒体✓ 评论\?/)).toBeInTheDocument();
     // 右侧事实列：字段名与值分开写，发布时间与观察时间各占一行。
     const info = row.querySelector('dl') as HTMLElement;
     const labels = [...info.querySelectorAll('dt')].map(node => node.textContent);
-    expect(labels).toEqual(['状态', '材料', '发布', '观察']);
+    expect(labels).toEqual(['材料', '发布', '观察']);
     expect(within(info).getByText('2026-10-13')).toBeInTheDocument();
     expect(within(info).getByText('2026-10-10 17:00')).toBeInTheDocument();
     // 窄屏整列隐藏时，发布时间回落到作者行。
     expect(row.querySelector('[data-meta-date]')).toHaveTextContent('2026-10-13');
     expect(row).toHaveAttribute('data-selecting', 'false');
-  });
-
-  it('长异常状态在窄列里显示短名，完整原句交给提示与读屏', () => {
-    renderList({}, items([1, { lanes: { detail: 'DETAIL_READ_BLOCKED' } }], [2, { lanes: { detail: 'PAGE_UNAVAILABLE' } }]));
-    const [blocked, unavailable] = within(screen.getByRole('list', { name: '作品材料集合' })).getAllByRole('listitem');
-    const blockedState = blocked!.querySelector('dd')!;
-    expect(within(blockedState).getByText('详情未读成')).toBeInTheDocument();
-    expect(blockedState).toHaveAttribute('title', '详情页已打开，但没有读成');
-    expect(within(blockedState).getByText('详情页已打开，但没有读成')).toHaveClass('v7-sr-only');
-    expect(blockedState.querySelector('[data-state="DETAIL_READ_BLOCKED"]')).toHaveAttribute('aria-hidden', 'true');
-    const unavailableState = unavailable!.querySelector('dd')!;
-    expect(within(unavailableState).getByText('平台页不存在')).toBeInTheDocument();
-    expect(unavailableState).toHaveAttribute('title', '平台页面已不存在（采集端确认）');
-    expect(within(unavailableState).getByText('平台页面已不存在（采集端确认）')).toHaveClass('v7-sr-only');
   });
 
   it('未知不是 0：没有互动数字写「未知」；没有标题写「标题当前未知」；没有原声写明确空态', () => {
@@ -212,8 +184,8 @@ describe('封面排版（翻转卡）', () => {
     const select = screen.getByRole('button', { name: '合成作品 1' });
     // The full-plate selection control covers the plate, so it owns the mouse-reachable status facts;
     // the work title itself must still have no native title competing with the custom full-title hint.
-    expect(select.getAttribute('title')).toContain('正文：可检索');
-    expect(select).toHaveAccessibleDescription(/正文：可检索/);
+    expect(select.getAttribute('title')).toContain('正文 未知');
+    expect(select).toHaveAccessibleDescription(/正文 未知/);
     expect(screen.getAllByRole('button', { name: '合成作品 1' })).toHaveLength(1);
     expect(flip.querySelector(`img[src="${mediaHandle(10)}"]`)).not.toBeNull();
   });
@@ -249,8 +221,8 @@ describe('封面排版（翻转卡）', () => {
     select.focus();
     await user.keyboard('{Enter}');
     expect(onSelect).toHaveBeenCalledWith(expect.objectContaining({ ref: workRef(1) }), 'user');
-    expect(select).toHaveAccessibleDescription(/评论 45 \/ 321/);
-    expect(select).toHaveAccessibleDescription(/正文：可检索/);
+    expect(select).toHaveAccessibleDescription(/评论 未知/);
+    expect(select).toHaveAccessibleDescription(/正文 未知/);
   });
 
   it('铭牌：作者、发布日、互动、状态线、观察时刻（MM-DD HH:MM）', () => {
@@ -259,7 +231,7 @@ describe('封面排版（翻转卡）', () => {
     expect(within(card).getByText('合成作者 1')).toBeInTheDocument();
     expect(within(card).getByText('2026-10-13')).toBeInTheDocument();
     expect(within(card).getByText('10-10 17:00')).toBeInTheDocument();
-    expect(within(card).getByText('可检索')).toBeInTheDocument();
+    expect(within(card).getByText(/标题✓ 正文\? 媒体\? 评论\?/)).toBeInTheDocument();
   });
 });
 

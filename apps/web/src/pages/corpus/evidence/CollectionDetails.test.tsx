@@ -114,8 +114,8 @@ describe('采集详情（Mog 2026-11-02）', () => {
       mediaSlotsReceipt: null,
       mediaReceipt: null,
     })} />);
-    expect(view.container).toHaveTextContent('正文：已处理，未识别到内容');
-    expect(view.container).toHaveTextContent('评论：当前未知');
+    expect(view.container).toHaveTextContent('正文 未知');
+    expect(view.container).toHaveTextContent('评论 已取得 48 条');
     expect(view.container).not.toHaveTextContent('可读 1/5');
     expect(view.container).not.toHaveTextContent('有缺口');
     expect(view.container).toHaveTextContent('时间未知');

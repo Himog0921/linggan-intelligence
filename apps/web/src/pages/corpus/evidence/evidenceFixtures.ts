@@ -151,6 +151,7 @@ export function listItemJson(n: number, options: ItemOptions = {}) {
   const lanes = { detail: 'SEARCHABLE', ...(options.lanes ?? {}) };
   const title = options.title === undefined ? `合成作品 ${n}` : options.title;
   return {
+    materialAvailability: { titleState: options.titleSource === 'cover_ocr' ? 'UNKNOWN' : (options.titleState ?? (title === null ? 'UNKNOWN' : 'KNOWN')), bodyState: 'UNKNOWN', bodyHasText: null, retainedComments: null },
     collectionContext: {
       authorIdentityMatchState: 'NOT_VERIFIED',
       relationshipState: 'UNKNOWN',

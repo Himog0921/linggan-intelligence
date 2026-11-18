@@ -245,7 +245,7 @@ async fn images(db: &Database, id: &str, total: u32, slots: &[(&str, u32, char)]
 async fn replacement_image_manifest_waits_for_every_page_receipt() {
     let db = fixture::proof_database("dossier_image_version_cutover").await;
     let id = "image-cutover";
-    let work = detail(&db, id, json!({"bodyText":""})).await;
+    let work = detail(&db, id, json!({"bodyText":"可供分析的正文"})).await;
     let previous = images(&db, id, 2, &[("image", 1, 'a'), ("image", 2, 'b')]).await;
     let slot = format!("xhs:{id}:image:1");
     let original = publish_image(
@@ -310,11 +310,13 @@ async fn replacement_image_manifest_waits_for_every_page_receipt() {
             .any(|issue| issue["code"] == "image_update_pending")
     );
     assert!(
-        dossier::material_readiness(&staged)
+        !dossier::material_readiness(&staged)
             .gaps
             .iter()
-            .any(|gap| gap.code == "image_update_pending")
+            .any(|gap| gap.code == "image_update_pending"),
+        "a pending replacement alone must not block analysis"
     );
+    assert!(dossier::material_readiness(&staged).can_start());
     let old = staged
         .materials
         .iter()
@@ -711,14 +713,18 @@ async fn first_pending_image_set_does_not_claim_an_older_version() {
     )
     .await;
     let dossier = dossier::read(&db, work).await.unwrap().unwrap();
-    let readiness = dossier::material_readiness(&dossier);
-    let gap = readiness
-        .gaps
+    let issue = dossier.coverage["issues"]
+        .as_array()
+        .unwrap()
         .iter()
-        .find(|gap| gap.code == "image_update_pending")
+        .find(|issue| issue["code"] == "image_update_pending")
         .unwrap();
-    assert_eq!(gap.message, "新图集尚未全部取得。");
-    assert!(!gap.message.contains("旧版本"));
+    assert_eq!(issue["message"], "新图集尚未全部取得。");
+    let readiness = dossier::material_readiness(&dossier);
+    assert!(!readiness.can_start());
+    assert!(
+        readiness.gaps.iter().any(|gap| gap.code == "no_readable_material")
+    );
 }
 
 #[tokio::test]
@@ -998,7 +1004,7 @@ async fn later_missing_body_preserves_known_empty_but_never_invents_one() {
             dossier::material_readiness(&read)
                 .gaps
                 .iter()
-                .any(|g| g.code == "native_text_unavailable")
+                .any(|g| g.code == "no_readable_material")
         );
     }
 }

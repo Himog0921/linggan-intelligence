@@ -7,7 +7,7 @@ mod support;
 
 #[tokio::test]
 #[ignore = "owned isolated PostgreSQL, synthetic saved Core; no provider"]
-async fn pending_image_update_excludes_the_same_partial_core_from_topic_inputs() {
+async fn pending_image_update_keeps_the_same_partial_core_available() {
     let (db, model_config) = support::setup("pending_partial_core").await;
     let work = support::work(&db, "dossier-note", "合成正文，用于已有内容理解。").await;
     support::dossier_fixture::acquired_image_source_with_bytes(&db, Some(vec![b'a'; 12])).await;
@@ -86,16 +86,17 @@ async fn pending_image_update_excludes_the_same_partial_core_from_topic_inputs()
         pending.snapshot.material_snapshot_identity,
         before.snapshot.material_snapshot_identity
     );
-    assert_eq!(pending.coverage["materialReadiness"]["state"], "blocked");
+    assert_eq!(pending.coverage["materialReadiness"]["state"], "ready");
     assert_eq!(
-        scope_coverage(&db, &[work], &cutoff).await.unwrap()["stale"],
+        scope_coverage(&db, &[work], &cutoff).await.unwrap()["available"],
         1
     );
     assert!(
         core_cards_at(&db, support::D, work, &cutoff)
             .await
             .unwrap()
-            .is_empty()
+            .len()
+            == 1
     );
 }
 

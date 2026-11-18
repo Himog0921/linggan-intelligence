@@ -82,7 +82,7 @@ pub(super) fn from_dossier(
         "slotKey":s["slotKey"],"purpose":s["purpose"],"component":s["component"],
         "page":s["page"],"producerOrdinal":s["producerOrdinal"],"displayOrderState":s["displayOrderState"],
         "sourceRef":s["sourceRef"],"sourceVersion":s["sourceVersion"],"blobSha256":s["blobSha256"],
-        "sourceState":s["sourceState"],"available":s["originalUrl"].is_string(),
+        "sourceState":s["sourceState"],"available":s["originalUrl"].is_string() && s["localReadable"] == true,
         "sameBytesSources":s["sameBytesSources"]
     })).collect();
     let mut seen = BTreeSet::new();
@@ -119,10 +119,11 @@ pub(super) fn from_dossier(
         .count() as u64;
     let readiness = linggan_evidence::research_dossier::material_readiness(&d);
     let complete = readiness.kind != linggan_evidence::research_dossier::NoteKind::Video
-        && !readiness
-            .gaps
-            .iter()
-            .any(|gap| gap.code == "image_update_pending")
+        && !d.coverage["issues"].as_array().is_some_and(|issues| {
+            issues
+                .iter()
+                .any(|issue| issue["code"] == "image_update_pending")
+        })
         && d.coverage["imageInventory"]["expectedPages"].as_u64() == Some(image_slots)
         && inventory
             .iter()
@@ -179,7 +180,7 @@ pub(crate) async fn frozen_in(
         serde_json::from_value(row.get("input_manifest")).map_err(|_| FoundationError::Invalid)?;
     let now = linggan_evidence::research_dossier::cutoff_in(tx, None).await?;
     let current = load(tx, row.get("domain_ref"), saved.snapshot.work_ref, &now).await?;
-    if current.snapshot.material_snapshot_identity != saved.snapshot.material_snapshot_identity
+    if !saved_sources_available(&saved, &current)
         || saved.hash() != row.get::<String, _>("input_hash")
         || current.coverage["materialReadiness"]["state"] != "ready"
     {
@@ -189,6 +190,63 @@ pub(crate) async fn frozen_in(
     }
     Ok(saved)
 }
+/// Reconstruct the frozen source at its original material time. The dossier applies
+/// current source restrictions even for historical reads, so replacement alone does
+/// not hide a saved result, while a subsequent withdrawal still does.
+pub(crate) async fn saved_result_available(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    cutoff: &str,
+    saved: &Packet,
+    current: &Packet,
+) -> Result<bool, FoundationError> {
+    let within_cutoff: bool = sqlx::query_scalar("SELECT $1::timestamptz <= $2::timestamptz")
+        .bind(&saved.snapshot.material_as_of)
+        .bind(cutoff)
+        .fetch_one(&mut **tx)
+        .await?;
+    if !within_cutoff {
+        return Ok(false);
+    }
+    if saved_sources_available(saved, current) {
+        return Ok(true);
+    }
+    let historical =
+        linggan_evidence::research_dossier::read_in(tx, &[work], &saved.snapshot.material_as_of)
+            .await?
+            .remove(&work);
+    match historical {
+        Some(dossier) => Ok(saved_sources_available(
+            saved,
+            &from_dossier(dossier, &saved.snapshot.material_as_of)?,
+        )),
+        None => Ok(false),
+    }
+}
+
+pub(crate) fn saved_sources_available(saved: &Packet, current: &Packet) -> bool {
+    let saved_text = serde_json::to_value(&saved.snapshot.texts).unwrap_or(Value::Null);
+    let current_text = serde_json::to_value(&current.snapshot.texts).unwrap_or(Value::Null);
+    let texts_available = saved_text
+        .as_array()
+        .zip(current_text.as_array())
+        .is_some_and(|(old, new)| {
+            old.iter()
+                .all(|source| new.iter().any(|candidate| candidate == source))
+        });
+    let images_available = saved.snapshot.images.iter().all(|image| {
+        current.snapshot.images.iter().any(|candidate| {
+            image.source_ref == candidate.source_ref
+                && image.source_version == candidate.source_version
+                && image.blob_sha256 == candidate.blob_sha256
+        })
+    });
+    saved.snapshot.work_ref == current.snapshot.work_ref
+        && (!saved.snapshot.texts.is_empty() || !saved.snapshot.images.is_empty())
+        && texts_available
+        && images_available
+}
+
 /// Images referenced by a frozen v2 manifest, in manifest order.
 pub(crate) async fn images_for_manifest_in(
     tx: &mut Transaction<'_, Postgres>,
@@ -277,13 +335,17 @@ mod tests {
         dossier.coverage["issues"] = json!([{"code":"image_update_pending"}]);
         let pending = from_dossier(dossier, "2026-11-16T00:00:00Z").unwrap();
         assert_eq!(pending.snapshot.coverage_mode, "partial");
-        assert_eq!(pending.coverage["materialReadiness"]["state"], "blocked");
-        assert!(
-            pending.coverage["materialReadiness"]["gaps"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .any(|gap| gap["code"] == "image_update_pending")
-        );
+        assert_eq!(pending.coverage["materialReadiness"]["state"], "ready");
+        assert!(saved_sources_available(&complete, &pending));
+        let mut extra = pending.clone();
+        extra.snapshot.images.push(ImageSource {
+            citation_id: "image_2".into(),
+            source_ref: Uuid::new_v4(),
+            source_version: "new".into(),
+            blob_sha256: "b".repeat(64),
+        });
+        assert!(saved_sources_available(&complete, &extra));
+        extra.snapshot.images.clear();
+        assert!(!saved_sources_available(&complete, &extra));
     }
 }

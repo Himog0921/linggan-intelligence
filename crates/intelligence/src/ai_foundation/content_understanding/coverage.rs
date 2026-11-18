@@ -11,14 +11,14 @@ pub(crate) async fn scope_coverage(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let rows = sqlx::query("SELECT work_ref,material_snapshot_identity FROM linggan_content_understanding_saved_core WHERE work_ref=ANY($1) AND method_version=$2 AND result IS NOT NULL AND created_at<=$3::timestamptz")
+    let rows = sqlx::query("SELECT core.work_ref,core.material_snapshot_identity,request.input_manifest FROM linggan_content_understanding_saved_core core JOIN linggan_content_understanding_request request USING(request_ref) WHERE core.work_ref=ANY($1) AND core.method_version=$2 AND core.result IS NOT NULL AND core.created_at<=$3::timestamptz")
         .bind(works).bind(METHOD).bind(cutoff).fetch_all(&mut *tx).await?;
-    let mut identities = BTreeMap::<Uuid, Vec<String>>::new();
+    let mut identities = BTreeMap::<Uuid, Vec<(String, Option<source::Packet>)>>::new();
     for row in rows {
-        identities
-            .entry(row.get("work_ref"))
-            .or_default()
-            .push(row.get("material_snapshot_identity"));
+        identities.entry(row.get("work_ref")).or_default().push((
+            row.get("material_snapshot_identity"),
+            serde_json::from_value(row.get("input_manifest")).ok(),
+        ));
     }
     let existing: Vec<_> = identities.keys().copied().collect();
     let mut dossiers =
@@ -30,11 +30,26 @@ pub(crate) async fn scope_coverage(
             None => "unknown",
             Some(dossier) => {
                 let packet = source::from_dossier(dossier, cutoff)?;
-                classify(
-                    &saved,
-                    &packet.snapshot.material_snapshot_identity,
-                    packet.coverage["materialReadiness"]["state"] == "ready",
-                )
+                let mut available = false;
+                for (identity, previous) in &saved {
+                    if qualified(
+                        identity,
+                        &packet.snapshot.material_snapshot_identity,
+                        packet.coverage["materialReadiness"]["state"] == "ready",
+                    ) {
+                        available = true;
+                        break;
+                    }
+                    if let Some(prior) = previous {
+                        if source::saved_result_available(&mut tx, work, cutoff, prior, &packet)
+                            .await?
+                        {
+                            available = true;
+                            break;
+                        }
+                    }
+                }
+                if available { "available" } else { "stale" }
             }
         };
         counts[state] = json!(counts[state].as_u64().unwrap_or(0) + 1);
@@ -43,6 +58,7 @@ pub(crate) async fn scope_coverage(
     Ok(counts)
 }
 
+#[cfg(test)]
 fn classify(saved: &[String], current: &str, ready: bool) -> &'static str {
     if saved
         .iter()

@@ -90,7 +90,24 @@ async fn read_source_note(
     current: &WorkResourceCurrent,
     as_of: &str,
 ) -> Result<Value, sqlx::Error> {
-    let row: Option<(Option<String>, Uuid)> = sqlx::query_as(
+    // The accepted detail record belongs to this work and carries the page that was opened.
+    // Discovery may instead point to an author profile, so prefer the actual detail URL.
+    let details: Vec<(Option<String>, Uuid)> = sqlx::query_as(
+        "SELECT record.value->'payload'->>'url',detail.material_ref \
+         FROM linggan_material_content_detail detail \
+         JOIN linggan_runtime_capture_package package USING(package_ref) \
+         CROSS JOIN LATERAL jsonb_array_elements(package.payload->'records') WITH ORDINALITY record(value,ordinality) \
+         WHERE detail.content_public_ref=$1 AND package.accepted_at<=$2::timestamptz \
+           AND detail.created_at<=$2::timestamptz AND record.ordinality=detail.record_ordinal+1 \
+         ORDER BY package.accepted_at DESC,detail.created_at DESC,detail.material_ref DESC",
+    ).bind(current.public_ref).bind(as_of).fetch_all(&mut **tx).await?;
+    for (url, source_ref) in details {
+        let Some(url) = url else { continue };
+        if current.platform == "xhs" && xhs_note_link_matches(&url, &current.content_external_id) {
+            return Ok(serde_json::json!({"url":url,"state":"KNOWN","sourceRef":source_ref}));
+        }
+    }
+    let rows: Vec<(Option<String>, Uuid)> = sqlx::query_as(
         "SELECT record.value->'payload'->>'url',finding.material_ref \
          FROM linggan_material_discovery_finding finding \
          JOIN linggan_runtime_capture_package package USING(package_ref) \
@@ -99,43 +116,52 @@ async fn read_source_note(
            AND finding.created_at<=$2::timestamptz AND linggan_opportunity_observed_at(finding.observed_at) IS NOT NULL AND record.ordinality=finding.record_ordinal+1 \
            AND record.value->'sourceObject'->>'platform'=$3 \
            AND record.value->'sourceObject'->>'externalId'=$4 \
-         ORDER BY package.accepted_at DESC,finding.created_at DESC,finding.material_ref DESC LIMIT 1",
+         ORDER BY package.accepted_at DESC,finding.created_at DESC,finding.material_ref DESC",
     ).bind(current.public_ref).bind(as_of).bind(&current.platform).bind(&current.content_external_id)
-        .fetch_optional(&mut **tx).await?;
-    let source_ref = row.as_ref().map(|(_, source)| *source);
-    let url = row.and_then(|(url, _)| url).filter(|url| {
-        current.platform == "xhs" && xhs_note_link_matches(url, &current.content_external_id)
+        .fetch_all(&mut **tx).await?;
+    let found = rows.into_iter().find_map(|(url, source_ref)| {
+        url.filter(|url| {
+            current.platform == "xhs" && xhs_note_link_matches(url, &current.content_external_id)
+        })
+        .map(|url| (url, source_ref))
     });
+    let source_ref = found.as_ref().map(|(_, source)| *source);
+    let url = found.map(|(url, _)| url);
     Ok(
         serde_json::json!({"url":url,"state":if url.is_some(){"KNOWN"}else{"UNKNOWN"},"sourceRef":source_ref}),
     )
 }
 
 fn xhs_note_link_matches(url: &str, id: &str) -> bool {
-    let Some((base, query)) = url.split_once('?') else {
-        return false;
-    };
-    ["explore", "search_result", "discovery/item"]
-        .iter()
-        .any(|path| base == format!("https://www.xiaohongshu.com/{path}/{id}"))
-        && query.split('&').any(|part| {
-            part.strip_prefix("xsec_token=")
-                .is_some_and(|token| !token.is_empty())
-        })
+    let base = url.split('?').next().unwrap_or("");
+    let profile_link = base
+        .strip_prefix("https://www.xiaohongshu.com/user/profile/")
+        .and_then(|path| path.split_once('/'))
+        .is_some_and(|(author, note)| !author.is_empty() && note == id);
+    profile_link
+        || ["explore", "search_result", "discovery/item"]
+            .iter()
+            .any(|path| base == format!("https://www.xiaohongshu.com/{path}/{id}"))
 }
 
 #[cfg(test)]
 mod source_note_tests {
     use super::xhs_note_link_matches;
     #[test]
-    fn navigation_requires_the_exact_note_and_a_real_signed_link() {
+    fn navigation_requires_the_exact_note_and_a_real_platform_link() {
         assert!(xhs_note_link_matches(
             "https://www.xiaohongshu.com/search_result/note?xsec_token=synthetic&xsec_source=pc_search",
             "note"
         ));
-        for url in [
+        assert!(xhs_note_link_matches(
             "https://www.xiaohongshu.com/explore/note",
-            "https://www.xiaohongshu.com/explore/note?xsec_token=",
+            "note"
+        ));
+        assert!(xhs_note_link_matches(
+            "https://www.xiaohongshu.com/user/profile/author/note?xsec_token=synthetic",
+            "note"
+        ));
+        for url in [
             "https://www.xiaohongshu.com/explore/other?xsec_token=synthetic",
             "https://www.xiaohongshu.com.evil.test/explore/note?xsec_token=synthetic",
         ] {

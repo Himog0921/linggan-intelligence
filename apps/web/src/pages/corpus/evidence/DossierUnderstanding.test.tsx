@@ -48,6 +48,14 @@ it('展示同一Card的摘要与知识单元，图片方法保留，打开与刷
   expect(init.method ?? 'GET').toBe('GET');
   expect(screen.queryByRole('button', { name: /分析|生成/ })).not.toBeInTheDocument();
 });
+it('新任务运行时继续展示旧结果与任务状态', async () => {
+  const analysis = { ...saved(), sourceChanged: true };
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ contract: 'content-understanding.read.v1', workRef: work, analysis, materialReadiness: ready, currentRequest: { state: 'running', failureCode: null } }), { headers: { 'Content-Type': 'application/json' } })));
+  mount();
+  expect(await screen.findByText('来自同一张卡片的整篇摘要。')).toBeVisible();
+  expect(screen.getByText('正在基于新材料理解。')).toBeVisible();
+  expect(screen.getByText('材料已有更新，以下是基于先前材料生成的结果。')).toBeVisible();
+});
 it('未分析时不虚构结果，原始材料仍可完整阅读', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => response(null)));
   render(<QueryClientProvider client={newClient()}><DossierDocument payload={payload} domain="domain" active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/></QueryClientProvider>);
@@ -121,7 +129,7 @@ it('材料待补齐时逐项显示原因，原始材料仍可阅读，打开不�
   }));
   vi.stubGlobal('fetch', fetch);
   render(<QueryClientProvider client={newClient()}><DossierDocument payload={payload} domain="domain" active busy={false} refreshFailed={false} onRefresh={() => {}} onUnavailable={() => {}}/></QueryClientProvider>);
-  expect(await screen.findByText('材料待补齐')).toBeVisible();
+  expect(await screen.findByText('暂无可分析材料')).toBeVisible();
   expect(screen.getByText('第 2 张正文原图尚未取得。')).toBeVisible();
   expect(screen.getByText('正文图片总数尚未确认。')).toBeVisible();
   expect(screen.getByText('合成原始材料保持完整。')).toBeVisible();
@@ -137,7 +145,7 @@ it('视频材料准备中显示口播与画面处理原因，不假装缺失或�
     ],
   })));
   mount();
-  expect(await screen.findByText('材料准备中')).toBeVisible();
+  expect(await screen.findByText('材料处理中')).toBeVisible();
   expect(screen.getByText('口播转写正在处理。')).toBeVisible();
   expect(screen.getByText('正在处理口播。')).toBeVisible();
   expect(screen.queryByText(videoScope)).not.toBeInTheDocument();
@@ -146,7 +154,7 @@ it('视频材料准备中显示口播与画面处理原因，不假装缺失或�
 it('材料已准备仍明确尚无理解结果，空缺口不加不适用或无字警告', async () => {
   vi.stubGlobal('fetch', vi.fn(async () => response(null)));
   mount();
-  expect(await screen.findByText('材料已准备')).toBeVisible();
+  expect(await screen.findByText('可进行内容理解')).toBeVisible();
   expect(screen.getByText(/这篇尚无当前材料的理解结果/)).toBeVisible();
   expect(screen.queryByRole('list')).not.toBeInTheDocument();
   expect(screen.queryByText(/不适用|没有文字|OCR/)).not.toBeInTheDocument();

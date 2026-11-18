@@ -1059,7 +1059,7 @@ pub(crate) fn material_item(
             "overview": {
                 "fields": [
                     {"field":"title","state":current.title_state,"sourceRefs":title_source_refs},
-                    {"field":"body","state":current.body_state,"value":null,"accessLevel":"RESTRICTED_SOURCE","sourceRefs":body_source_refs},
+                    {"field":"body","state":current.body_state,"hasText":if current.body_state == "KNOWN" { Some(current.body_text.as_deref().is_some_and(|text| !text.trim().is_empty())) } else { None },"value":null,"accessLevel":"RESTRICTED_SOURCE","sourceRefs":body_source_refs},
                     {"field":"creator","state":current.creator_display_name_state,"sourceRefs":creator_source_refs}
                 ]
             },
