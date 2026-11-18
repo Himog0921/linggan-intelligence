@@ -36,7 +36,7 @@ export interface DossierMaterial {
   pageSource?: { basis: 'same_verified_bytes'; sourceRef: string; sourceVersion: string; slotKey: string };
   sourceState: SourceState; sourceRef: string | null; sourceVersion: string | null;
   currentRevisionRef: string | null; originalUrl: string | null;
-  reading: { generatedBy: ReadingProducer; adoption: Adoption; verification: Verification; ruleVersion: string; review: ReadingReviewSummary | null } | null;
+  reading: { generatedBy: ReadingProducer; adoption: Adoption; verification: Verification; ruleVersion: string; formattedOrigin?: boolean; review: ReadingReviewSummary | null } | null;
   processing?: { state: 'pending' | 'running' | 'completed' | 'failed' | 'cancelled' | 'invalidated'; reason: string | null } | null;
   blocks: DossierBlock[]; issues: DossierIssue[];
 }

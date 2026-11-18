@@ -34,6 +34,7 @@ pub struct Endpoint {
     pub url: String,
     pub requests: Arc<Mutex<Vec<Value>>>,
     pub payment_required: Arc<AtomicBool>,
+    pub include_image_readings: Arc<AtomicBool>,
     stop: watch::Sender<bool>,
     task: JoinHandle<()>,
 }
@@ -45,6 +46,8 @@ impl Endpoint {
         let recorded = requests.clone();
         let payment_required = Arc::new(AtomicBool::new(false));
         let reject = payment_required.clone();
+        let include_image_readings = Arc::new(AtomicBool::new(false));
+        let image_mode = include_image_readings.clone();
         let (stop, mut stopping) = watch::channel(false);
         let task = tokio::spawn(async move {
             let mut clients = JoinSet::new();
@@ -55,6 +58,7 @@ impl Endpoint {
                         let (mut socket, _) = socket.unwrap();
                         let recorded = recorded.clone();
                         let reject = reject.clone();
+                        let image_mode = image_mode.clone();
                         clients.spawn(async move {
                             // Reuse the bounded reader, synthetic-credential check and SSE
                             // response (including its actual wire model: synthetic-writing).
@@ -112,7 +116,13 @@ impl Endpoint {
                                             assert_eq!(content[2 + index * 2]["type"], "image_url");
                                         }
                                     }
-                                    draft(&packet)
+                                    let mut output = draft(&packet);
+                                    if image_mode.load(Ordering::SeqCst) {
+                                        output["imageReadings"] = json!(images.iter().map(|image| json!({
+                                            "inputCitationId":image["citationId"], "state":"readable", "text":"合成图片文字"
+                                        })).collect::<Vec<_>>());
+                                    }
+                                    output
                                 } else {
                                     assert!(packet["material"]["sources"].is_array());
                                     note_response::response(&packet)
@@ -136,6 +146,7 @@ impl Endpoint {
             url,
             requests,
             payment_required,
+            include_image_readings,
             stop,
             task,
         }

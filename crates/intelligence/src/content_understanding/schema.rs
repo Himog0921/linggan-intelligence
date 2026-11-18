@@ -110,8 +110,8 @@ pub fn response_schema() -> Value {
         "imageContributions":{"type":"array","items":contribution},
         "imageReadings":{"type":"array","items":object(json!({
             "inputCitationId":vision["inputCitationId"],
-            "state":{"type":"string","enum":["readable","no_text","unreadable"]},
-            "text":{"type":"string","maxLength":30000,"description":"按原图阅读顺序整理本图所有可辨认的实质文字，连起排版断行，允许修正有上下文依据的错字，保留标题、段落、清单和表格。跨页句子保持本图范围，可用上下文补明显掉字。看不清的字标［无法辨认］。保留作者观点、数字和限定条件，不写摘要，不添加新观点。readable 填整理后的 Markdown；no_text 表示确实没有文字，unreadable 表示有字但无法读取，两者的 text 为空。"}
+            "state":{"type":"string","enum":["readable","no_text","unreadable","deferred"]},
+            "text":{"type":"string","maxLength":30000,"description":"按原图阅读顺序整理本图所有可辨认的实质文字，连起排版断行，保留标题、段落、清单和表格。只记录本图可辨认文字，不根据上下文补字、改字或推断看不清的内容；看不清的字标［无法辨认］。跨页句子只记录本图可见部分。保留作者观点、数字和限定条件，不写摘要，不添加新观点。readable 填整理后的 Markdown；no_text 表示确实没有文字，unreadable 表示有字但无法读取，deferred 表示本次输出预算不足以完整记录该图；这些状态的 text 均为空。"}
         })),"description":"material.images 中的每张图片正好一条。无图时返回空数组。"} ,
         "evidenceCandidates":object(json!({
             "text":array(object(text_fields),0,64),
@@ -136,4 +136,45 @@ pub fn response_schema() -> Value {
             "quote":"先核对顺序，再摆出材料"}],"vision":[]}
     }]);
     schema
+}
+
+/// Reserve most of the model output for the core and reasoning; do not emit a
+/// truncated image reading as though it were complete. This is an instruction
+/// and schema bound, not a guarantee that a provider respects its token cap.
+pub(crate) fn response_schema_for_images(image_count: usize, output_tokens: usize) -> Value {
+    let mut schema = response_schema();
+    if image_count > 0 {
+        let max_chars = (output_tokens / 3 / image_count).min(3_000);
+        let text = &mut schema["properties"]["imageReadings"]["items"]["properties"]["text"];
+        text["maxLength"] = json!(max_chars);
+        let original = text["description"].as_str().unwrap_or("").to_owned();
+        text["description"] = json!(format!(
+            "{original} 本次每图最多 {max_chars} 字；若无法完整记录整图，不得截断冒充完整，请用 deferred 且 text 为空。"
+        ));
+        schema["description"] = json!(
+            "先完成 core、evidenceCandidates 和 imageContributions，最后填写 imageReadings；每张图片遵守本次字数上限，放不下时标 deferred，必须结束为完整 JSON。"
+        );
+    }
+    schema
+}
+
+#[cfg(test)]
+mod image_budget_tests {
+    use super::*;
+    #[test]
+    fn multi_image_readings_leave_output_room_and_can_be_deferred() {
+        for image_count in [1, 4, 13] {
+            let schema = response_schema_for_images(image_count, 40_000);
+            let text = &schema["properties"]["imageReadings"]["items"]["properties"]["text"];
+            let max_chars = text["maxLength"].as_u64().unwrap() as usize;
+            assert!(max_chars * image_count <= 40_000 / 3);
+            assert!(text["description"].as_str().unwrap().contains("deferred"));
+            assert!(
+                schema["properties"]["imageReadings"]["items"]["properties"]["state"]["enum"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&json!("deferred"))
+            );
+        }
+    }
 }
