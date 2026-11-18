@@ -49,6 +49,16 @@ it('展开之前不读取任何设置', () => {
   mount();
   expect(calls).toHaveLength(0);
 });
+it('打开时聚焦对话框，关闭后将焦点还给入口', async () => {
+  route();
+  mount();
+  const trigger = screen.getByRole('button', { name: '深入研究' });
+  trigger.focus();
+  fireEvent.click(trigger);
+  expect(screen.getByRole('button', { name: '关闭深入研究' })).toHaveFocus();
+  fireEvent.click(screen.getByRole('button', { name: '关闭深入研究' }));
+  expect(trigger).toHaveFocus();
+});
 it('展开后显示默认子问题与材料清单，图片数取预览且不超过上限', async () => {
   route();
   mount();

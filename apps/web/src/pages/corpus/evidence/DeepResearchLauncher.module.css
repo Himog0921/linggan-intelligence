@@ -1,12 +1,6 @@
 .trigger { min-height: var(--lgi-space-8); }
 
-.modalLayer {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
-  display: grid;
-  place-items: center;
-  padding: var(--lgi-space-4);
+.modal::backdrop {
   background: color-mix(in srgb, var(--lgi-ink) 58%, transparent);
 }
 
@@ -15,6 +9,8 @@
   width: min(680px, calc(100vw - var(--lgi-space-8)));
   max-height: calc(100dvh - var(--lgi-space-8));
   overflow: auto;
+  padding: 0;
+  border: 1px solid var(--lgi-ink);
   background: var(--lgi-canvas);
   color: var(--lgi-ink);
   box-shadow: 8px 8px 0 var(--lgi-ink);

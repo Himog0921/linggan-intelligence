@@ -56,30 +56,26 @@ WHERE item_control.item_ref = item.item_ref
 
 UPDATE linggan_ai_batch_control AS batch_control
 SET cancel_requested = true,
-    revision = batch_control.revision
-        + CASE WHEN NOT batch_control.cancel_requested OR batch_control.stop_reason IS NULL THEN 1 ELSE 0 END,
-    stop_reason = COALESCE(batch_control.stop_reason, 'task_retired'),
-    state = CASE
-        WHEN NOT EXISTS (
-            SELECT 1
-            FROM linggan_ai_batch_item AS item
-            JOIN linggan_ai_batch_item_control AS item_control USING (item_ref)
-            WHERE item.batch_ref = batch_control.batch_ref
-              AND item_control.state IN ('pending', 'running')
-        ) THEN 'cancelled'
-        ELSE 'open'
-    END,
-    finished_at = CASE
-        WHEN NOT EXISTS (
-            SELECT 1
-            FROM linggan_ai_batch_item AS item
-            JOIN linggan_ai_batch_item_control AS item_control USING (item_ref)
-            WHERE item.batch_ref = batch_control.batch_ref
-              AND item_control.state IN ('pending', 'running')
-        ) THEN scope_001_now()
-        ELSE NULL
-    END
+    revision = batch_control.revision + 1,
+    stop_reason = COALESCE(batch_control.stop_reason, 'task_retired')
 FROM linggan_ai_batch AS batch
 WHERE batch_control.batch_ref = batch.batch_ref
   AND batch.task_key = 'note_interpretation'
-  AND batch_control.state = 'open';
+  AND batch_control.state = 'open'
+  AND NOT batch_control.cancel_requested;
+
+-- Settle each completed round through the existing database contract. Unresolved
+-- invocations and running items remain open for the recovery path.
+DO $$
+DECLARE candidate uuid;
+BEGIN
+    FOR candidate IN
+        SELECT control.batch_ref FROM linggan_ai_batch_control AS control
+        JOIN linggan_ai_batch AS batch USING (batch_ref)
+        WHERE batch.task_key = 'note_interpretation' AND control.state = 'open'
+    LOOP
+        WHILE linggan_ai_evaluate_next_round(candidate) IS NOT NULL LOOP
+            NULL;
+        END LOOP;
+    END LOOP;
+END $$;

@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useRef, useState } from 'react';
+import { ModalDialog } from '../../../corpus/ModalDialog';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ApiError, isRecord } from '../../../shared/api';
 import { InlineNotice } from '../../../shared/InlineNotice';
@@ -59,18 +59,6 @@ export function DeepResearchLauncher({ domain, work, coreRef, onSubmitted }: {
     setMessage(null);
     if (!setup) void load();
   };
-  useEffect(() => {
-    if (!open) return;
-    const dismiss = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        setOpen(false);
-      }
-    };
-    document.addEventListener('keydown', dismiss);
-    return () => document.removeEventListener('keydown', dismiss);
-  }, [open]);
-
   const current = setup?.modes.find(item => item.researchMode === mode);
   const trimmed = questions.map(text => text.trim());
   const valid = trimmed.length >= 1 && trimmed.length <= MAX_QUESTIONS && trimmed.every(text => text !== '' && [...text].length <= MAX_QUESTION_LENGTH);
@@ -103,12 +91,11 @@ export function DeepResearchLauncher({ domain, work, coreRef, onSubmitted }: {
       <ActionButton variant="primary" className={styles.trigger} aria-expanded={open} onClick={toggle}>
         深入研究
       </ActionButton>
-      {open ? createPortal(
-        <div className={styles.modalLayer} onMouseDown={event => { if (event.target === event.currentTarget) setOpen(false); }}>
-          <section id="deep-research-dialog" className={styles.modal} role="dialog" aria-modal="true" aria-label="深入研究">
+      {open ? (
+          <ModalDialog labelledBy="deep-research-title" className={styles.modal} closeOnBackdrop onClose={() => setOpen(false)}>
             <header className={styles.modalHeader}>
-              <h2>深入研究</h2>
-              <button type="button" className={styles.close} aria-label="关闭深入研究" onClick={() => setOpen(false)}>×</button>
+              <h2 id="deep-research-title">深入研究</h2>
+              <button type="button" data-initial-focus className={styles.close} aria-label="关闭深入研究" onClick={() => setOpen(false)}>×</button>
             </header>
             <div className={styles.modalBody}>
               {loadError ? <InlineNotice tone="error" action={<ActionButton className={quiet} onClick={() => void load()}>重试</ActionButton>}>暂时无法读取深入研究的设置。</InlineNotice> : null}
@@ -142,9 +129,7 @@ export function DeepResearchLauncher({ domain, work, coreRef, onSubmitted }: {
               </> : null}
               {message ? <InlineNotice>{message}</InlineNotice> : null}
             </div>
-          </section>
-        </div>,
-        document.body,
+          </ModalDialog>
       ) : null}
     </>
   );

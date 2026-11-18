@@ -75,9 +75,8 @@ it('L1 材料已变化时不允许用旧 Core 发起 L2', async () => {
 
 it('复用当前 L1 Core 打开 L2 弹窗，提交后写入跨页签轮询信号', async () => {
   const { client, submitted } = mount(understanding().analysis);
-  const button = await screen.findByRole('button', { name: '深入研究' });
-  expect(button).toBeEnabled();
-  fireEvent.click(button);
+  await waitFor(() => expect(screen.getByRole('button', { name: '深入研究' })).toBeEnabled());
+  fireEvent.click(screen.getByRole('button', { name: '深入研究' }));
   expect(await screen.findByRole('dialog', { name: '深入研究' })).toBeVisible();
   fireEvent.click(await screen.findByRole('button', { name: '提交' }));
   await waitFor(() => expect(submitted).toHaveBeenCalledTimes(1));
