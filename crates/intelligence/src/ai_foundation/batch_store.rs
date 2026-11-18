@@ -185,8 +185,8 @@ impl BatchKind {
         }
         match task {
             TaskKey::ModelProbe => self == Self::Probe,
-            TaskKey::ContentUnderstanding
-            | TaskKey::ContentUnderstandingDeep
+            TaskKey::ContentUnderstanding => matches!(self, Self::Interactive | Self::Automatic),
+            TaskKey::ContentUnderstandingDeep
             | TaskKey::WorkComparison
             | TaskKey::CreatorResearch
             | TaskKey::CreatorAccountResearch

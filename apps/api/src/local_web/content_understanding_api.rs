@@ -19,6 +19,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
             get(deep_modes),
         )
         .route("/api/local/content-understanding", post(start))
+        .route(
+            "/api/local/content-understanding/automation",
+            get(automation_read).post(automation_change),
+        )
         .route("/api/local/content-understanding/deep", post(publish_deep))
         .route(
             "/api/local/content-understanding/deep/generate",
@@ -37,6 +41,26 @@ async fn publish_deep(
         return unavailable();
     };
     super::ai_settings::respond(owner::publish_deep(db, &request).await)
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct DomainQuery {
+    domain_ref: Uuid,
+}
+async fn automation_read(State(s): State<LocalWebState>, Query(q): Query<DomainQuery>) -> Response {
+    let LocalDatabaseState::Ready(db) = &s.database else {
+        return unavailable();
+    };
+    super::ai_settings::respond(owner::read_automation(db, q.domain_ref).await)
+}
+async fn automation_change(
+    State(s): State<LocalWebState>,
+    Json(request): Json<owner::AutomationChange>,
+) -> Response {
+    let LocalDatabaseState::Ready(db) = &s.database else {
+        return unavailable();
+    };
+    super::ai_settings::respond(owner::change_automation(db, &request).await)
 }
 async fn deep_modes() -> Json<serde_json::Value> {
     Json(owner::deep_modes())

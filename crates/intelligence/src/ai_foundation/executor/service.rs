@@ -109,6 +109,7 @@ async fn work_loop(
     let mut recovery = Instant::now();
     let mut automation_scan = Instant::now();
     let mut automation_cursor = None;
+    let mut understanding_cursor = None;
     loop {
         if drain.is_requested() && tasks.is_empty() {
             return failure.map_or(Ok(()), Err);
@@ -145,6 +146,9 @@ async fn work_loop(
                     // Queue production is isolated from execution: one bad source is not a drain request.
                     if let Err(error) = crate::ai_foundation::topic_research_automation::tick(db, &mut automation_cursor).await {
                         eprintln!("topic automation scan deferred: {error}");
+                    }
+                    if let Err(error) = crate::ai_foundation::content_understanding::automation_tick(db, &mut understanding_cursor).await {
+                        eprintln!("content understanding automation scan deferred: {error}");
                     }
                     automation_scan = Instant::now() + Duration::from_secs(5);
                 }
