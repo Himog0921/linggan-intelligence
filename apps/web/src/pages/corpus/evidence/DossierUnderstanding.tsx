@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ActionButton } from '../../../shared/ActionButton';
-import { DeepResearchLauncher } from './DeepResearchLauncher';
 import { isRecord, requestJson } from '../../../shared/api';
 import { parseMaterialReadiness } from './evidenceDecode';
 import { materialReadinessCopy } from './evidencePresent';
@@ -17,7 +16,7 @@ type DeepAnalysis = {
   coreBasis: null | { kind?: string }; question: string; methodVersion: string;
   findings: DeepFinding[]; materials: DeepMaterial[];
 };
-type Understanding = {
+export type Understanding = {
   materialReadiness: MaterialReadiness;
   currentRequest?: { state: string; failureCode: string | null };
   deepAnalyses?: DeepAnalysis[];
@@ -66,7 +65,7 @@ function readDeep(entries: unknown): DeepAnalysis[] | undefined {
   }
   return analyses;
 }
-async function read(domain: string, work: string, asOf: string, signal: AbortSignal): Promise<Understanding> {
+export async function readContentUnderstanding(domain: string, work: string, asOf: string, signal: AbortSignal): Promise<Understanding> {
   const value = await requestJson(`/api/local/content-understanding/latest?${new URLSearchParams({ domainRef: domain, workRef: work, asOf })}`, { signal });
   if (!isRecord(value) || value.contract !== 'content-understanding.read.v1' || value.workRef !== work) throw new Error('理解结果无法读取');
   const materialReadiness = parseMaterialReadiness(value.materialReadiness);
@@ -90,22 +89,46 @@ async function read(domain: string, work: string, asOf: string, signal: AbortSig
   } else if (analysis.state === 'succeeded') throw new Error('理解内容缺失');
   return { analysis: analysis as Understanding['analysis'], materialReadiness, currentRequest, deepAnalyses, deepEvidence };
 }
-export function DossierUnderstanding({ domain, work, revision, asOf, active }: { domain: string; work: string; revision: string; asOf: string; active: boolean }) {
-  // After a deep request is submitted the page watches for one more published result, for a bounded time.
-  const [waiting, setWaiting] = useState<null | { count: number; expired: boolean }>(null);
-  const watching = waiting !== null && !waiting.expired;
-  useEffect(() => {
-    if (!watching) return;
-    const timer = window.setTimeout(() => setWaiting(current => current && { ...current, expired: true }), 10 * 60 * 1000);
-    return () => window.clearTimeout(timer);
-  }, [watching]);
-  const query = useQuery({
-    queryKey: ['content-understanding', domain, work, revision, asOf],
-    queryFn: ({ signal }) => read(domain, work, asOf, signal), enabled: active, retry: false,
-    gcTime: 0, refetchOnWindowFocus: false,
-    refetchInterval: q => ['pending', 'running'].includes(q.state.data?.currentRequest?.state ?? q.state.data?.analysis?.state ?? '') ? 1500
-      : watching && (q.state.data?.deepAnalyses?.length ?? 0) <= waiting.count ? 4000 : false,
+
+export type DeepResearchWatch = { count: number; submittedAt: number };
+export const contentUnderstandingQueryKey = (domain: string, work: string, revision: string, asOf: string) =>
+  ['content-understanding', domain, work, revision, asOf] as const;
+export const deepResearchWatchKey = (domain: string, work: string) =>
+  ['content-understanding-deep-watch', domain, work] as const;
+
+export function useContentUnderstanding(domain: string, work: string, revision: string, asOf: string, active: boolean) {
+  return useQuery({
+    queryKey: contentUnderstandingQueryKey(domain, work, revision, asOf),
+    queryFn: ({ signal }) => readContentUnderstanding(domain, work, asOf, signal),
+    enabled: active,
+    retry: false,
+    gcTime: 0,
+    staleTime: 10_000,
+    refetchOnWindowFocus: false,
   });
+}
+
+export function DossierUnderstanding({ domain, work, revision, asOf, active }: { domain: string; work: string; revision: string; asOf: string; active: boolean }) {
+  const query = useContentUnderstanding(domain, work, revision, asOf, active);
+  // The header owns the L2 launch action. This shared cache signal lets the dossier
+  // poll for the published finding even when the launch happened from another tab.
+  const watchQuery = useQuery<DeepResearchWatch | null>({
+    queryKey: deepResearchWatchKey(domain, work),
+    queryFn: async () => null,
+    enabled: false,
+    initialData: null,
+    gcTime: 10 * 60 * 1000,
+  });
+  const waiting = watchQuery.data;
+  const [watchExpired, setWatchExpired] = useState(false);
+  useEffect(() => {
+    if (!waiting) { setWatchExpired(false); return; }
+    setWatchExpired(false);
+    const remaining = Math.max(0, 10 * 60 * 1000 - (Date.now() - waiting.submittedAt));
+    const timer = window.setTimeout(() => setWatchExpired(true), remaining);
+    return () => window.clearTimeout(timer);
+  }, [waiting?.submittedAt]);
+  const watching = waiting !== null && !watchExpired;
   const analysis = query.isError ? null : query.data?.analysis;
   const currentRequest = query.data?.currentRequest;
   const result = analysis?.result;
@@ -113,8 +136,7 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
   const deepEvidence = query.isError ? undefined : query.data?.deepEvidence;
   const materialReadiness = query.isError ? null : query.data?.materialReadiness;
   const readiness = materialReadinessCopy(materialReadiness);
-  const coreRef = result?.card.analysisRef;
-  const waitingExpired = waiting?.expired === true && (deepAnalyses?.length ?? 0) <= waiting.count;
+  const waitingExpired = waiting !== null && watchExpired && (deepAnalyses?.length ?? 0) <= waiting.count;
   return <section className={`${styles.section} ${styles.understanding}`} aria-label="整篇内容理解">
     <header className={styles.sectionIndex}><h2>作品概览</h2></header>
     <div className={styles.content}>
@@ -139,8 +161,7 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
             </section> : null;
           })}
         </div>
-        {coreRef ? <DeepResearchLauncher domain={domain} work={work} coreRef={coreRef}
-          onSubmitted={() => { setWaiting({ count: deepAnalyses?.length ?? 0, expired: false }); void query.refetch(); }}/> : null}
+        {watching && (deepAnalyses?.length ?? 0) <= (waiting?.count ?? 0) ? <p role="status">正在等待研究结果…</p> : null}
         {waitingExpired ? <p role="status">提交后一段时间内没有新的研究发现出现。可能仍在处理，也可能没有通过校验；稍后刷新页面再看。</p> : null}
         {deepAnalyses?.length ? <section className={styles.researchFindings}>
           <h3 className={styles.researchTitle}>研究发现</h3>
