@@ -133,9 +133,9 @@ try {
     );
     assert.equal(await side.getByRole('link', { name: /证据库/ }).getAttribute('aria-current'), 'page');
     assert.match(await page.getByLabel('切换当前观察领域').innerText(), /合成领域一/);
-    // 侧栏徽标：本次读取的作品数，悬停说明里是三个读数；读模型不给总数，页面不编造「共 N 个」。
+    // 侧栏徽标：本次读取的作品数，悬停说明里是四项取得篇数；读模型不给总数，页面不编造「共 N 个」。
     assert.equal((await page.locator('#ev-rail-count').innerText()).trim(), String(pageSize));
-    assert.match(await page.locator('#ev-rail-count').getAttribute('title'), /^本次读取 50 个作品 · 已留存评论 \d+ · 本地材料 \d+ · 部分或缺口 \d+$/);
+    assert.match(await page.locator('#ev-rail-count').getAttribute('title'), /^本次读取 50 个作品 · 标题已取得 \d+ 篇 · 正文已取得 \d+ 篇 · 媒体已取得 \d+ 篇 · 评论已取得 \d+ 篇$/);
     assert.equal(await page.getByText('只读本机材料投影／列表与详情不触发采集', { exact: true }).count(), 0);
     // 第一行的封面是真的受控本机图片（不是平台地址）。
     await page.waitForFunction(() => {

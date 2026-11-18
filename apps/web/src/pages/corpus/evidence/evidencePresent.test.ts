@@ -101,15 +101,21 @@ describe('材料完整度（N02）', () => {
     expect(segmentTitle(summary.segments[4]!)).toBe('转录：本作品不适用，不计入分母');
   });
 
-  it('侧栏徽标的读数：本次读取 N 个作品，不编造总数；未知评论数写「未知」', () => {
-    const items = [item({ lanes: { comments: ['SEARCHABLE', 1500] }, media: { images: 1, cover: 'available' } }, 1), item({ lanes: { media_bytes: 'FAILED' } }, 2)];
-    const facts = readoutFacts(items);
-    expect(facts.works).toBe(2);
-    expect(facts.commentsRetained).toBe(1500);
-    expect(facts.localObjects).toBeGreaterThan(0);
-    expect(facts.gaps).toBeGreaterThanOrEqual(1);
-    expect(readoutTitle(facts)).toMatch(/^本次读取 2 个作品 · 已留存评论 1\.5K · 本地材料 \d+ · 部分或缺口 \d+$/);
-    expect(readoutTitle(readoutFacts([item()]))).toContain('已留存评论 未知');
+  it('侧栏统计本次读取作品的四项已取得数量，不把未知或空值当成已取得', () => {
+    const withMaterials = { ...item({ media: { images: 1 } }, 1), bodyState: 'KNOWN', bodyHasText: true, retainedComments: 3 };
+    const unknown = { ...item({}, 2), materialTitleState: 'UNKNOWN', bodyState: 'KNOWN', bodyHasText: false, retainedComments: null };
+    const facts = readoutFacts([withMaterials, unknown]);
+    expect(facts).toEqual({ works: 2, titles: 1, bodies: 1, media: 1, comments: 1 });
+    expect(readoutTitle(facts)).toBe('本次读取 2 个作品 · 标题已取得 1 篇 · 正文已取得 1 篇 · 媒体已取得 1 篇 · 评论已取得 1 篇');
+    const empty = { ...unknown, bodyState: 'UNKNOWN', bodyHasText: null, retainedComments: 0 };
+    const differentWorks = [
+      { ...empty, materialTitleState: 'KNOWN' },
+      { ...empty, bodyState: 'KNOWN', bodyHasText: true },
+      { ...empty, media: withMaterials.media },
+      { ...empty, retainedComments: 2 },
+    ];
+    expect(readoutFacts(differentWorks)).toEqual({ works: 4, titles: 1, bodies: 1, media: 1, comments: 1 });
+    expect(readoutFacts([])).toEqual({ works: 0, titles: 0, bodies: 0, media: 0, comments: 0 });
   });
 });
 

@@ -75,7 +75,7 @@ describe('打开页面', () => {
     const badge = document.getElementById('ev-rail-count')!;
     expect(badge).toHaveTextContent('3');
     expect(badge).not.toHaveAttribute('hidden');
-    expect(badge.title).toMatch(/^本次读取 3 个作品 · 已留存评论 .* · 本地材料 \d+ · 部分或缺口 \d+$/);
+    expect(badge.title).toMatch(/^本次读取 3 个作品 · 标题已取得 \d+ 篇 · 正文已取得 \d+ 篇 · 媒体已取得 \d+ 篇 · 评论已取得 \d+ 篇$/);
   });
 
   it('保留页面标题和语料导航，不展示实现说明页脚', async () => {
