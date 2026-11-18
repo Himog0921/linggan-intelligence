@@ -27,10 +27,34 @@ pub(crate) async fn load(
     if !allowed {
         return Err(FoundationError::NotFound);
     }
-    let d = linggan_evidence::research_dossier::read_in(tx, &[work], cutoff)
+    let mut d = linggan_evidence::research_dossier::read_in(tx, &[work], cutoff)
         .await?
         .remove(&work)
         .ok_or(FoundationError::NotFound)?;
+    // Video identity can be present in the accepted detail even when collection
+    // did not produce a video media slot. Consult the captured type as of cutoff.
+    let source_type: Option<String> = sqlx::query_scalar(
+        "SELECT source_type FROM (SELECT CASE WHEN raw.payload->>'type' = 'video'
+            OR (jsonb_typeof(raw.payload->'video') = 'string' AND btrim(raw.payload->>'video') <> '')
+            OR (jsonb_typeof(raw.payload->'videoDownloadUrl') = 'string' AND btrim(raw.payload->>'videoDownloadUrl') <> '')
+            OR (jsonb_typeof(raw.payload->'videoPlayUrl') = 'string' AND btrim(raw.payload->>'videoPlayUrl') <> '')
+            OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(raw.payload->'videoStreams')='array' THEN raw.payload->'videoStreams' ELSE '[]'::jsonb END) stream WHERE jsonb_typeof(stream->'url')='string' AND btrim(stream->>'url') <> '')
+          THEN 'video' ELSE 'normal' END AS source_type, d.created_at, d.material_ref
+         FROM linggan_material_content_detail d
+         JOIN linggan_runtime_capture_package p USING(package_ref)
+         JOIN linggan_runtime_submission_receipt r ON r.attempt_id=p.attempt_id
+         JOIN linggan_runtime_record_disposition x ON x.package_ref=d.package_ref AND x.record_ordinal=d.record_ordinal
+         CROSS JOIN LATERAL (SELECT p.payload->'records'->d.record_ordinal->'payload' AS payload) raw
+         WHERE d.content_public_ref=$1 AND d.created_at<=$2::timestamptz AND p.accepted_at<=$2::timestamptz
+          AND r.material_admission='ACCEPTED' AND x.disposition<>'quarantined'
+          AND (raw.payload->>'type' IN ('video','normal') OR jsonb_typeof(raw.payload->'video')='string'
+            OR jsonb_typeof(raw.payload->'videoDownloadUrl')='string' OR jsonb_typeof(raw.payload->'videoPlayUrl')='string'
+            OR jsonb_typeof(raw.payload->'videoStreams')='array')
+         ) typed ORDER BY (source_type='video') DESC, created_at DESC, material_ref DESC LIMIT 1",
+    ).bind(work).bind(cutoff).fetch_optional(&mut **tx).await?;
+    if source_type.as_deref() == Some("video") {
+        d.note["sourceContentType"] = json!("video");
+    }
     from_dossier(d, cutoff)
 }
 
@@ -117,7 +141,7 @@ pub(super) fn from_dossier(
         .iter()
         .filter(|s| s["component"] == "image")
         .count() as u64;
-    let readiness = linggan_evidence::research_dossier::material_readiness(&d);
+    let readiness = linggan_evidence::research_dossier::l1_material_readiness(&d);
     let complete = readiness.kind != linggan_evidence::research_dossier::NoteKind::Video
         && !d.coverage["issues"].as_array().is_some_and(|issues| {
             issues
@@ -180,7 +204,8 @@ pub(crate) async fn frozen_in(
         serde_json::from_value(row.get("input_manifest")).map_err(|_| FoundationError::Invalid)?;
     let now = linggan_evidence::research_dossier::cutoff_in(tx, None).await?;
     let current = load(tx, row.get("domain_ref"), saved.snapshot.work_ref, &now).await?;
-    if !saved_sources_available(&saved, &current)
+    if !video_transcripts_included(&saved, &current)
+        || !saved_sources_available(&saved, &current)
         || saved.hash() != row.get::<String, _>("input_hash")
         || current.coverage["materialReadiness"]["state"] != "ready"
     {
@@ -190,6 +215,32 @@ pub(crate) async fn frozen_in(
     }
     Ok(saved)
 }
+// A queued request must contain the current video transcripts in its frozen
+// input. A transcript added after enqueueing cannot repair that old payload.
+fn video_transcripts_included(saved: &Packet, current: &Packet) -> bool {
+    if current.coverage["materialReadiness"]["kind"] != "video" {
+        return true;
+    }
+    let video_slots: Vec<_> = saved
+        .inventory
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|slot| slot["purpose"] == "video" && slot["component"] == "motion")
+        .collect();
+    !video_slots.is_empty()
+        && video_slots.iter().all(|slot| {
+            let source_ref = slot["sourceRef"]
+                .as_str()
+                .and_then(|value| value.parse::<Uuid>().ok());
+            saved.snapshot.texts.iter().any(|text| {
+                text.kind == "transcript"
+                    && !text.text.trim().is_empty()
+                    && Some(text.source_ref) == source_ref
+            })
+        })
+}
+
 /// Reconstruct the frozen source at its original material time. The dossier applies
 /// current source restrictions even for historical reads, so replacement alone does
 /// not hide a saved result, while a subsequent withdrawal still does.
@@ -302,6 +353,54 @@ pub(crate) async fn images_in(
 mod tests {
     use super::*;
     use linggan_evidence::research_dossier::ResearchDossier;
+
+    #[test]
+    fn queued_video_input_must_include_current_transcript() {
+        let mut saved = Packet {
+            snapshot: Snapshot {
+                work_ref: Uuid::new_v4(),
+                material_snapshot_identity: "old".into(),
+                material_as_of: "2026-11-17T00:00:00Z".into(),
+                included_kinds: vec![],
+                coverage_mode: "partial".into(),
+                texts: vec![],
+                images: vec![],
+            },
+            inventory: json!([]),
+            coverage: json!({"materialReadiness":{"kind":"video"}}),
+        };
+        let source_ref = Uuid::new_v4();
+        saved.inventory = json!([{"purpose":"video","component":"motion","sourceRef":source_ref}]);
+        let mut current = saved.clone();
+        current.snapshot.texts.push(TextSource {
+            citation_id: "speech".into(),
+            source_ref,
+            source_version: "1".into(),
+            start: 0,
+            text: "完整转录".into(),
+            kind: "transcript".into(),
+            speaker: "author".into(),
+            structure: json!({}),
+            issues: vec![],
+        });
+        assert!(!video_transcripts_included(&saved, &current));
+        saved.snapshot.texts = current.snapshot.texts.clone();
+        assert!(video_transcripts_included(&saved, &current));
+        current.snapshot.texts.push(TextSource {
+            citation_id: "additional".into(),
+            source_ref,
+            source_version: "1".into(),
+            start: 0,
+            text: "调用期间新加入的转录".into(),
+            kind: "transcript".into(),
+            speaker: "author".into(),
+            structure: json!({}),
+            issues: vec![],
+        });
+        assert!(video_transcripts_included(&saved, &current));
+        saved.snapshot.texts[0].source_ref = Uuid::new_v4();
+        assert!(!video_transcripts_included(&saved, &current));
+    }
 
     #[test]
     fn pending_image_update_cannot_be_reported_as_complete() {

@@ -18,7 +18,9 @@ mod readiness;
 mod reading;
 mod render;
 mod selection;
-pub use readiness::{MaterialReadiness, MaterialState, NoteKind, material_readiness};
+pub use readiness::{
+    MaterialReadiness, MaterialState, NoteKind, l1_material_readiness, material_readiness,
+};
 pub use reading::ordered_refs;
 pub(crate) use reading::unit_text;
 pub use render::{context_sources, markdown, model_context, render_materials};
