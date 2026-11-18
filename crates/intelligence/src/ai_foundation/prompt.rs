@@ -43,8 +43,7 @@ pub struct PromptActivation {
 fn connected(task: TaskKey) -> bool {
     matches!(
         task,
-        TaskKey::NoteInterpretation
-            | TaskKey::ContentUnderstanding
+        TaskKey::ContentUnderstanding
             | TaskKey::ContentUnderstandingDeep
             | TaskKey::OcrRecognition
             | TaskKey::WritingLegacy
