@@ -30,7 +30,7 @@ pub(super) fn assemble(
             .push(issue(
                 "image_update_pending",
                 "image_update_pending",
-                "新图集尚未全部取得，当前显示已取得的版本。",
+                "新图集尚未全部取得。",
                 "source_refresh",
             ));
     }
