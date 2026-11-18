@@ -62,17 +62,17 @@
 - [产品冻结基线](product/research-dossier-v1.md)：当前能力、30+9 篇验收汇总、已知缺口与后续变更准入。产品 V1.0，机器接口仍为 `research-dossier.v2`。
 - [唯一底稿合同](data-contracts/research-dossier.md)：字段与读取行为；不另建平行材料合同。
 
-## 2026-11-03 · AI 中期质量离线候选
+## 2026-11-03 · AI 中期质量历史实验（2026-11-18 退役）
 
 - [切片 A 结果规范与接口设计](data-contracts/ai-midterm-quality-002/slice-a-result-and-api.md)：N02保存/展示/下游投影，四接口与两表；切片A本地候选已实现，未部署。
 
-- [单篇分析流程与最小实施方案](plans/active/single-note-analysis-minimal-implementation.md)：两层结果规范、代码衔接、首版切片和验收；当前本地实施与冻结回执。
+- [单篇分析历史实施方案](archive/plans/single-note-analysis-minimal-implementation.md)：旧两层结果规范、实现与隔离验收记录；2026-11-18 已由 L1 Content Card + L2 深入研究替代。
 
-- [单篇分析 Skill 与离线试验](data-contracts/ai-midterm-quality-002/README.md)：当前 v0.3 方法、输出及标签规则已冻结；旧候选与B0/B1为历史实验，未部署。
+- [单篇分析 Skill 与离线试验](data-contracts/ai-midterm-quality-002/README.md)：历史 v0.3 方法、输出及标签规则；独立单篇分析已退役，文件仅作历史参考。
 - [切片 A 完整链路核对与下一步验收](audits/slice-a-frozen-chain-readiness-2026-11-04.md)：本地提交保存、输入来源与配置绑定差距、真实产品闭环的实施顺序。
-- [单篇分析冻结基线](data-contracts/ai-midterm-quality-002/frozen-baseline.md)：note-analysis-baseline-20261104，停止继续调优，保留已知缺口；未部署。
-- [单篇分析 Skill 方法](data-contracts/ai-midterm-quality-002/skill/linggan-note-analysis/SKILL.md)：阅读、分析、打标和使用判断。
-- [单篇输出与标签规则](data-contracts/ai-midterm-quality-002/skill/linggan-note-analysis/references/output-guide.md)：输出内容、证据类型与下游边界。
+- [单篇分析冻结基线](data-contracts/ai-midterm-quality-002/frozen-baseline.md)：note-analysis-baseline-20261104，历史冻结版本；独立单篇分析已退役。
+- [单篇分析 Skill 方法](data-contracts/ai-midterm-quality-002/skill/linggan-note-analysis/SKILL.md)：历史阅读、分析、打标和使用判断方法；不再用于生产任务。
+- [单篇输出与标签规则](data-contracts/ai-midterm-quality-002/skill/linggan-note-analysis/references/output-guide.md)：历史输出内容、证据类型与下游边界。
 - [主题容量与评论配对离线复现](audits/ai-midterm-offline-validation-2026-11-03.md)：原函数执行结果、合成替身范围及未证明部分。
 
 ## 2026-10-28 · 评论目录与概览回归
