@@ -39,7 +39,7 @@ function mount() {
   return render(<DeepResearchLauncher domain="domain" work="work" coreRef="core" onSubmitted={onSubmitted}/>);
 }
 async function open() {
-  fireEvent.click(screen.getByRole('button', { name: '发起深入研究' }));
+  fireEvent.click(screen.getByRole('button', { name: '深入研究' }));
   await screen.findByLabelText('子问题 1');
 }
 afterEach(() => { cleanup(); vi.unstubAllGlobals(); onSubmitted.mockReset(); });
@@ -70,7 +70,7 @@ it('提交时按顺序重编子问题编号，并带上当前任务配置与核�
     subQuestions: [{ id: 'Q1', text: '正文按什么顺序展开？' }], taskConfigRef: 'config-1', taskRevision: 3,
   });
   expect(typeof body.commandRef).toBe('string');
-  expect(await screen.findByText(/已提交/)).toBeVisible();
+  expect(screen.queryByRole('dialog', { name: '深入研究' })).not.toBeInTheDocument();
 });
 it('空子问题与超过四个时不能提交或添加', async () => {
   route();
