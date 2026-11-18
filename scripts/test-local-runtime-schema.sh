@@ -203,5 +203,5 @@ result.update(populatedUpgradePassed=True,baselineHead='0195_observation_transit
     scope='fresh, repeat and populated synthetic upgrade; no production data or external calls')
 with open(path,'w') as f:json.dump(result,f,ensure_ascii=False,indent=2);f.write('\n')
 PY
-  echo 'Populated content-understanding upgrade and repeat passed; prior rows unchanged, new tasks disabled and no work dispatched.'
+  echo 'Populated upgrade and repeat passed; scoped rows preserved, retired task settled, new tasks disabled and no work dispatched.'
 fi

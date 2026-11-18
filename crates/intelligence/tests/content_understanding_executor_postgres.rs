@@ -12,9 +12,7 @@ mod wire;
 
 use base64::Engine as _;
 use linggan_intelligence::{
-    ai_foundation::{
-        TaskKey, content_understanding as owner, store::FoundationError,
-    },
+    ai_foundation::{TaskKey, content_understanding as owner, store::FoundationError},
     content_understanding::METHOD,
     pi_adapter::PiAdapter,
 };
@@ -184,7 +182,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
     let missing_inventory = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
     assert_eq!(
         missing_inventory["canStart"], true,
-        "available body is enough without proving a complete media inventory"
+        "available body is enough without proving a complete media inventory: {missing_inventory}"
     );
     // Acquire through media-slot submission and admit_media_blob, not a forged material projection
     // or OCR result. No image reading is preseeded: the production path must send these bytes.
@@ -869,7 +867,7 @@ async fn optional_image_reading_failure_keeps_l1_and_invocation_receipt() {
                 .execute(db.pool()).await.unwrap();
         }
         let preview = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
-        assert_eq!(preview["canStart"], true);
+        assert_eq!(preview["canStart"], true, "{preview}");
         let receipt = owner::start(&db, &start_from(&preview, work))
             .await
             .unwrap();
