@@ -517,5 +517,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0225_content_understanding_deep_outcome','c995e0e64983c8c70984aa62cc5c934d820a425bcaa4951672277a03624934e3');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0226_ai_connection_billing_pause','26687d1eaf49ad905f1f9f843467bd36c86516670e3e16052c9539cc08068ca6');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0227_opportunity_exclusion_precedence','8bebb429d541fef62f63481c57ae6668bf7b4e8bd5464d9700781c39fadc571f');\n",
-    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0229_retire_note_interpretation','38895285d77cd2c6fa494d03385cb5ef3da46e02630eab6ffd8a0952aa9a51c9');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0229_retire_note_interpretation','50ce7182e68007ae5a76b9f3dde8322b9a2f5ec75a3c031c5922c46b5e801909');\n",
 );
