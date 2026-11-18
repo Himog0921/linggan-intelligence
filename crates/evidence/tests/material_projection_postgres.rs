@@ -266,6 +266,25 @@ async fn source_navigation_uses_latest_accepted_exact_note_link_without_reviving
 
 #[tokio::test]
 #[ignore = "requires the isolated PostgreSQL 16 proof harness"]
+async fn detail_url_is_used_when_discovery_points_to_profile() {
+    let db = proof_database("detail_source_navigation").await;
+    let id = "0123456789abcdef01234567";
+    let url = format!("https://www.xiaohongshu.com/explore/{id}?xsec_token=synthetic");
+    submit_package(&db, "content_detail", serde_json::json!({"contentExternalId":id}),
+        serde_json::json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":id},"payload":{"title":"Example","bodyText":"Example","url":url}})).await;
+    let work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+    )
+    .bind(id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let item = read_work_resource(&db, work).await.unwrap().unwrap();
+    assert_eq!(item.inspector["sourceNote"]["url"], url);
+}
+
+#[tokio::test]
+#[ignore = "requires the isolated PostgreSQL 16 proof harness"]
 async fn blank_platform_title_falls_back_only_to_an_accepted_front_cover_headline() {
     let database = proof_database("material_cover_ocr_title_fallback").await;
     let content_id = "note-cover-ocr-fallback";

@@ -128,13 +128,9 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         .bind(Uuid::new_v4()).bind(work).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
     let missing_inventory = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
     assert_eq!(
-        missing_inventory["canStart"], false,
-        "a title and body cannot stand in for an unconfirmed media inventory"
+        missing_inventory["canStart"], true,
+        "available body is enough without proving a complete media inventory"
     );
-    assert!(matches!(
-        owner::start(&db, &start_from(&missing_inventory, work)).await,
-        Err(FoundationError::AdmissionDenied(_))
-    ));
     // Acquire through media-slot submission and admit_media_blob, not a forged material projection
     // or OCR result. No image reading is preseeded: the production path must send these bytes.
     let image_bytes = base64::engine::general_purpose::STANDARD
@@ -151,18 +147,17 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     let held_path = image_path.with_extension("held");
     std::fs::rename(&image_path, &held_path).unwrap();
     let unreadable = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
-    assert_eq!(unreadable["canStart"], false);
     assert_eq!(
-        unreadable["materialReadiness"]["gaps"][0]["code"],
-        "original_unavailable"
+        unreadable["canStart"], true,
+        "a missing image does not block an available body"
+    );
+    assert_eq!(
+        unreadable["imageCount"], 0,
+        "unreadable image is not sent to the model"
     );
     assert!(matches!(
         owner::start(&db, &start_from(&image_ready, work)).await,
         Err(FoundationError::Conflict | FoundationError::AdmissionDenied(_))
-    ));
-    assert!(matches!(
-        owner::start(&db, &start_from(&unreadable, work)).await,
-        Err(FoundationError::AdmissionDenied(_))
     ));
     std::fs::rename(held_path, &image_path).unwrap();
     saved_video_and_cover(&db, work, &image_bytes, &image_sha).await;
@@ -203,19 +198,19 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
             .unwrap()
             .contains("不包含视频画面")
     );
-    let stopped = owner::start(&db, &start_from(&video_ready, work))
-        .await
-        .unwrap();
-    let video_sha = canonical
-        .media_inventory
-        .iter()
-        .find(|s| s["purpose"] == "video")
-        .unwrap()["blobSha256"]
-        .as_str()
-        .unwrap();
+    let stopped = owner::start(&db, &start_from(&video_ready, work)).await.unwrap();
+    // The original video is not in the frozen model input. Its loss must not
+    // make the queued task disappear from the current status.
+    let video_sha = canonical.media_inventory.iter().find(|s| s["purpose"] == "video").unwrap()["blobSha256"].as_str().unwrap();
     let video_path = media_root.join(format!("blobs/{video_sha}.mp4"));
     let held_video = video_path.with_extension("held");
     std::fs::rename(&video_path, &held_video).unwrap();
+    let during = owner::latest(&db, dossier::DOMAIN, work, None).await.unwrap();
+    assert_eq!(during["currentRequest"]["state"], "pending");
+    std::fs::rename(&held_video, &video_path).unwrap();
+    // Removing a frozen image prevents sending bytes that the model input used.
+    let held_image = image_path.with_extension("held");
+    std::fs::rename(&image_path, &held_image).unwrap();
     let stop_drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
     let stop_worker = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
         db.clone(),
@@ -227,15 +222,15 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     ));
     tokio::time::timeout(Duration::from_secs(30), async {
         loop {
-            let current = owner::latest(&db, dossier::DOMAIN, work, None)
-                .await
-                .unwrap();
-            if current["analysis"]["state"] == "skipped" {
-                assert_eq!(
-                    current["analysis"]["requestRef"],
-                    json!(stopped.request_ref)
-                );
-                assert_eq!(current["analysis"]["failureCode"], "ai_source_unavailable");
+            let (state, failure): (String, Option<String>) = sqlx::query_as(
+                "SELECT state,failure_code FROM linggan_ai_batch_item_control WHERE item_ref=$1",
+            )
+            .bind(stopped.item_ref)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+            if state == "skipped" {
+                assert_eq!(failure.as_deref(), Some("ai_source_unavailable"));
                 break;
             }
             assert!(!stop_worker.is_finished());
@@ -243,7 +238,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         }
     })
     .await
-    .expect("missing video must stop before dispatch, not defer forever");
+    .expect("missing frozen image must stop before dispatch, not defer forever");
     stop_drain.request();
     stop_worker.await.unwrap().unwrap();
     let dispatched: i64 = sqlx::query_scalar(
@@ -253,7 +248,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     .await
     .unwrap();
     assert_eq!(dispatched, 0);
-    std::fs::rename(held_video, &video_path).unwrap();
+    std::fs::rename(held_image, &image_path).unwrap();
 
     let old_preview = legacy::preview(&db, dossier::DOMAIN, work, Scope::Note)
         .await
@@ -406,6 +401,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
             "itemRef",
             "requestRef",
             "result",
+            "sourceChanged",
             "state"
         ]
     );
@@ -515,13 +511,15 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     .await;
     let changed = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
     assert_ne!(changed["inputHash"], preview["inputHash"]);
-    assert!(
-        owner::latest(&db, dossier::DOMAIN, work, None)
-            .await
-            .unwrap()["analysis"]
-            .is_null(),
-        "a Core for previous material must not appear as current"
+    let previous = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        previous["analysis"]["requestRef"],
+        json!(receipt.request_ref)
     );
+    assert_eq!(previous["analysis"]["sourceChanged"], true);
+    assert_eq!(previous["analysis"]["result"], saved["analysis"]["result"]);
     assert_eq!(
         owner::latest(&db, dossier::DOMAIN, work, Some(&canonical.as_of))
             .await
@@ -533,18 +531,19 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         owner::latest(&db, foreign_domain, work, Some(&canonical.as_of)).await,
         Err(FoundationError::NotFound)
     ));
-    assert!(
-        owner::latest(
-            &db,
-            dossier::DOMAIN,
-            work,
-            Some(changed["knowledgeCutoff"].as_str().unwrap())
-        )
-        .await
-        .unwrap()["analysis"]
-            .is_null(),
-        "the new dossier cutoff cannot receive the old Core"
+    let old_at_new_cutoff = owner::latest(
+        &db,
+        dossier::DOMAIN,
+        work,
+        Some(changed["knowledgeCutoff"].as_str().unwrap()),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        old_at_new_cutoff["analysis"]["requestRef"],
+        json!(receipt.request_ref)
     );
+    assert_eq!(old_at_new_cutoff["analysis"]["sourceChanged"], true);
     assert!(matches!(
         owner::start(&db, &start_from(&preview, work)).await,
         Err(FoundationError::Conflict)
@@ -665,7 +664,8 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     let before = owner::latest(&db, dossier::DOMAIN, work, None)
         .await
         .unwrap();
-    assert_eq!(before["analysis"]["state"], "failed");
+    assert_eq!(before["analysis"]["state"], "succeeded");
+    assert_eq!(before["currentRequest"]["state"], "failed");
     let count_sql = "SELECT count(*) FROM linggan_model_invocation";
     let calls: i64 = sqlx::query_scalar(count_sql)
         .fetch_one(db.pool())
@@ -748,6 +748,13 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         calls
     );
     prove_billing_pause(&db, work, &model, &endpoint, adapter).await;
+    // A later withdrawal must hide results based on those bytes, including
+    // results recovered from an older material snapshot.
+    linggan_evidence::record_blob_disposition(&db, &image_sha,
+        linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
+        "synthetic-proof", "synthetic withdrawal").await.unwrap();
+    let after_withdrawal = owner::latest(&db, dossier::DOMAIN, work, None).await.unwrap();
+    assert!(after_withdrawal["analysis"]["result"].is_null());
     endpoint.finish().await;
 }
 

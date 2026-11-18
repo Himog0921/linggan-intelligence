@@ -71,6 +71,10 @@ async fn dead_controls_never_return_results_by_construction() {
         .find(|item| item["display"]["title"] == "合成关键词 两天前发布")
         .expect("recent work is listed");
     assert_eq!(recent["display"]["publishedAtState"], "KNOWN", "{recent}");
+    assert_eq!(recent["materialAvailability"]["bodyState"], "KNOWN");
+    assert_eq!(recent["materialAvailability"]["bodyHasText"], true);
+    assert_eq!(recent["materialAvailability"]["retainedComments"], 0);
+    assert!(recent.get("inspector").is_none());
     let uri = format!("{base}&q=合成关键词");
     let reply = get(&app, &uri).await;
     probe("search with text", &reply, &uri);

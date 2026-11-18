@@ -4,7 +4,7 @@ import type { PanelContext } from './ReadingPanel';
 import { commentCollectionRows } from './observationRecords';
 import {
   limitationCopy,
-  materialSummary,
+  materialAvailability,
   momentText,
   purposeLabel,
   stateMeta,
@@ -32,11 +32,8 @@ function receiptReading(receipt: Receipt | null): string {
   return `${total} · ${returned} · ${truncated}`;
 }
 
-function materialReading(item: Pick<WorkItem, 'media' | 'lanes'>): string {
-  const applicable = materialSummary(item).segments.filter(segment => segment.applicable);
-  if (applicable.length === 0) return '本作品没有适用材料通道';
-  if (applicable.every(segment => segment.state === 'UNKNOWN')) return `本次未返回材料状态（${applicable.length} 项）`;
-  return applicable.map(segment => `${segment.label}：${stateMeta(segment.state)[0]}`).join('；');
+function materialReading(item: WorkItem): string {
+  return materialAvailability(item).join('；');
 }
 
 function localMaterials(context: PanelContext): string {

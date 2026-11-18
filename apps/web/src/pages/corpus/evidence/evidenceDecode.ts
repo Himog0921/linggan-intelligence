@@ -157,11 +157,21 @@ export function parseWorkItem(item: Json): WorkItem {
   const context = optObj(item, 'collectionContext') ?? {};
   const summary = optObj(item, 'summary') ?? {};
   const usage = optObj(item, 'domainUsage');
+  const inspector = optObj(item, 'inspector');
+  const fields = records(optObj(inspector ?? {}, 'overview')?.fields);
+  const title = fields.find(field => field.field === 'title');
+  const body = fields.find(field => field.field === 'body');
+  const commentReceipt = optObj(inspector ?? {}, 'commentsReceipt');
+  const availability = optObj(item, 'materialAvailability');
   return {
     ref: str(identity, 'publicRef'),
     platform: str(identity, 'platform'),
     detailUrl: optStr(item, 'detailUrl'),
     display: parseDisplay(optObj(item, 'display')),
+    materialTitleState: title ? stateOf(title, 'state') : availability ? stateOf(availability, 'titleState') : UNKNOWN,
+    bodyState: body ? stateOf(body, 'state') : availability ? stateOf(availability, 'bodyState') : UNKNOWN,
+    bodyHasText: body ? optBool(body, 'hasText') : availability ? optBool(availability, 'bodyHasText') : null,
+    retainedComments: commentReceipt ? optNum(commentReceipt, 'total') : availability ? optNum(availability, 'retainedComments') : null,
     context: {
       authorIdentityMatchState: stateOf(context, 'authorIdentityMatchState'),
       targetKind: optStr(context, 'targetKind'),

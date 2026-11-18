@@ -7,7 +7,7 @@ import type { CurrentMetric, DetailField, Engagement, Fragment, LaneSummary, Lis
 
 export function materialReadinessCopy(readiness: MaterialReadiness | null | undefined) {
   if (!readiness) return null;
-  const label = { ready: '材料已准备', preparing: '材料准备中', blocked: '材料待补齐' }[readiness.state];
+  const label = { ready: '可进行内容理解', preparing: '材料处理中', blocked: '暂无可分析材料' }[readiness.state];
   return { label, title: [label, ...readiness.gaps.map(gap => gap.message)].join('；') };
 }
 
@@ -475,4 +475,18 @@ export function receiptRows(receipt: Receipt | null): FactRowData[] {
     ['本次返回', number(receipt?.returned ?? null), receipt?.returned === null || receipt === null ? 'UNKNOWN' : null],
     ['是否截断', receipt?.truncated === true ? '是，可继续读取' : receipt?.truncated === false ? '否' : '当前未知'],
   ];
+}
+
+/** Facts about material obtained, independent of collection completeness and L1 readiness. */
+export function materialAvailability(item: WorkItem): string[] {
+  const title = item.materialTitleState === 'KNOWN' ? '已取得' : '未知';
+  const body = item.bodyState !== 'KNOWN' ? '未知' : item.bodyHasText === true ? '已取得' : item.bodyHasText === false ? '来源为空' : '已观察';
+  const media = item.media.localObjectCount > 0 ? '已取得' : '未知';
+  const comments = item.retainedComments !== null && item.retainedComments > 0
+    ? `已取得 ${item.retainedComments} 条` : '未知';
+  return [`标题 ${title}`, `正文 ${body}`, `媒体 ${media}`, `评论 ${comments}`];
+}
+
+export function compactAvailability(lines: string[]): string {
+  return lines.map(line => line.replace(/ 已取得(?: \d+ 条)?$/, '✓').replace(' 未知', '?').replace(' 来源为空', '空').replace(' 已观察', '已观察')).join(' ');
 }

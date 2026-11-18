@@ -478,7 +478,36 @@ pub(super) async fn compose_json(
                 .pointer("/identity/publicRef")
                 .and_then(Value::as_str)
                 .map(str::to_owned);
+            let title_state = item
+                .pointer("/inspector/overview/fields")
+                .and_then(Value::as_array)
+                .and_then(|fields| fields.iter().find(|field| field["field"] == "title"))
+                .and_then(|field| field.get("state"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let body_state = item
+                .pointer("/inspector/overview/fields")
+                .and_then(Value::as_array)
+                .and_then(|fields| fields.iter().find(|field| field["field"] == "body"))
+                .and_then(|field| field.get("state"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let body_has_text = item
+                .pointer("/inspector/overview/fields")
+                .and_then(Value::as_array)
+                .and_then(|fields| fields.iter().find(|field| field["field"] == "body"))
+                .and_then(|field| field.get("hasText"))
+                .cloned()
+                .unwrap_or(Value::Null);
+            let retained_comments = item
+                .pointer("/inspector/commentsReceipt/total")
+                .cloned()
+                .unwrap_or(Value::Null);
             if let Some(object) = item.as_object_mut() {
+                object.insert(
+                    "materialAvailability".to_owned(),
+                    json!({"titleState":title_state,"bodyState":body_state,"bodyHasText":body_has_text,"retainedComments":retained_comments}),
+                );
                 object.remove("inspector");
                 object.insert(
                     "detailUrl".to_owned(),

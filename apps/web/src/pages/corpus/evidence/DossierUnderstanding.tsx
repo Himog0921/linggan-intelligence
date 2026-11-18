@@ -19,9 +19,10 @@ type DeepAnalysis = {
 };
 type Understanding = {
   materialReadiness: MaterialReadiness;
+  currentRequest?: { state: string; failureCode: string | null };
   deepAnalyses?: DeepAnalysis[];
   deepEvidence?: Record<string, string[]>;
-  analysis: null | { state: string; failureCode: string | null; result: null | {
+  analysis: null | { state: string; sourceChanged?: boolean; failureCode: string | null; result: null | {
     card: { analysisRef?: string; core: { summary: { text: string }; knowledgeUnits: Unit[] } };
   } };
 };
@@ -69,8 +70,9 @@ async function read(domain: string, work: string, asOf: string, signal: AbortSig
   const value = await requestJson(`/api/local/content-understanding/latest?${new URLSearchParams({ domainRef: domain, workRef: work, asOf })}`, { signal });
   if (!isRecord(value) || value.contract !== 'content-understanding.read.v1' || value.workRef !== work) throw new Error('理解结果无法读取');
   const materialReadiness = parseMaterialReadiness(value.materialReadiness);
+  const currentRequest = isRecord(value.currentRequest) && typeof value.currentRequest.state === 'string' ? { state: value.currentRequest.state, failureCode: typeof value.currentRequest.failureCode === 'string' ? value.currentRequest.failureCode : null } : undefined;
   const analysis = value.analysis;
-  if (analysis === null) return { analysis: null, materialReadiness };
+  if (analysis === null) return { analysis: null, materialReadiness, currentRequest };
   if (!isRecord(analysis) || !['pending', 'running', 'succeeded', 'failed', 'skipped', 'cancelled'].includes(String(analysis.state))) throw new Error('理解状态无法读取');
   let deepAnalyses: DeepAnalysis[] | undefined;
   let deepEvidence: Record<string, string[]> | undefined;
@@ -86,7 +88,7 @@ async function read(domain: string, work: string, asOf: string, signal: AbortSig
       return excerpts.length ? [[item.id, excerpts]] : [];
     }));
   } else if (analysis.state === 'succeeded') throw new Error('理解内容缺失');
-  return { analysis: analysis as Understanding['analysis'], materialReadiness, deepAnalyses, deepEvidence };
+  return { analysis: analysis as Understanding['analysis'], materialReadiness, currentRequest, deepAnalyses, deepEvidence };
 }
 export function DossierUnderstanding({ domain, work, revision, asOf, active }: { domain: string; work: string; revision: string; asOf: string; active: boolean }) {
   // After a deep request is submitted the page watches for one more published result, for a bounded time.
@@ -101,10 +103,11 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
     queryKey: ['content-understanding', domain, work, revision, asOf],
     queryFn: ({ signal }) => read(domain, work, asOf, signal), enabled: active, retry: false,
     gcTime: 0, refetchOnWindowFocus: false,
-    refetchInterval: q => ['pending', 'running'].includes(q.state.data?.analysis?.state ?? '') ? 1500
+    refetchInterval: q => ['pending', 'running'].includes(q.state.data?.currentRequest?.state ?? q.state.data?.analysis?.state ?? '') ? 1500
       : watching && (q.state.data?.deepAnalyses?.length ?? 0) <= waiting.count ? 4000 : false,
   });
   const analysis = query.isError ? null : query.data?.analysis;
+  const currentRequest = query.data?.currentRequest;
   const result = analysis?.result;
   const deepAnalyses = query.isError ? undefined : query.data?.deepAnalyses;
   const deepEvidence = query.isError ? undefined : query.data?.deepEvidence;
@@ -123,7 +126,9 @@ export function DossierUnderstanding({ domain, work, revision, asOf, active }: {
       </> : null}
       {!query.isPending && !query.isError && !analysis ? <p>这篇尚无当前材料的理解结果，以下保留原始材料。</p> : null}
       {analysis && !result ? <p role="status">{analysis.state === 'pending' ? '等待理解处理。' : analysis.state === 'running' ? '正在理解这篇内容。' : analysis.failureCode === 'ai_dispatch_unknown' ? '本次处理结果尚未确认，以下仍可阅读原始材料。' : analysis.state === 'cancelled' ? '本次理解已取消，原始材料不受影响。' : '本次理解未完成，原始材料不受影响。'}</p> : null}
+      {result && currentRequest ? <p role="status">{currentRequest.state === 'pending' ? '新的理解任务正在等待处理。' : currentRequest.state === 'running' ? '正在基于新材料理解。' : '新的理解任务未完成。'}</p> : null}
       {result ? <>
+        {analysis?.sourceChanged ? <p role="status">材料已有更新，以下是基于先前材料生成的结果。</p> : null}
         <p className={`${styles.paragraph} ${styles.summary}`}>{result.card.core.summary.text}</p>
         <div className={styles.understandingGroups}>
           {GROUPS.map(([type, title]) => {
