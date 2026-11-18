@@ -171,14 +171,10 @@ if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-foundation" || "${1:-}"
     echo "AI-GEN1 release handshake and patrol ownership proof passed"
     exit 0
   fi
-  if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-service" ]]; then
+  if [[ "${1:-}" == "--note-analysis" ]]; then
     cargo_proof -p linggan-intelligence --test note_analysis_contract --locked -- --nocapture
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test note_analysis_executor_postgres --locked -- --ignored --nocapture
-    cargo_proof -p linggan-api --bin linggan-api local_web::note_analysis_api_tests:: --locked -- --ignored --nocapture
-    if [[ "${1:-}" == "--note-analysis" ]]; then
-      echo "Single-note analysis contracts, queue persistence and HTTP proof passed"
-      exit 0
-    fi
+    echo "Retired single-note analysis compatibility proof passed"
+    exit 0
   fi
   if [[ "${1:-}" == "--ai-service" ]]; then
     cargo_proof -p linggan-intelligence --test content_understanding_executor_postgres --locked -- --exact full_schema_fixtures_record_the_actual_deep_v2_migration_digest --nocapture
