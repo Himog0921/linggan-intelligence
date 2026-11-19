@@ -1,3 +1,8 @@
+mod automation;
+pub use automation::{
+    Change as AutomationChange, Cursor as AutomationCursor, Setting as AutomationSetting,
+    change as change_automation, read as read_automation, tick as automation_tick,
+};
 mod core_revision;
 pub use core_revision::{CoreRevisionReceipt, ReviewedCore, publish_reviewed_core};
 mod coverage;
@@ -147,6 +152,13 @@ async fn lock_work_snapshot(
 }
 
 pub async fn start(db: &Database, r: &Start) -> Result<Receipt, FoundationError> {
+    start_with_kind(db, r, BatchKind::Interactive).await
+}
+pub(crate) async fn start_with_kind(
+    db: &Database,
+    r: &Start,
+    kind: BatchKind,
+) -> Result<Receipt, FoundationError> {
     if r.domain_ref.is_nil() || r.work_ref.is_nil() || r.command_ref.is_nil() || r.task_revision < 0
     {
         return Err(FoundationError::Invalid);
@@ -205,16 +217,9 @@ pub async fn start(db: &Database, r: &Start) -> Result<Receipt, FoundationError>
         },
     }];
     let hash = batch_store::input_hash(TASK, &inputs, false)?;
-    let batch = batch_store::insert_batch(
-        &mut c.tx,
-        r.command_ref,
-        TASK,
-        config,
-        BatchKind::Interactive,
-        &inputs,
-        &hash,
-    )
-    .await?;
+    let batch =
+        batch_store::insert_batch(&mut c.tx, r.command_ref, TASK, config, kind, &inputs, &hash)
+            .await?;
     let item: Uuid =
         sqlx::query_scalar("SELECT item_ref FROM linggan_ai_batch_item WHERE batch_ref=$1")
             .bind(batch)
