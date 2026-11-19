@@ -251,16 +251,6 @@ export function Inspector(props: InspectorProps) {
             </button>
           </div>
         )}
-        {work ? <div className={styles.researchAction}>
-          <InspectorResearchAction
-            key={`${domain}:${work.ref}`}
-            domain={domain}
-            work={work.ref}
-            revision={dossier?.revision}
-            asOf={dossier?.asOf}
-            onSubmitted={() => onTab('dossier')}
-          />
-        </div> : null}
         {work ? <div className={styles.workSummary}>
           {drawer ? originalLink : null}
           <h3 className={styles.workTitle} title={title} data-work-title>{title}</h3>
@@ -270,7 +260,17 @@ export function Inspector(props: InspectorProps) {
             <span className={styles.workPlatform}>{work.platform.toUpperCase()}</span>
             <span className={styles.workDate}>{publishedCopy(work.display, { compact: true, withFieldName: false })}</span>
           </div>
-          <Engagement engagement={work.display.engagement} />
+          <div className={styles.workActions}>
+            <Engagement engagement={work.display.engagement} />
+            <InspectorResearchAction
+              key={`${domain}:${work.ref}`}
+              domain={domain}
+              work={work.ref}
+              revision={dossier?.revision}
+              asOf={dossier?.asOf}
+              onSubmitted={() => onTab('dossier')}
+            />
+          </div>
         </div> : null}
         <div className={styles.state} role="status" data-empty={state === null}>
           {state ? (

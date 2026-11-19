@@ -38,14 +38,15 @@
   gap: calc(var(--lgi-space-1) * 1.5);
 }
 
-.researchAction {
+.workActions {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
   align-items: center;
-  min-height: var(--lgi-space-8);
-  margin-top: var(--lgi-space-1);
-  padding-bottom: var(--lgi-space-1);
+  justify-content: space-between;
+  gap: var(--lgi-space-2);
 }
+
+.workActions > [data-engagement-metrics] { margin-top: 0; min-width: 0; }
 
 .widths {
   display: flex;
