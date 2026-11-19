@@ -541,6 +541,7 @@ migrate() {
   apply_migration_once "0227_opportunity_exclusion_precedence" "$project_root/database/migrations/0227_opportunity_exclusion_precedence.sql"
   apply_migration_once "0228_content_understanding_automation" "$project_root/database/migrations/0228_content_understanding_automation.sql"
   apply_migration_once "0229_retire_note_interpretation" "$project_root/database/migrations/0229_retire_note_interpretation.sql"
+  apply_migration_once "0230_comment_understanding" "$project_root/database/migrations/0230_comment_understanding.sql"
 }
 
 case "$command_name" in

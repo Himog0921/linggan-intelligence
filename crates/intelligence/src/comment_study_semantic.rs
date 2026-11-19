@@ -21,7 +21,7 @@ struct SemanticOutput {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum SignalKind {
+pub enum SignalKind {
     Problem,
     Need,
     Belief,
@@ -34,7 +34,7 @@ enum SignalKind {
 }
 
 impl SignalKind {
-    fn as_str(&self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Problem => "problem",
             Self::Need => "need",
@@ -48,7 +48,7 @@ impl SignalKind {
         }
     }
 
-    fn has_problem_frame(&self) -> bool {
+    pub fn has_problem_frame(&self) -> bool {
         matches!(self, Self::Problem | Self::Need)
     }
 }

@@ -48,6 +48,7 @@ impl MaterialClass {
                     | TaskKey::CreatorResearch
                     | TaskKey::CreatorAccountResearch
                     | TaskKey::CommentStudy
+                    | TaskKey::CommentUnderstanding
                     | TaskKey::CommentProblemResolution
                     | TaskKey::CommentProblemPairReview
                     | TaskKey::TopicResearch
@@ -61,6 +62,7 @@ impl MaterialClass {
                 task,
                 TaskKey::NoteInterpretation
                     | TaskKey::CommentStudy
+                    | TaskKey::CommentUnderstanding
                     | TaskKey::CommentProblemResolution
                     | TaskKey::CommentProblemPairReview
                     | TaskKey::TopicResearch

@@ -9,6 +9,7 @@ pub mod catalog;
 pub mod comment_problem;
 pub mod comment_research;
 pub mod comment_research_overview;
+pub mod comment_understanding;
 pub mod control;
 pub mod control_store;
 mod creator_account_input;
@@ -67,6 +68,7 @@ pub enum TaskKey {
     OcrRecognition,
     WorkComparison,
     CommentStudy,
+    CommentUnderstanding,
     CommentProblemResolution,
     CommentProblemPairReview,
     TopicResearch,
@@ -96,6 +98,7 @@ impl TaskKey {
             Self::OcrRecognition => "ocr_recognition",
             Self::WorkComparison => "work_comparison",
             Self::CommentStudy => "comment_study",
+            Self::CommentUnderstanding => "comment_understanding",
             Self::CommentProblemResolution => "comment_problem_resolution",
             Self::CommentProblemPairReview => "comment_problem_pair_review",
             Self::TopicResearch => "topic_research",

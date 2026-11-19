@@ -38,6 +38,12 @@
 - [问题记录](opportunity/QUESTIONS.md)：Q-01 至 Q-15 已答复（评论平台时间采用日精度，见 D-034）。
 - [交接说明](opportunity/HANDOFF.md)：开工顺序、已合并交付的最终迁移编号、本地环境、采集目标与下一步（2026-11-13）。
 
+## 2026-11-19 · 评论研究 V2（评论理解）
+
+- [COMMENT-UNDERSTANDING-V2-001 实施计划](plans/active/comment-understanding-v2-001.md)：按作品分单元的批量理解、稳定需求身份、合并重定向、派生候选/正式状态、任务编排 T0–T4 与 G0–G6；G0、G1 已实施，未合并、未部署。
+- [交接：从 G2 继续](plans/active/comment-understanding-v2-001-handoff.md)：同一分支和 PR 上的剩余工作、已确认决定、落点与容易踩的坑、验证配方、必须回到 Mog 的事项。
+- [评论理解合同](data-contracts/comment-understanding.md)：`comment-understanding.v1`、研究单元表、接纳规则、需求当前状态视图（迁移 `0230`）；旧评论三阶段在切换前仍是运行流程。
+
 ## 2026-11-15 · L2 单篇深入研究 V0.3
 
 - [V0.3 研究方法与实施规范](plans/active/deep-content-research-v03.md)：三种研究模式共用一个 L2 Skill（附 Skill 正文草案）、子问题与逐条判定、材料清单与指纹、Core 版本绑定、召回与一致率评测；第 1.2 节 M1–M6 已由 Mog 确认；已实施（#598–#602、#604），Skill 包为草案待 Mog 评审，尚未开启 L2。

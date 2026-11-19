@@ -68,7 +68,8 @@ RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
   --test comment_study_inspection_postgres \
   --test comment_study_work_catalog_postgres \
   --test comment_study_p1_closure_postgres \
-  --test comment_study_start_postgres --locked \
+  --test comment_study_start_postgres \
+  --test comment_understanding_schema_postgres --locked \
   -- --ignored --nocapture --test-threads=1
 # Current three-stage workflow is exercised with opportunity disabled and an owned loopback provider.
 proof_support_dir="$(mktemp -d "${TMPDIR:-/tmp}/linggan-comment-study-support.XXXXXXXX")"
