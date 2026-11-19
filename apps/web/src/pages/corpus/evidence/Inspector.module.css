@@ -507,6 +507,14 @@
 .openOriginal { height:var(--lgi-space-8);min-height:var(--lgi-space-8);font-size:var(--lgi-type-label-size);box-shadow:none; }
 /* Desktop tool row: the same 32px frame as the width group and close button. */
 .openOriginalTool { height:var(--lgi-space-8);min-height:var(--lgi-space-8);padding:0 var(--lgi-space-3);font-size:var(--lgi-type-control-size);box-shadow:none; }
+/* Match the existing original-link frame, including the disabled state. */
+.researchAction > button {
+  width:calc(var(--lgi-space-8) * 3 + var(--lgi-space-1) / 2);
+  height:var(--lgi-space-8);
+  min-height:var(--lgi-space-8);
+  padding:0 var(--lgi-space-3);
+  font-size:var(--lgi-type-control-size);
+}
 
 .workByline [role='img'] { width:var(--lgi-space-6);height:var(--lgi-space-6); }
 .workPlatform { font-size:var(--lgi-type-label-size);line-height:var(--lgi-type-label-leading); }
