@@ -342,7 +342,7 @@ async fn comment_lineage_in(
             .await?;
         for row in rows {
             let request: Uuid = row.get("request_ref");
-            match crate::ai_foundation::comment_research::frozen_in(tx, request).await {
+            match crate::ai_foundation::comment_research::current_source_in(tx, request).await {
                 Ok(_) => {}
                 Err(crate::ai_foundation::store::FoundationError::AdmissionDenied(_)) => continue,
                 Err(crate::ai_foundation::store::FoundationError::Database(e)) => {

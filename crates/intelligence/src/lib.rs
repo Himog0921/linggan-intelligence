@@ -1,6 +1,9 @@
 //! Domain intelligence interfaces. Topic workspaces are explicit, versioned human research
 //! decisions over Work Resource identities; they never manufacture Evidence or source facts.
 
+#[cfg(test)]
+extern crate self as linggan_intelligence;
+
 pub mod ai_foundation;
 pub mod creator_discovery_analysis;
 pub mod creator_discovery_input;

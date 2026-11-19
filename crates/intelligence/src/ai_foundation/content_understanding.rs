@@ -469,4 +469,4 @@ pub(crate) async fn core_cards_in(
 
 #[cfg(test)]
 #[path = "content_understanding/topic_tests.rs"]
-mod topic_tests;
+pub(crate) mod topic_tests;

@@ -80,6 +80,11 @@ AI_FOUNDATION_PROOF_NODE="$(command -v node)" LINGGAN_OPPORTUNITY_CARD=disabled 
   OPPORTUNITY_TEST_MISSING_KEY=0 OPPORTUNITY_TEST_LOCK_MODE='' RUST_TEST_THREADS=1 \
   cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
     -- --ignored --exact comment_uses_target_dossier_and_both_permissions --nocapture --test-threads=1
+# Research units (V2): one provider call per work, end to end on a synthetic saved L1 and an
+# owned loopback provider. The filter must select tests; an empty selection is a failure.
+AI_FOUNDATION_PROOF_NODE="$(command -v node)" RUST_TEST_THREADS=1 \
+  cargo test -p linggan-intelligence --lib --locked -- --ignored --test-threads=1 \
+    comment_understanding::execution_tests
 # Gate tests need the feature enabled and an owned key; do not read a developer's support directory.
 openssl rand 32 > "$proof_support_dir/opportunity/commenter-digest.key"
 chmod 600 "$proof_support_dir/opportunity/commenter-digest.key"

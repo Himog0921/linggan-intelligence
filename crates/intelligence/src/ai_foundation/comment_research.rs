@@ -212,6 +212,33 @@ pub(crate) async fn frozen_in(
     }
     Ok((source, input))
 }
+/// The comment behind a stored research, for readers that do not care which method produced it.
+/// A V1 research is requalified against its frozen input; a V2 research only has to be readable.
+pub(crate) async fn current_source_in(
+    tx: &mut Transaction<'_, Postgres>,
+    request: Uuid,
+) -> Result<super::comment_understanding::CurrentSource, FoundationError> {
+    let method: String = sqlx::query_scalar(
+        "SELECT method_version FROM linggan_comment_research_request WHERE request_ref=$1",
+    )
+    .bind(request)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(FoundationError::NotFound)?;
+    if method == super::comment_understanding::CONTRACT {
+        return super::comment_understanding::current_source_in(tx, request).await;
+    }
+    let (source, prepared) = frozen_in(tx, request).await?;
+    Ok(super::comment_understanding::CurrentSource {
+        source_ref: source.source.source_ref,
+        raw_sha256: prepared.raw_sha256,
+        raw_text: source.raw_text,
+        comment_external_id: source.comment_external_id,
+        work_ref: source.source.content_public_ref,
+        work_title: source.source.work_title,
+        input_hash: prepared.input_hash,
+    })
+}
 pub async fn latest(
     db: &Database,
     domain: Uuid,

@@ -4,9 +4,7 @@ WITH latest AS (
  FROM linggan_comment_research_request r
  JOIN linggan_comment_research_result result USING(request_ref)
  JOIN linggan_material_comment m ON m.material_ref=r.source_ref
- JOIN linggan_ai_batch_item i USING(batch_ref)
- JOIN linggan_ai_batch_item_control c USING(item_ref)
- WHERE c.state='succeeded'
+ WHERE result.result IS NOT NULL
  ORDER BY r.domain_ref,r.work_ref,m.comment_external_id,r.created_at DESC,r.request_ref DESC
 )
 SELECT a.domain_ref,semantic.request_ref

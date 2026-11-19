@@ -106,7 +106,7 @@ async fn saved_core_drives_topic_queue_and_persisted_membership() {
     roundtrip(false).await;
     roundtrip(true).await;
 }
-async fn configure_tasks_for_test(db: &Database, model_config: Uuid) {
+pub(crate) async fn configure_tasks_for_test(db: &Database, model_config: Uuid) {
     // Seed selected configurations in this isolated fixture, not live settings.
     let settings: Vec<(String,Uuid)> = sqlx::query_as("SELECT task_key,current_config_ref FROM linggan_ai_task_setting WHERE task_key LIKE 'topic_research%' OR task_key='content_understanding'").fetch_all(db.pool()).await.unwrap();
     for (task, previous) in settings {
@@ -355,7 +355,12 @@ async fn roundtrip(image_only: bool) {
     }
 }
 
-async fn seed_core(db: &Database, work: Uuid, model_config: Uuid, image_only: bool) -> Uuid {
+pub(crate) async fn seed_core(
+    db: &Database,
+    work: Uuid,
+    model_config: Uuid,
+    image_only: bool,
+) -> Uuid {
     let reference = Uuid::new_v4();
     let mut command = Command::begin(
         &db,

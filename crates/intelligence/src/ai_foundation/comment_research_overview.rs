@@ -70,7 +70,7 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
     let mut experiences = Vec::new();
     for row in rows {
         let request: Uuid = row.get("request_ref");
-        let (source, _) = match comment_research::frozen_in(&mut tx, request).await {
+        let source = match comment_research::current_source_in(&mut tx, request).await {
             Ok(v) => v,
             Err(FoundationError::AdmissionDenied(_)) => continue,
             Err(e) => return Err(e),
@@ -104,16 +104,16 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
                 .skip(start)
                 .take(end - start)
                 .collect();
-            let item = json!({"requestRef":request,"commentKey":{"workRef":source.source.content_public_ref,"commentExternalId":source.comment_external_id},"quote":quote,"proposition":signal["proposition"],"workTitle":source.source.work_title});
+            let item = json!({"requestRef":request,"commentKey":{"workRef":source.work_ref,"commentExternalId":source.comment_external_id},"quote":quote,"proposition":signal["proposition"],"workTitle":source.work_title});
             if kind == "solution" {
                 solution_count += 1;
-                solution_works.insert(source.source.content_public_ref);
+                solution_works.insert(source.work_ref);
                 if solutions.len() < 3 {
                     solutions.push(item)
                 }
             } else {
                 experience_count += 1;
-                experience_works.insert(source.source.content_public_ref);
+                experience_works.insert(source.work_ref);
                 if experiences.len() < 3 {
                     experiences.push(item)
                 }

@@ -1,14 +1,14 @@
 # COMMENT-UNDERSTANDING-V2-001 · 评论研究 V2 实施计划
 
 > 状态: 活跃计划
-> 最后核对: 2026-11-19（G1 已实施，见附录 B）
+> 最后核对: 2026-11-19（G1、G2 已实施，见附录 B、C）
 > 适用范围: 评论研究 V2：按作品分单元的批量理解、稳定需求身份、合并重定向与派生状态（G0–G6）
 > 事实来源: Mog 2026-11-19 的决定（第 10 节）、`main@8891d71`、本机运行库只读核对、本机 WeMM 小样本实验
 > 冲突时以谁为准: 用户最新明确授权、AGENTS.md、真实运行/数据库副作用、当前代码/migration/测试
 
 产品决策（不变）：B——单条评论形成候选；同一需求获得至少两位可区分作者的有效支持后成为正式需求。\
 适用仓库：`Himog0921/linggan-intelligence`。\
-实施状态：G0、G1 已实施（分支 `claude/comment-understanding-v2`，未合并、未部署）；G2 起尚未实施。G1 对本计划 §4.2、§5.3、§6.1 的修正已就地改正，原因见附录 B。\
+实施状态：G0、G1、G2 已实施（分支 `claude/comment-understanding-v2`，未合并、未部署）；G3 起尚未实施。G1 对本计划 §4.2、§5.3、§6.1 的修正已就地改正（附录 B）；G2 的实现差异见附录 C，并已写入 §5.2–§5.4 的实现说明。\
 接手继续实施从[交接文档](comment-understanding-v2-001-handoff.md)开始。
 
 ---
@@ -237,13 +237,15 @@ T4 下游刷新（确定性）
    - 作品在当前领域和来源范围内；
    - 默认跳过已经有 `comment-understanding.v1` 成功结果的评论，除非运营勾选"重新研究"。
 2. **按作品分组。** 不同作品不混在一个单元里。
-3. **切分研究单元：** 每单元最多 `UNIT_MAX_TARGETS` 条，并满足 `UNIT_MAX_OUTPUT_EST`（按每条目标的估算输出累加）。同一作品切成多个单元时，按评论在平台上的时间顺序切分，让同一讨论串尽量落在同一单元里。
+3. **切分研究单元：** 每单元最多 `UNIT_MAX_TARGETS` 条，并满足 `UNIT_MAX_OUTPUT_EST`（按每条目标的估算输出累加）。同一作品切成多个单元时，按（讨论串根评论，评论 ID）排序后切分，让同一讨论串尽量落在同一单元里（实现没有用平台时间，见附录 C.2）。
 4. **重试时自动缩小单元：** 如果某条目标上一次失败的原因是 `unit_truncated`，这次它所在单元的上限减半，最小为 1。
 5. **冻结**每个单元的 `l1_result_ref`，以及每条目标的输入指纹（原文哈希、清洗版本、父评论、L1 引用，只用于审计）。
 6. **写入：** 一个 `ai_batch`（`task_key = comment_understanding`）；每个单元一个 `ai_batch_item` 和一行 `unit`；每条目标一行 `request` 和一行 `unit_target`。
 7. **单元排序：** 评论多的作品排在前面，让需求目录先由内容最丰富的单元建立起来。
 
 **界面预览**只显示：已选评论数、涉及作品数、可研究数、L1 未就绪数（附"补 L1"入口）、其他无法处理的数量及原因、预计调用次数。
+
+**G2 实现说明：** 预览与启动由同一个规划函数产生同一个 `planHash`（不含随机的单元 ID）；启动时重算，哈希不一致返回冲突，不会去研究和预览不同的东西。已有成功结果的评论、已在排队或运行的评论、上一次调用结果未知（`ai_dispatch_unknown`）的评论都不进计划；没有单独的"重试"入口，运营重新选择失败的评论即可，截断次数从历史结果推导。一次启动最多 1000 条选择。
 
 ### 5.3 T1 单元调用
 
@@ -272,6 +274,8 @@ T4 下游刷新（确定性）
 
 派发时实际放入 prompt 的需求 ref 列表，按顺序记在 `linggan_comment_research_unit_dispatch.catalog_problem_refs`：既供审计，也是 T2 把别名 `pN` 还原成需求的唯一依据。
 
+**G2 实现说明：** 作品语境是冻结的 L1 Core 卡的投影：摘要、内容类型、主话题和 `discussion / author_position / provision / reader_value / audience_context` 五类知识单元（`id、unitType、statement、assertionKind、speakerRole`）；不含证据引用、候选标签和 L2。目录超过 `CATALOG_FULL_MAX`（200）时**整个单元跳过**（`comment_catalog_too_large`），不截断：截断的目录会让模型对看不见的需求重复新建。L1 卡找不到时跳过（`comment_l1_unavailable`）。派发前评论已不可读的目标，在同一个事务里写入失败结果 `ai_source_unavailable`，其余目标照常发送；全部不可读则整个单元跳过。
+
 **失败处理：** 提供方错误和超时沿用执行器现有的重试策略，T1 不再另加重试逻辑。
 
 ### 5.4 T2 接纳
@@ -283,7 +287,7 @@ T4 下游刷新（确定性）
 | 情况 | 处理 |
 |---|---|
 | JSON 无法解析，或顶层合同不符 | 本单元所有目标标记失败，原因为 `unit_output_invalid` |
-| 输出被截断（finish_reason 为长度上限） | 本单元所有目标标记失败，原因为 `unit_truncated`；下次重试时单元自动减半 |
+| 输出被截断 | 本单元所有目标标记失败，原因为 `unit_truncated`；下次重试时单元自动减半。**适配器把长度截断报告为失败的调用（`output_limit`），而不是一个较短的回答**，所以执行器按这个失败码和 `finish_reason=length` 识别 |
 
 **逐条目标的检查：**
 
@@ -549,7 +553,7 @@ G1 里给 `comment_understanding` 和 `comment_problem_consolidation` 注册任�
 
 **验收：** 迁移可以在隔离的 PostgreSQL 上反复应用；视图测试覆盖 §7.1 的所有不变量。
 
-### G2｜研究单元纵向打通（T0、T1、T2 和全量目录模式）
+### G2｜研究单元纵向打通（T0、T1、T2 和全量目录模式）（已实施，记录见附录 C）
 
 - 实现 T0 规划，包括资格筛选、切分和重试时的单元减半；
 - 执行器支持 `CommentResearchUnit` 输入，加上同领域串行条件；
@@ -562,7 +566,7 @@ G1 里给 `comment_understanding` 和 `comment_problem_consolidation` 注册任�
 - 截断后重试会自动减半；
 - 重复投递不产生重复写入；
 - 后一个单元能匹配到前一个单元新建的候选；
-- 用 P0 的同一批样本端到端跑通，§7.1 的不变量全部为 0。
+- 端到端跑通，§7.1 的不变量全部为 0：用合成的已保存 L1、真实执行器和本机回环提供方（**没有调用真实模型**）；在 P0 样本上的真实运行属于 P0。
 
 ### G3｜候选整理（T3，不使用向量的全量模式）与下游
 
@@ -788,3 +792,69 @@ G1 里给 `comment_understanding` 和 `comment_problem_consolidation` 注册任�
 - 视图在真实数据量下的性能没有测：本地库里评论研究表为空，只有合成数据。
 - 接纳器没有对真实模型输出验证。这是 P0 的工作；提示词是草案 v1，P0 后以新版本保存。
 - 草案提示词里的"同一需求"反例来自本机 33 条评论的向量实验（§1.3），样本小、标签由 Claude 标注。
+
+---
+
+## 附录 C｜G2 实施记录（2026-11-19）
+
+同一分支同一 PR。交付状态：**已实现、已在隔离 PostgreSQL 测试；未合并、未部署；没有调用真实模型。**
+
+### C.1 交付内容
+
+| 项 | 位置 |
+|---|---|
+| T0 规划 | `comment_understanding/start.rs`（`preview`、`start`）、`plan.rs`（纯函数：按作品分组、切分、截断后减半、`planHash`）、`target.rs`（评论读取与资格） |
+| T1/T2 执行 | `executor/service/comment_understanding.rs`（准备、调用、结算）、`comment_understanding/publish.rs`（结果、需求、支持的同事务写入）、`unit.rs`、`catalog.rs`、`context.rs`（L1 投影） |
+| 队列接线 | `InputRef::CommentResearchUnit`、批次类型、准入（需要 note 与 comment 两类外发许可）、领取条件加入 `comment_understanding` 并加同领域串行（`executor/comment_understanding_order.sql`） |
+| 运行回执与取消 | `comment_understanding/run.rs`（`read_run`：单元、目标状态与失败码、调用数与 Token；`cancel`） |
+| 下游读取 | `comment_research::current_source_in`：按方法版本分发（V1 仍按冻结输入复核，V2 只要求评论仍可读）；Topic Map、Topic 评论来源、评论概览改用它。三处 SQL 的"成功"改为"有成功结果行"；评论目录的研究状态加上 V2 分支 |
+| 测试 | `comment_understanding/execution_tests.rs`（8 个端到端）；`tests/support/comment_understanding_response.rs`（按评论文本决定回复的确定性回环提供方）；已加入 `scripts/test-comment-study-productization-postgres.sh` |
+
+### C.2 与计划的差异
+
+| 计划 | 实际 | 原因 |
+|---|---|---|
+| 同作品内按平台时间切分 | 按（讨论串根评论 ID，评论 ID）排序 | 平台时间表只覆盖部分评论，且需要另一套读取；按讨论串根排序已让同一讨论串相邻 |
+| 准入只有三条 | 沿用 V1 来源门：创作者本人的评论排除，**作品作者未知也排除**；放开的只有"评论者作者未知" | 作品作者未知时分不出创作者的声音。这是保守的沿用，不是新决定；要放开需要 Mog 确认 |
+| 失败目标自动重试 | 不自动重试；运营重新选择即可，预览只含未成功的 | 少一个状态机；截断次数从历史结果推导 |
+| 目录过大时召回 | 跳过整个单元并给出原因 | 召回属于 G4；截断目录会造成重复需求 |
+| `uncertain`、批内重试等 | 与 G1 一致，未引入 | — |
+| 任务失败码需要新迁移 | 不需要迁移 | 批次条目的失败码是自由文本；只有调用账本的失败码有外键，已在 `0230` 注册 |
+
+### C.3 验证
+
+- 单元测试 25 个（规划、目标指纹、L1 投影、接纳器、整理合同）。
+- 端到端（`execution_tests`，隔离 PostgreSQL，真实执行器，本机回环提供方）8 个，覆盖：
+  - 两个作品两个单元、**两次调用而不是每条评论一次**；调用载荷不含评论者身份；
+  - 同一单元内多条评论共用一个新需求；第二个单元读到第一个单元写入的目录，匹配而不重复新建；三位作者、两个作品使需求变为 formal；
+  - 目标缺失、证据不在原文的目标各自失败，其余目标不受影响；证据范围指向原文中的正确位置；
+  - 截断（`unit_truncated`）和无法使用的输出（`unit_output_invalid`）使整个单元失败，不写任何需求；
+  - 缺 L1 的作品不进计划；已研究、已排队的评论不重复；
+  - 启动幂等（同一命令重放不重复创建）、计划过期和任务版本过期被拒绝；
+  - 取消后不调用提供方，所有评论为取消状态；
+  - Topic Map 的信号查询、`current_source_in`、Topic 评论来源都读到 V2 结果；评论被限制后立即不再计入，需求退回候选；评论目录显示 V2 状态与信号类型；
+  - 独立于视图重新计数的不变量为 0：证据范围在本条评论内、信号指向自己的来源、支持不跨领域、formal 的作者数不少于 2。
+- 回归见 C.4。
+
+### C.4 回归（G2 的全部改动之后，原有测试）
+
+| 范围 | 结果 |
+|---|---|
+| 隔离 PostgreSQL：`comment_study_catalog` 3、`catalog_read` 11、`inspection` 4、`p1_closure` 3、`start` 1、`work_catalog` 4 | 全部通过（目录状态 SQL 已加 V2 分支） |
+| 隔离 PostgreSQL：`comment_understanding_schema_postgres` | 5/5 |
+| 隔离 PostgreSQL：`ai_foundation_postgres` | 33/33 |
+| 隔离 PostgreSQL：`opportunity_postgres` 13、`opportunity_mentions_postgres` 6、`opportunity_asof_postgres` 4 | 全部通过 |
+| 隔离 PostgreSQL：V1 三阶段执行器 `comment_uses_target_dossier_and_both_permissions` | 通过：旧流程在 G2 之后仍可运行 |
+| lib 层 PostgreSQL（`topic_comment_source`、`topic_map_research`、`topic_research_automation`、`comment_study`、`content_understanding`、新的 `execution_tests`） | 15 通过，1 失败：`content_understanding::topic_tests::saved_core_drives_topic_queue_and_persisted_membership`（`topic_research_automation/tests.rs:29`，期望 4 个阶段、实际 1 个）。**在未改动的基线 `8891d71` 上同样失败**，与本包无关，未处理 |
+| `cargo test -p linggan-intelligence --lib` | 431 通过，26 个忽略 |
+| `cargo check --workspace --tests`、`scripts/ci-preflight.sh origin/main` | 通过 |
+| `cargo test -p linggan-api` | 沿用 B.4：1 个基线上同样失败的页面测试，未重复运行 |
+
+环境说明：端到端和部分回归需要 `AI_FOUNDATION_PROOF_NODE`、`apps/pi-adapter/node_modules`、`LINGGAN_CREATION_ASSET_ROOT`、`LINGGAN_LOCAL_MEDIA_ROOT`；缺这些时的失败是环境问题（见交接文档第 8 节）。
+
+### C.5 未验证边界
+
+- 真实模型的输出质量、截断率、单元大小：属于 P0。
+- 同领域串行靠第二个单元读到第一个单元的目录来证明（并发度为 4 时若没有串行条件，第二个单元的目录会是空的），没有直接测并发竞争的时序。
+- 视图和规划在真实数据量下的性能：本机评论研究表仍是空的。
+- 取消在"单元正在调用提供方"时的行为沿用现有批次取消机制（已在调用中的单元正常结算），没有为本任务单独测。

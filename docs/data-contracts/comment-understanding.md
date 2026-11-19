@@ -1,12 +1,12 @@
 # 评论理解合同（Comment Understanding V2）
 
 > 状态: 代码事实优先
-> 最后核对: 2026-11-19
+> 最后核对: 2026-11-19（G1 结构；G2 执行与读取）
 > 适用范围: `comment-understanding.v1`、`comment-problem-consolidation.v1`、研究单元、需求身份与派生状态（迁移 `0230`）
 > 事实来源: `database/migrations/0230_comment_understanding.sql`、`crates/intelligence/src/ai_foundation/comment_understanding/`、[实施计划](../plans/active/comment-understanding-v2-001.md)
 > 冲突时以谁为准: 当前 migration/代码/隔离 PostgreSQL 测试；语义标准以计划第 3 节为准，提示词是它的实现
 
-本合同描述 G1 已落地的结构。旧的评论三阶段（`comment-research-semantic.v1`、`comment-problem-stage.v1`）仍是运行中的流程，直到计划的切换步骤才退役；届时[研究自动化执行合同](research-automation.md)中评论部分同步改写。
+本合同描述 G1、G2 已落地的结构和流程。旧的评论三阶段（`comment-research-semantic.v1`、`comment-problem-stage.v1`）仍是运行中的流程，直到计划的切换步骤才退役；届时[研究自动化执行合同](research-automation.md)中评论部分同步改写。
 
 ## 1. 一次调用与一个研究单元
 
@@ -69,6 +69,33 @@
 
 ## 6. 任务与失败码
 
-`comment_understanding` 已注册：生命周期 `active`，开关关闭，预算 `unconfigured`，未绑定模型，提示词 v1 为草案；批次只允许 `interactive`，外发材料类别为 `note_material` 与 `comment_material`。**G1 阶段它不能入队**，入队接线属于计划 G2。
+`comment_understanding` 已注册：生命周期 `active`，开关关闭，预算 `unconfigured`，未绑定模型，提示词 v1 为草案；批次只允许 `interactive`，外发材料类别为 `note_material` 与 `comment_material`，两类许可都要有才能派发。入队只通过 `comment_understanding::start`，不能走通用的批次创建。
 
-失败码：`unit_output_invalid`、`unit_truncated`、`target_missing`、`target_invalid`、`target_all_signals_invalid`。
+失败码：`unit_output_invalid`、`unit_truncated`、`target_missing`、`target_invalid`、`target_all_signals_invalid`（已在迁移中注册）；单元在调用前被跳过时写在条目上的 `comment_l1_unavailable`、`comment_catalog_too_large`、`ai_source_unavailable`；目标在结算时评论已不可读的 `comment_publication_withheld`。
+
+## 7. 规划与启动（T0）
+
+`preview(domain, selections, rerun)` 与 `start(Start)` 共用一个规划函数。选择项是 `(workRef, sourceRef, observationRole)`，一次最多 1000 条。
+
+- 资格：V1 来源门，差别是不读研究底稿、允许评论者作者未知；创作者本人的评论、作品作者未知的评论仍排除。作品必须有可用的 L1 Core（`core_cards_in` 的第一张，其 `analysisRef` 即 L1 请求 ID），否则计入预览的 `waitingL1`。
+- 不进计划：已有成功结果（除非 `rerun`）、已在排队或运行、上一次调用结果未知（`ai_dispatch_unknown`）。
+- 切分：按作品分组，每单元最多 `UNIT_MAX_TARGETS`（20）条且不超过输出估算上限；之前因输出被截断失败的评论，每次失败容量减半，最小为 1；作品评论多的先执行。
+- `planHash` 不含随机单元 ID；启动重算并比较，不一致为冲突。启动在同一事务里写一个批次、每单元一个条目和 `unit` 行、每条评论一行 `request` 与 `unit_target`，按领域加咨询锁避免两个启动规划同一批评论。命令幂等。
+
+预览返回：`planHash`、`knowledgeCutoff`、`taskConfigRef`、`taskRevision`、`selectedCount`、`researchableCount`、`unitCount`、`expectedModelCalls`、`workCount`、`waitingL1`、`alreadyResearchedCount`、`alreadyQueuedCount`、`dispatchUnresolvedCount`、`excludedCounts`、`units`。
+
+## 8. 执行（T1、T2）
+
+同一领域同一时间只执行一个单元（领取条件，`executor/comment_understanding_order.sql`）。
+
+准备（一个事务）：核对任务配置与外发许可、单元与请求属于本次批次；逐条重读评论，不可读的写入失败结果；读冻结的 L1 卡并投影为作品语境；读需求目录（超过 200 条则跳过整个单元）；组装载荷并创建调用；**在调用之前**写入 `unit_dispatch`（有序目录）。
+
+结算（一个事务）：重读评论，调用期间被撤回的评论写 `comment_publication_withheld`；识别截断（适配器的 `output_limit` 失败或 `finish_reason=length`）为 `unit_truncated`；否则用 `accept_unit` 接纳，顶层不可用为 `unit_output_invalid`；成功则 `publish_in` 写入每条评论的结果、新需求（每个被引用的 `newKey` 一个）和支持关系，失败则给每条已发送的评论写失败结果。调用账本、批次条目状态在同一事务里结算。
+
+## 9. 运行回执与取消
+
+`read_run(domain, batch)`：每个单元的状态与失败码、目标按状态和失败码的计数、模型调用数与输入输出 Token（来自调用账本）。`cancel`：停止尚未开始的单元；已在调用中的单元正常结算。
+
+## 10. 下游读取
+
+`comment_research::current_source_in(request)` 是 Topic Map、Topic 评论来源和评论概览读取"某条研究对应的评论"的唯一入口：V1 研究按冻结输入复核；V2 研究只要求评论仍可读，L1 与清洗版本不作为有效性条件。三处 SQL 以"该请求有成功结果行"判断成功，不看同批次其他条目的状态。评论目录的"最近一次研究"状态对 V2 请求从单元条目与结果行推导。

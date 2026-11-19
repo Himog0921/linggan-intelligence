@@ -51,6 +51,24 @@ WITH observations AS MATERIALIZED (
       AND ($4::uuid IS NULL OR original.content_public_ref=$4)
       AND ($5::text IS NULL OR original.comment_external_id=$5)
     GROUP BY request.request_ref,original.content_public_ref,original.comment_external_id
+    UNION ALL
+    SELECT request.request_ref, request.source_ref,
+           CASE WHEN result.result IS NOT NULL THEN 'succeeded'
+                WHEN result.failure_code IS NOT NULL THEN 'failed'
+                WHEN control.state IN ('pending','running') THEN 'running'
+                WHEN control.state='cancelled' THEN 'cancelled'
+                ELSE 'failed' END AS state,
+           request.created_at,COALESCE(result.created_at,control.finished_at) AS finished_at,
+           original.content_public_ref,original.comment_external_id
+    FROM linggan_comment_research_request request
+    JOIN linggan_material_comment original ON original.material_ref=request.source_ref
+    JOIN linggan_comment_research_unit_target unit_target USING(request_ref)
+    JOIN linggan_comment_research_unit unit USING(unit_ref)
+    JOIN linggan_ai_batch_item_control control ON control.item_ref=unit.item_ref
+    LEFT JOIN linggan_comment_research_result result ON result.request_ref=request.request_ref
+    WHERE request.domain_ref=$1 AND request.created_at<=$2::timestamptz
+      AND ($4::uuid IS NULL OR original.content_public_ref=$4)
+      AND ($5::text IS NULL OR original.comment_external_id=$5)
 ), last_attempt AS (
     SELECT DISTINCT ON (content_public_ref, comment_external_id) * FROM history
     ORDER BY content_public_ref, comment_external_id, created_at DESC, request_ref DESC

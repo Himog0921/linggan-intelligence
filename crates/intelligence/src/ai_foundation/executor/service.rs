@@ -15,6 +15,7 @@ use tokio::{
 use uuid::Uuid;
 mod comment_problem;
 mod comment_research;
+mod comment_understanding;
 mod content_understanding;
 mod content_understanding_deep;
 mod creator_account_research;
@@ -218,6 +219,9 @@ async fn fill_slots(
                 }
                 TaskKey::CommentStudy => {
                     comment_research::execute(&db, &item, secrets.as_ref(), &adapter).await
+                }
+                TaskKey::CommentUnderstanding => {
+                    comment_understanding::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
                 TaskKey::CreatorAccountResearch => {
                     creator_account_research::execute(&db, &item, secrets.as_ref(), &adapter).await
