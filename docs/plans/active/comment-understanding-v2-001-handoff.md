@@ -8,7 +8,7 @@
 
 ## 1. 从哪里开始
 
-1. 目录与分支：`.worktrees/claude-comment-understanding-v2-20261119`，分支 `claude/comment-understanding-v2`，基线 `origin/main@8891d718`。所有工作在这个 worktree 里做，向这个分支推送，更新同一个 PR。
+1. 目录与分支：`.worktrees/claude-comment-understanding-v2-20261119`，分支 `claude/comment-understanding-v2`，基线 `origin/main@8891d718`。所有工作在这个 worktree 里做，向这个分支推送，更新同一个 PR（[#621](https://github.com/Himog0921/linggan-intelligence/pull/621)，Draft；候选完成并审阅后再转 Ready）。
 2. 读取顺序：`AGENTS.md` → [协作协议](../../governance/agent-collaboration.md) → [安全与领域约束](../../agents/safety-invariants.md) → 计划第 2、3、5、6、8、9、10 节 → 评论理解合同 → `database/migrations/0230_comment_understanding.sql` → `crates/intelligence/src/ai_foundation/comment_understanding/`。
 3. 计划附录 A.2 是 G2 起的改动清单（文件和函数），附录 B.2 是 G1 对计划的修正。
 
