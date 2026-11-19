@@ -38,14 +38,16 @@
   gap: calc(var(--lgi-space-1) * 1.5);
 }
 
-.researchAction {
+.workActions {
   display: flex;
-  justify-content: flex-end;
+  flex-wrap: wrap;
   align-items: center;
-  min-height: var(--lgi-space-8);
-  margin-top: var(--lgi-space-1);
-  padding-bottom: var(--lgi-space-1);
+  justify-content: space-between;
+  gap: var(--lgi-space-2);
 }
+
+.workActions > [data-engagement-metrics] { margin-top: 0; min-width: 0; }
+.researchAction { margin-left: auto; }
 
 .widths {
   display: flex;
@@ -505,6 +507,14 @@
 .openOriginal { height:var(--lgi-space-8);min-height:var(--lgi-space-8);font-size:var(--lgi-type-label-size);box-shadow:none; }
 /* Desktop tool row: the same 32px frame as the width group and close button. */
 .openOriginalTool { height:var(--lgi-space-8);min-height:var(--lgi-space-8);padding:0 var(--lgi-space-3);font-size:var(--lgi-type-control-size);box-shadow:none; }
+/* Match the existing original-link frame, including the disabled state. */
+.researchAction > button {
+  width:calc(var(--lgi-space-8) * 3 + var(--lgi-space-1) / 2);
+  height:var(--lgi-space-8);
+  min-height:var(--lgi-space-8);
+  padding:0 var(--lgi-space-3);
+  font-size:var(--lgi-type-control-size);
+}
 
 .workByline [role='img'] { width:var(--lgi-space-6);height:var(--lgi-space-6); }
 .workPlatform { font-size:var(--lgi-type-label-size);line-height:var(--lgi-type-label-leading); }
