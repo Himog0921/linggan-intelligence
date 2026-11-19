@@ -8,7 +8,7 @@ use sqlx::Row;
 use std::time::{Duration, Instant};
 use uuid::Uuid;
 
-/// Automatic work waiting or running per domain; the scan pauses above this.
+/// Automatic work waiting or running; the scan pauses at this size.
 const QUEUE_LIMIT: i64 = 20;
 const SCAN_PAGE: i64 = 10;
 /// A finished pass over every work waits this long before it looks again.
@@ -175,11 +175,18 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
         return Ok(0);
     }
     state.idle_until = None;
+    // A full queue pauses the scan in place. It must not look like the end of a pass, or the
+    // cursor would reset and the scan would idle for ten minutes while the queue drains.
+    let waiting: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_content_understanding_request r JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE b.kind='automatic' AND c.state IN('pending','running')")
+        .fetch_one(db.pool())
+        .await?;
+    if waiting >= QUEUE_LIMIT {
+        return Ok(0);
+    }
     let rows = sqlx::query(include_str!("automation_candidates.sql"))
         .bind(state.after.map(|v| v.0))
         .bind(state.after.map(|v| v.1))
         .bind(METHOD)
-        .bind(QUEUE_LIMIT)
         .bind(SCAN_PAGE)
         .fetch_all(db.pool())
         .await?;
