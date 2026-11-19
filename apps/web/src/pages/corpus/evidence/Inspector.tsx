@@ -262,14 +262,16 @@ export function Inspector(props: InspectorProps) {
           </div>
           <div className={styles.workActions}>
             <Engagement engagement={work.display.engagement} />
-            <InspectorResearchAction
-              key={`${domain}:${work.ref}`}
-              domain={domain}
-              work={work.ref}
-              revision={dossier?.revision}
-              asOf={dossier?.asOf}
-              onSubmitted={() => onTab('dossier')}
-            />
+            <div className={styles.researchAction}>
+              <InspectorResearchAction
+                key={`${domain}:${work.ref}`}
+                domain={domain}
+                work={work.ref}
+                revision={dossier?.revision}
+                asOf={dossier?.asOf}
+                onSubmitted={() => onTab('dossier')}
+              />
+            </div>
           </div>
         </div> : null}
         <div className={styles.state} role="status" data-empty={state === null}>

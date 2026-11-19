@@ -47,6 +47,7 @@
 }
 
 .workActions > [data-engagement-metrics] { margin-top: 0; min-width: 0; }
+.researchAction { margin-left: auto; }
 
 .widths {
   display: flex;
