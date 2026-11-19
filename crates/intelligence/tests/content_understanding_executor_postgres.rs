@@ -12,22 +12,8 @@ mod wire;
 
 use base64::Engine as _;
 use linggan_intelligence::{
-    ai_foundation::{
-        TaskKey,
-        capability::ModelLimits,
-        content_understanding as owner,
-        control::BudgetPolicy,
-        control_store::ControlScope,
-        note_analysis as legacy,
-        provider_store::MaterialClass,
-        skill_binding::{SwitchSkill, switch_skill},
-        skill_package::{Encoding, SkillPackage, UploadFile},
-        skill_store::{ImportSkill, import_skill},
-        store::FoundationError,
-        task_config::{MaterialColumn, ModelSelection, SaveTaskConfig, save_task_config},
-    },
+    ai_foundation::{TaskKey, content_understanding as owner, store::FoundationError},
     content_understanding::METHOD,
-    note_analysis::Scope,
     pi_adapter::PiAdapter,
 };
 use linggan_storage_postgres::Database;
@@ -79,7 +65,7 @@ fn full_schema_fixtures_record_the_actual_deep_v2_migration_digest() {
 
 #[tokio::test]
 #[ignore = "owned PostgreSQL + AI_FOUNDATION_PROOF_NODE + owned LINGGAN_LOCAL_MEDIA_ROOT; no real models"]
-async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
+async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
     // The fixture reads LOCAL_001_PROOF_DATABASE_URL itself. Never discover or print a DSN.
     let db = fixture::proof_database(&format!("content_l1_{}", Uuid::new_v4().simple())).await;
     let media_root = PathBuf::from(
@@ -105,7 +91,6 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     .await
     .unwrap();
     let model = setup::prepare_with_actual_probe(&db, &endpoint.url, &session, &adapter).await;
-    configure_legacy(&db, &adapter, &model).await;
     let legacy_config_before: Value = sqlx::query_scalar(
         "SELECT to_jsonb(s) FROM linggan_ai_task_setting s WHERE task_key='note_interpretation'",
     )
@@ -116,6 +101,74 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     session.request_drain().await.unwrap();
     session.complete_drain().await.unwrap();
     drop(session);
+
+    let no_slot_package = fixture::submit_package(&db, "content_detail", json!({"contentExternalId":"video-no-slot"}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"video-no-slot"},
+            "payload":{"title":"合成视频","bodyText":BODY,"type":"video"}})).await;
+    let no_slot_work: Uuid = sqlx::query_scalar(
+        "SELECT public_ref FROM linggan_material_content WHERE content_external_id='video-no-slot'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
+        .bind(Uuid::new_v4()).bind(no_slot_work).bind(dossier::DOMAIN).bind(no_slot_package).execute(db.pool()).await.unwrap();
+    let no_slot_preview = owner::preview(&db, dossier::DOMAIN, no_slot_work)
+        .await
+        .unwrap();
+    assert_eq!(no_slot_preview["materialReadiness"]["kind"], "video");
+    assert_eq!(no_slot_preview["canStart"], false);
+    assert!(
+        no_slot_preview["materialReadiness"]["gaps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|gap| gap["code"] == "video_transcript_required")
+    );
+
+    // An incomplete later capture can default to normal; it must not erase an
+    // earlier explicit video fact for the same platform work.
+    fixture::submit_package(&db, "content_detail", json!({"contentExternalId":"video-no-slot"}),
+        json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"video-no-slot"},
+            "payload":{"title":"合成视频新版本","bodyText":BODY,"type":"normal"}})).await;
+    let recaptured = owner::preview(&db, dossier::DOMAIN, no_slot_work)
+        .await
+        .unwrap();
+    assert_eq!(recaptured["materialReadiness"]["kind"], "video");
+    assert_eq!(recaptured["canStart"], false);
+
+    for (external, media) in [
+        (
+            "video-url-no-slot",
+            json!({"type":"normal","video":"https://media.example/video.mp4"}),
+        ),
+        (
+            "video-stream-no-slot",
+            json!({"type":"normal","videoStreams":[{"url":"https://media.example/stream.mp4"}]}),
+        ),
+    ] {
+        let mut payload = json!({"title":"合成视频","bodyText":BODY});
+        payload
+            .as_object_mut()
+            .unwrap()
+            .extend(media.as_object().unwrap().clone());
+        let package = fixture::submit_package(&db, "content_detail", json!({"contentExternalId":external}),
+            json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":external},"payload":payload})).await;
+        let source_work: Uuid = sqlx::query_scalar(
+            "SELECT public_ref FROM linggan_material_content WHERE content_external_id=$1",
+        )
+        .bind(external)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+        sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
+            .bind(Uuid::new_v4()).bind(source_work).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+        let preview = owner::preview(&db, dossier::DOMAIN, source_work)
+            .await
+            .unwrap();
+        assert_eq!(preview["materialReadiness"]["kind"], "video", "{external}");
+        assert_eq!(preview["canStart"], false, "{external}");
+    }
 
     let package = submit_body(&db, BODY).await;
     let work: Uuid = sqlx::query_scalar(
@@ -129,7 +182,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     let missing_inventory = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
     assert_eq!(
         missing_inventory["canStart"], true,
-        "available body is enough without proving a complete media inventory"
+        "available body is enough without proving a complete media inventory: {missing_inventory}"
     );
     // Acquire through media-slot submission and admit_media_blob, not a forged material projection
     // or OCR result. No image reading is preseeded: the production path must send these bytes.
@@ -198,14 +251,24 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
             .unwrap()
             .contains("不包含视频画面")
     );
-    let stopped = owner::start(&db, &start_from(&video_ready, work)).await.unwrap();
+    let stopped = owner::start(&db, &start_from(&video_ready, work))
+        .await
+        .unwrap();
     // The original video is not in the frozen model input. Its loss must not
     // make the queued task disappear from the current status.
-    let video_sha = canonical.media_inventory.iter().find(|s| s["purpose"] == "video").unwrap()["blobSha256"].as_str().unwrap();
+    let video_sha = canonical
+        .media_inventory
+        .iter()
+        .find(|s| s["purpose"] == "video")
+        .unwrap()["blobSha256"]
+        .as_str()
+        .unwrap();
     let video_path = media_root.join(format!("blobs/{video_sha}.mp4"));
     let held_video = video_path.with_extension("held");
     std::fs::rename(&video_path, &held_video).unwrap();
-    let during = owner::latest(&db, dossier::DOMAIN, work, None).await.unwrap();
+    let during = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
     assert_eq!(during["currentRequest"]["state"], "pending");
     std::fs::rename(&held_video, &video_path).unwrap();
     // Removing a frozen image prevents sending bytes that the model input used.
@@ -249,26 +312,6 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     .unwrap();
     assert_eq!(dispatched, 0);
     std::fs::rename(held_image, &image_path).unwrap();
-
-    let old_preview = legacy::preview(&db, dossier::DOMAIN, work, Scope::Note)
-        .await
-        .unwrap();
-    assert_eq!(old_preview["canStart"], true, "{}", old_preview["reasons"]);
-    let old = legacy::start(
-        &db,
-        &legacy::Start {
-            command_ref: Uuid::new_v4(),
-            domain_ref: dossier::DOMAIN,
-            work_ref: work,
-            scope: Scope::Note,
-            knowledge_cutoff: old_preview["knowledgeCutoff"].as_str().unwrap().into(),
-            input_hash: old_preview["inputHash"].as_str().unwrap().into(),
-            task_config_ref: serde_json::from_value(old_preview["taskConfigRef"].clone()).unwrap(),
-            task_revision: old_preview["taskRevision"].as_i64().unwrap(),
-        },
-    )
-    .await
-    .unwrap();
 
     let preview = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
     assert_eq!(preview["canStart"], true, "{}", preview["reasons"]);
@@ -316,34 +359,25 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         adapter.clone(),
         drain.clone(),
     ));
-    let (saved, old_saved) = tokio::time::timeout(Duration::from_secs(60), async {
+    let saved = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let current = owner::latest(&db, dossier::DOMAIN, work, None)
                 .await
                 .unwrap();
-            let old_current = legacy::read(&db, dossier::DOMAIN, old.request_ref)
-                .await
-                .unwrap();
-            for run in [&current["analysis"], &old_current["run"]] {
-                assert!(
-                    ![json!("failed"), json!("skipped")].contains(&run["state"]),
-                    "run failed: {run}"
-                );
-            }
-            if current["analysis"]["state"] == "succeeded"
-                && old_current["run"]["state"] == "succeeded"
-            {
-                break (current, old_current);
-            }
+            let run = &current["analysis"];
             assert!(
-                !worker.is_finished(),
-                "executor exited before settling both tasks"
+                ![json!("failed"), json!("skipped")].contains(&run["state"]),
+                "run failed: {run}"
             );
+            if run["state"] == "succeeded" {
+                break current;
+            }
+            assert!(!worker.is_finished(), "executor exited before settling L1");
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
     })
     .await
-    .expect("both formal tasks settle");
+    .expect("L1 task settles");
     drain.request();
     worker.await.unwrap().unwrap();
 
@@ -473,6 +507,26 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         )
     );
 
+    // This synthetic provider intentionally omits optional imageReadings.
+    // A usable Core and its raw model receipt must still be preserved.
+    let image_outcome: Value = sqlx::query_scalar(
+        "SELECT result->'imageReadings' FROM linggan_model_invocation WHERE invocation_ref=$1",
+    )
+    .bind(invocation)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(image_outcome["state"], "invalid");
+    assert_eq!(image_outcome["code"], "l1_image_readings_invalid");
+    let stored_raw: Option<String> = sqlx::query_scalar(
+        "SELECT raw_output FROM linggan_content_understanding_result WHERE request_ref=$1",
+    )
+    .bind(receipt.request_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert!(stored_raw.is_some());
+
     let current_preview = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
     let success_reuse = owner::start(&db, &start_from(&current_preview, work))
         .await
@@ -490,19 +544,28 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     .await
     .unwrap();
     assert_eq!(legacy_config_after, legacy_config_before);
-    assert_eq!(
-        legacy::read(&db, dossier::DOMAIN, old.request_ref)
-            .await
-            .unwrap()["result"],
-        old_saved["result"]
+    // A newly published synthetic finding must not leak into the earlier dossier snapshot.
+    let deep_ref = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt) VALUES($1,'synthetic_deep_cutoff','{}','{}')")
+        .bind(deep_ref).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_content_understanding_deep(analysis_ref,core_ref,domain_ref,method_version,question,findings) VALUES($1,$2,$3,'content-understanding.l2.manual.v1','合成问题','[]')")
+        .bind(deep_ref).bind(receipt.request_ref).bind(dossier::DOMAIN).execute(db.pool()).await.unwrap();
+    let old_snapshot = owner::latest(&db, dossier::DOMAIN, work, Some(&canonical.as_of))
+        .await
+        .unwrap();
+    assert!(
+        old_snapshot["analysis"]["deepAnalyses"]
+            .as_array()
+            .unwrap()
+            .is_empty()
     );
+    let current_snapshot = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
     assert_eq!(
-        legacy::latest(&db, dossier::DOMAIN, work, Scope::Note)
-            .await
-            .unwrap()["latestSuccessful"]["requestRef"],
-        json!(old.request_ref)
+        current_snapshot["analysis"]["deepAnalyses"][0]["analysisRef"],
+        json!(deep_ref)
     );
-
     // Only an admitted new content_detail package changes the body; old immutable results stay put.
     submit_body(
         &db,
@@ -556,12 +619,6 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     .await
     .unwrap();
     assert_eq!(preserved, persisted);
-    let old_after_change = legacy::read(&db, dossier::DOMAIN, old.request_ref)
-        .await
-        .unwrap();
-    assert_eq!(old_after_change["result"], old_saved["result"]);
-    assert_eq!(old_after_change["freshness"], "source_changed");
-
     let requests = endpoint.requests.lock().unwrap().clone();
     let l1_calls: Vec<_> = requests
         .iter()
@@ -577,11 +634,7 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         1,
         "pending and completed duplicates make no extra model call"
     );
-    assert_eq!(
-        requests.len(),
-        3,
-        "one real probe, one legacy call, one L1 call"
-    );
+    assert_eq!(requests.len(), 2, "one synthetic probe and one L1 call");
     let (request, packet) = &l1_calls[0];
     assert_eq!(
         packet["draftProtocol"],
@@ -597,10 +650,20 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
     }
     assert_eq!(request["reasoning_effort"], "high");
     assert_eq!(request["response_format"]["type"], "json_object");
+    let schema = &packet["resultSchema"];
+    let baseline = linggan_intelligence::content_understanding::response_schema();
+    assert_eq!(schema["properties"]["core"], baseline["properties"]["core"]);
     assert_eq!(
-        packet["resultSchema"],
-        linggan_intelligence::content_understanding::response_schema()
+        schema["properties"]["evidenceCandidates"],
+        baseline["properties"]["evidenceCandidates"]
     );
+    let image_count = packet["material"]["images"].as_array().unwrap().len();
+    let max_chars =
+        schema["properties"]["imageReadings"]["items"]["properties"]["text"]["maxLength"]
+            .as_u64()
+            .unwrap() as usize;
+    assert!(image_count > 0 && max_chars * image_count <= 4096 / 3);
+    assert!(schema["description"].as_str().unwrap().contains("deferred"));
     assert!(serde_json::from_str::<Value>(&raw).is_err());
     let repair: String = sqlx::query_scalar(
         "SELECT result->>'replyRepair' FROM linggan_model_invocation WHERE invocation_ref=$1",
@@ -748,14 +811,224 @@ async fn l1_round_trip_reuses_current_core_and_preserves_legacy_analysis() {
         calls
     );
     prove_billing_pause(&db, work, &model, &endpoint, adapter).await;
+    // A newly observed video without a transcript blocks new L1, but must not
+    // make a previously saved result disappear.
+    let uri = "https://media.example/synthetic-second-video";
+    fixture::submit_package(&db, "media_slots", json!({"contentExternalId":"dossier-note"}),
+        json!({"kind":"media_slot","slotKey":"xhs:dossier-note:video:2","observationRef":Uuid::new_v4(),
+            "slot":{"role":"video","ordinal":2},
+            "observation":{"externalUri":uri,"candidateUris":[uri],"observedAt":"2026-10-14T00:00:00Z"},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"}})).await;
+    let after_new_video = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
+    assert!(after_new_video["analysis"]["result"].is_object());
+    assert_eq!(after_new_video["materialReadiness"]["state"], "blocked");
+    let blocked = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
+    assert_eq!(blocked["canStart"], false);
     // A later withdrawal must hide results based on those bytes, including
     // results recovered from an older material snapshot.
-    linggan_evidence::record_blob_disposition(&db, &image_sha,
+    linggan_evidence::record_blob_disposition(
+        &db,
+        &image_sha,
         linggan_evidence::MaterialMediaDisposition::WithdrawnOrRestricted,
-        "synthetic-proof", "synthetic withdrawal").await.unwrap();
-    let after_withdrawal = owner::latest(&db, dossier::DOMAIN, work, None).await.unwrap();
+        "synthetic-proof",
+        "synthetic withdrawal",
+    )
+    .await
+    .unwrap();
+    let after_withdrawal = owner::latest(&db, dossier::DOMAIN, work, None)
+        .await
+        .unwrap();
     assert!(after_withdrawal["analysis"]["result"].is_null());
     endpoint.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "owned PostgreSQL + synthetic Node endpoint only"]
+async fn optional_image_reading_failure_keeps_l1_and_invocation_receipt() {
+    for scenario in ["new", "write_failure", "existing"] {
+        let reject_reading = scenario == "write_failure";
+        let db = fixture::proof_database(&format!("l1_img_{}", Uuid::new_v4().simple())).await;
+        let endpoint = wire::Endpoint::start().await;
+        endpoint
+            .include_image_readings
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let adapter = PiAdapter::configured_with_test_command(
+            std::env::var_os("AI_FOUNDATION_PROOF_NODE").unwrap().into(),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../apps/pi-adapter/src/adapter.mjs"),
+        );
+        let mut session = linggan_intelligence::ai_foundation::executor::ExecutorSession::acquire(
+            &db,
+            "image-reading-synthetic-probe",
+            4,
+        )
+        .await
+        .unwrap();
+        let model = setup::prepare_with_actual_probe(&db, &endpoint.url, &session, &adapter).await;
+        l1_setup::configure_high(&db, &model).await;
+        session.request_drain().await.unwrap();
+        session.complete_drain().await.unwrap();
+        drop(session);
+        let package = submit_body(&db, BODY).await;
+        let work: Uuid = sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='dossier-note'").fetch_one(db.pool()).await.unwrap();
+        sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)")
+            .bind(Uuid::new_v4()).bind(work).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+        let image = base64::engine::general_purpose::STANDARD
+            .decode(PNG)
+            .unwrap();
+        if scenario == "existing" {
+            dossier::current_image_reading_with_bytes(&db, Some(image)).await;
+        } else {
+            dossier::acquired_image_source_with_bytes(&db, Some(image)).await;
+        }
+        if reject_reading {
+            sqlx::query("CREATE FUNCTION reject_synthetic_l1_reading() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.rule_version='content-understanding.image-reading.v1' THEN RAISE EXCEPTION 'synthetic reading failure'; END IF; RETURN NEW; END $$")
+                .execute(db.pool()).await.unwrap();
+            sqlx::query("CREATE TRIGGER reject_synthetic_l1_reading BEFORE INSERT ON linggan_material_reading FOR EACH ROW EXECUTE FUNCTION reject_synthetic_l1_reading()")
+                .execute(db.pool()).await.unwrap();
+        }
+        let preview = owner::preview(&db, dossier::DOMAIN, work).await.unwrap();
+        assert_eq!(preview["canStart"], true, "{preview}");
+        let receipt = owner::start(&db, &start_from(&preview, work))
+            .await
+            .unwrap();
+        let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
+        let worker = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
+            db.clone(),
+            "image-reading-synthetic",
+            4,
+            Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
+            adapter,
+            drain.clone(),
+        ));
+        let result = tokio::time::timeout(Duration::from_secs(60), async {
+            loop {
+                let current = owner::latest(&db, dossier::DOMAIN, work, None)
+                    .await
+                    .unwrap();
+                let state = current["analysis"]["state"].as_str().unwrap_or("");
+                assert_ne!(state, "failed", "{current}");
+                if state == "succeeded" {
+                    break current;
+                }
+                assert!(!worker.is_finished());
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .unwrap();
+        drain.request();
+        worker.await.unwrap().unwrap();
+        assert!(result["analysis"]["result"].is_object());
+        let (raw, metadata, invocation_state): (Option<String>, Value, String) = sqlx::query_as(
+            "SELECT r.raw_output,i.result,i.state FROM linggan_content_understanding_result r JOIN linggan_model_invocation i USING(invocation_ref) WHERE r.request_ref=$1"
+        ).bind(receipt.request_ref).fetch_one(db.pool()).await.unwrap();
+        assert!(raw.is_some());
+        assert_eq!(invocation_state, "succeeded");
+        let dossier = linggan_evidence::research_dossier::read(&db, work)
+            .await
+            .unwrap()
+            .unwrap();
+        if reject_reading {
+            assert_eq!(metadata["imageReadings"]["state"], "failed");
+            assert_eq!(
+                metadata["imageReadings"]["code"],
+                "image_reading_write_failed"
+            );
+            assert!(
+                !dossier
+                    .materials
+                    .iter()
+                    .any(|m| m["blocks"].to_string().contains("合成图片文字"))
+            );
+        } else if scenario == "existing" {
+            assert_eq!(metadata["imageReadings"]["state"], "published");
+            assert_eq!(metadata["imageReadings"]["receipts"][0]["current"], false);
+            assert!(
+                dossier
+                    .materials
+                    .iter()
+                    .any(|m| m["blocks"].to_string().contains("连续的图片正文"))
+            );
+            assert!(
+                !dossier
+                    .materials
+                    .iter()
+                    .any(|m| m["blocks"].to_string().contains("合成图片文字"))
+            );
+        } else {
+            assert_eq!(metadata["imageReadings"]["state"], "published");
+            assert_eq!(metadata["imageReadings"]["receipts"][0]["current"], true);
+            let image_material = dossier
+                .materials
+                .iter()
+                .find(|m| m["blocks"].to_string().contains("合成图片文字"))
+                .unwrap();
+            assert_eq!(image_material["reading"]["generatedBy"], "cloud_vision");
+            assert_eq!(image_material["reading"]["verification"], "unchecked");
+            assert!(
+                image_material["issues"]
+                    .to_string()
+                    .contains("model_formatted_reading")
+            );
+            assert!(
+                linggan_evidence::research_dossier::markdown(&dossier)
+                    .contains("图片文字由模型识读整理，引用前请对照原图。")
+            );
+            // A human may edit and resolve the issue without claiming verification.
+            // The immutable model origin must still reach readers and exports.
+            let unit_ref: Uuid =
+                serde_json::from_value(metadata["imageReadings"]["receipts"][0]["unitRef"].clone())
+                    .unwrap();
+            let edit = linggan_evidence::material_reading::ReviewReadingRequest {
+                command_ref: Uuid::new_v4(),
+                unit_ref: unit_ref.to_string(),
+                expected_current_revision_ref: image_material["currentRevisionRef"]
+                    .as_str()
+                    .map(|v| v.parse().unwrap()),
+                source_version: image_material["sourceVersion"].as_str().unwrap().into(),
+                action: "edit".into(),
+                actor: "synthetic-editor".into(),
+                reason: "整理后尚未核对".into(),
+                edited_blocks: Some(vec![
+                    json!({"kind":"paragraph","text":"编辑后的图片文字","speaker":"unconfirmed"}),
+                ]),
+                verified: false,
+                resolved_issue_keys: vec!["model-formatted-image-reading".into()],
+            };
+            linggan_evidence::material_reading::review_reading(&db, unit_ref, &edit)
+                .await
+                .unwrap();
+            let edited = linggan_evidence::research_dossier::read(&db, work)
+                .await
+                .unwrap()
+                .unwrap();
+            let edited_image = edited
+                .materials
+                .iter()
+                .find(|m| m["blocks"].to_string().contains("编辑后的图片文字"))
+                .unwrap();
+            assert_eq!(edited_image["reading"]["formattedOrigin"], true);
+            assert_eq!(edited_image["reading"]["verification"], "unchecked");
+            assert!(
+                !edited_image["issues"]
+                    .to_string()
+                    .contains("model_formatted_reading")
+            );
+            assert!(
+                linggan_evidence::research_dossier::markdown(&edited)
+                    .contains("图片文字由模型识读整理，引用前请对照原图。")
+            );
+            assert!(
+                dossier
+                    .materials
+                    .iter()
+                    .any(|m| m["blocks"].to_string().contains("合成图片文字"))
+            );
+        }
+        endpoint.finish().await;
+    }
 }
 
 async fn prove_billing_pause(
@@ -937,6 +1210,21 @@ async fn saved_video_and_cover(db: &Database, work: Uuid, image: &[u8], image_sh
     }).collect();
     fixture::submit_custom_package(db,"xhs",&["media_slots"],json!({"contentExternalId":"dossier-note"}),"media_slots","xhs",
         json!({"target":{"contentExternalId":"dossier-note"},"layers":[fixture::coverage_layer("media_slots",2)]}),records).await;
+    // A video title, body and cover are not a substitute for its speech transcript.
+    let before_transcript = owner::preview(db, dossier::DOMAIN, work).await.unwrap();
+    assert_eq!(before_transcript["materialReadiness"]["kind"], "video");
+    assert_eq!(before_transcript["canStart"], false);
+    assert!(
+        before_transcript["materialReadiness"]["gaps"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|gap| gap["code"] == "video_transcript_required")
+    );
+    assert!(matches!(
+        owner::start(db, &start_from(&before_transcript, work)).await,
+        Err(FoundationError::AdmissionDenied(_))
+    ));
     admit_media_blob(
         db,
         observations[0],
@@ -1005,79 +1293,4 @@ async fn saved_video_and_cover(db: &Database, work: Uuid, image: &[u8], image_sh
         publication:material_reading::Publication::Automatic { expected_current:None },
     }).await.unwrap();
     tx.commit().await.unwrap();
-}
-
-async fn configure_legacy(db: &Database, adapter: &PiAdapter, model: &setup::Configured) {
-    let revision: i64 = sqlx::query_scalar(
-        "SELECT revision FROM linggan_ai_task_setting WHERE task_key='note_interpretation'",
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    let config = save_task_config(
-        db,
-        &SaveTaskConfig {
-            command_ref: Uuid::new_v4(),
-            task_key: TaskKey::NoteInterpretation,
-            expected_revision: revision,
-            model: Some(ModelSelection {
-                model_ref: model.model,
-                capability_ref: model.capability,
-                limits: ModelLimits {
-                    input_tokens: 31768,
-                    ..model.limits.clone()
-                },
-            }),
-            skill_version_ref: None,
-            material_columns: [MaterialColumn::Title, MaterialColumn::Body]
-                .into_iter()
-                .collect(),
-            budget: BudgetPolicy::Unlimited,
-        },
-    )
-    .await
-    .unwrap();
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../docs/data-contracts/ai-midterm-quality-002/skill/linggan-note-analysis");
-    let skill = import_skill(
-        db,
-        adapter,
-        &ImportSkill {
-            command_ref: Uuid::new_v4(),
-            expected_version_ref: None,
-            package: SkillPackage {
-                directory: "linggan-note-analysis".into(),
-                files: ["SKILL.md", "references/output-guide.md"]
-                    .into_iter()
-                    .map(|path| UploadFile {
-                        path: path.into(),
-                        encoding: Encoding::Utf8,
-                        content: std::fs::read_to_string(root.join(path)).unwrap(),
-                    })
-                    .collect(),
-            },
-        },
-    )
-    .await
-    .unwrap();
-    switch_skill(
-        db,
-        &SwitchSkill {
-            command_ref: Uuid::new_v4(),
-            task_key: TaskKey::NoteInterpretation,
-            expected_task_revision: config.revision,
-            expected_binding_revision: 0,
-            version_ref: skill.version_ref,
-        },
-    )
-    .await
-    .unwrap();
-    setup::enable(db, ControlScope::Task(TaskKey::NoteInterpretation)).await;
-    setup::allow(
-        db,
-        model.endpoint,
-        TaskKey::NoteInterpretation,
-        MaterialClass::NoteMaterial,
-    )
-    .await;
 }

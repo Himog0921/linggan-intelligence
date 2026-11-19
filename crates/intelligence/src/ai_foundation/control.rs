@@ -174,7 +174,7 @@ mod tests {
     }
     #[test]
     fn strictly_over_thirty_percent_and_empty_rounds_cannot_mask_the_brake() {
-        let task = TaskKey::NoteInterpretation;
+        let task = TaskKey::DirectionListDraft;
         assert_eq!(
             CompletedRound {
                 attempted: 50,

@@ -350,6 +350,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0226_ai_connection_billing_pause.sql"),
     include_str!("../../../../database/migrations/0227_opportunity_exclusion_precedence.sql"),
     include_str!("../../../../database/migrations/0228_content_understanding_automation.sql"),
+    include_str!("../../../../database/migrations/0229_retire_note_interpretation.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -518,4 +519,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0226_ai_connection_billing_pause','26687d1eaf49ad905f1f9f843467bd36c86516670e3e16052c9539cc08068ca6');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0227_opportunity_exclusion_precedence','8bebb429d541fef62f63481c57ae6668bf7b4e8bd5464d9700781c39fadc571f');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0228_content_understanding_automation','be890f1d908c8cc973d81836b8046bf09e2cee3dab39d72290f27b8b4c147957');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0229_retire_note_interpretation','06b9d2d5281a90895069d2d9321be5cf78a68a4149168bcde5b536eaabfe70f7');\n",
 );

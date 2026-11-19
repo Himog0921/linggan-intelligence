@@ -79,6 +79,17 @@ pub fn markdown(dossier: &ResearchDossier) -> String {
                 if unit["kind"] == "image" && seen_images.insert(unit["ref"].clone().to_string()) {
                     let label = format!("图片 {}", seen_images.len());
                     out.push_str(&format!("### {label}\n\n"));
+                    let model_formatted = unit["reading"]["formattedOrigin"] == true
+                        || unit["reading"]["ruleVersion"]
+                            == "content-understanding.image-reading.v1"
+                        || unit["issues"].as_array().is_some_and(|issues| {
+                            issues
+                                .iter()
+                                .any(|issue| issue["code"] == "model_formatted_reading")
+                        });
+                    if model_formatted && unit["reading"]["verification"] != "verified" {
+                        out.push_str("> 图片文字由模型识读整理，引用前请对照原图。\n\n");
+                    }
                     if let Some(url) = unit["originalUrl"].as_str() {
                         out.push_str(&format!(
                             "[查看原图](<{}>)\n\n",
@@ -195,10 +206,20 @@ fn render_tags(out: &mut String, dossier: &ResearchDossier, group: &Value) {
 
 fn render_block(out: &mut String, unit: &Value, block: &Value, attribution: &mut Attribution) {
     if let Some(kind) = block["contentType"].as_str() {
-        let label = if kind == "visual_description" { "视觉描述（模型观察，非原文）" } else {
-            match block["sourceRole"].as_str() { Some("background") => "背景文字（识别提取）", Some("brand") => "品牌文字（识别提取）", Some("subtitle") => "字幕文字（识别提取）", _ => "图片文字（识别提取）" }
+        let label = if kind == "visual_description" {
+            "视觉描述（模型观察，非原文）"
+        } else {
+            match block["sourceRole"].as_str() {
+                Some("background") => "背景文字（识别提取）",
+                Some("brand") => "品牌文字（识别提取）",
+                Some("subtitle") => "字幕文字（识别提取）",
+                _ => "图片文字（识别提取）",
+            }
         };
-        let boundary = (unit["ref"].as_str().unwrap_or("").to_owned(), label.to_owned());
+        let boundary = (
+            unit["ref"].as_str().unwrap_or("").to_owned(),
+            label.to_owned(),
+        );
         if attribution.image_type.as_ref() != Some(&boundary) {
             out.push_str(&format!("*{label}*\n\n"));
             attribution.image_type = Some(boundary);

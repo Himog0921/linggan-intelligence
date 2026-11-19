@@ -15,6 +15,7 @@ import { AuthorFact, Engagement } from './WorkParts';
 import { publishedCopy } from './evidencePresent';
 import { SourceNote } from './Primitives';
 import { ReadingPanel, type PanelContext } from './ReadingPanel';
+import { InspectorResearchAction } from './InspectorResearchAction';
 import { errorCode } from './evidenceFeedback';
 import { useToast } from './toastContext';
 import { apiPath } from './evidencePaths';
@@ -259,7 +260,19 @@ export function Inspector(props: InspectorProps) {
             <span className={styles.workPlatform}>{work.platform.toUpperCase()}</span>
             <span className={styles.workDate}>{publishedCopy(work.display, { compact: true, withFieldName: false })}</span>
           </div>
-          <Engagement engagement={work.display.engagement} />
+          <div className={styles.workActions}>
+            <Engagement engagement={work.display.engagement} />
+            <div className={styles.researchAction}>
+              <InspectorResearchAction
+                key={`${domain}:${work.ref}`}
+                domain={domain}
+                work={work.ref}
+                revision={dossier?.revision}
+                asOf={dossier?.asOf}
+                onSubmitted={() => onTab('dossier')}
+              />
+            </div>
+          </div>
         </div> : null}
         <div className={styles.state} role="status" data-empty={state === null}>
           {state ? (

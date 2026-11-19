@@ -1,4 +1,4 @@
-import { exportFileName } from './dossierPresent';
+import { exportFileName, isUnverifiedL1ImageReading } from './dossierPresent';
 import { fetchDossierMarkdown } from './dossierApi';
 import type { DossierBlock, DossierPayload } from './dossierTypes';
 export interface DossierFile { name: string; type: string; data: string }
@@ -17,6 +17,8 @@ export function dossierExport(payload: DossierPayload): DossierFile {
     materials: dossier.materials.map(unit => ({
       kind: unit.kind,
       ...(unit.originalUrl ? { originalUrl: unit.originalUrl } : {}),
+      ...(isUnverifiedL1ImageReading(unit) && unit.blocks.some(block => included.has(block.ref))
+        ? { readingNote: '图片文字由模型识读整理，引用前请对照原图。' } : {}),
       ...(unit.blocks.length === 0 ? { state: unit.sourceState, ...(unit.processing ? { processing: unit.processing.state } : {}) } : {}),
       content: unit.blocks.filter(block => included.has(block.ref)).map(exportBlock),
     })),

@@ -43,15 +43,30 @@ impl MaterialReadiness {
 }
 
 pub fn material_readiness(dossier: &ResearchDossier) -> MaterialReadiness {
-    check(&dossier.materials, &dossier.media_inventory, None)
+    check(&dossier.materials, &dossier.media_inventory, false, false)
 }
 
-fn check(materials: &[Value], slots: &[Value], _expected: Option<u64>) -> MaterialReadiness {
+/// L1 needs the video's spoken content even when other material is readable.
+pub fn l1_material_readiness(dossier: &ResearchDossier) -> MaterialReadiness {
+    check(
+        &dossier.materials,
+        &dossier.media_inventory,
+        dossier.note["sourceContentType"] == "video",
+        true,
+    )
+}
+
+fn check(
+    materials: &[Value],
+    slots: &[Value],
+    source_is_video: bool,
+    require_transcript: bool,
+) -> MaterialReadiness {
     let has_video = slots
         .iter()
         .any(|s| s["purpose"] == "video" && s["component"] == "motion");
     let has_image = slots.iter().any(|s| s["component"] == "image");
-    let kind = if has_video {
+    let kind = if has_video || source_is_video {
         NoteKind::Video
     } else if has_image {
         NoteKind::ImageText
@@ -81,6 +96,42 @@ fn check(materials: &[Value], slots: &[Value], _expected: Option<u64>) -> Materi
         scope_note: (kind == NoteKind::Video)
             .then(|| "仅分析已取得的文字和图片，不包含视频画面内容。".into()),
     };
+    // For video, a caption or cover alone cannot represent the spoken content.
+    // Every video slot must have a current, nonempty transcript for that slot.
+    for video in slots
+        .iter()
+        .filter(|s| require_transcript && s["purpose"] == "video" && s["component"] == "motion")
+    {
+        let transcript_available = materials.iter().any(|m| {
+            m["kind"] == "audio"
+                && m["slotKey"] == video["slotKey"]
+                && video["sourceState"] != "restricted"
+                && m["sourceState"] == "present"
+                && m["currentRevisionRef"].is_string()
+                && m["sourceRef"]
+                    .as_str()
+                    .and_then(|value| value.parse::<uuid::Uuid>().ok())
+                    .is_some()
+                && m["sourceVersion"].is_string()
+                && has_referenceable_text(m)
+        });
+        if !transcript_available {
+            result.gap(
+                "video_transcript_required",
+                MaterialState::Blocked,
+                "视频口播尚未取得有效转录，完成转录后才能进行内容理解。",
+                video["slotKey"].as_str(),
+            );
+        }
+    }
+    if require_transcript && source_is_video && !has_video {
+        result.gap(
+            "video_transcript_required",
+            MaterialState::Blocked,
+            "视频来源尚未取得有效转录，完成转录后才能进行内容理解。",
+            None,
+        );
+    }
     if !readable_text && !readable_image {
         result.gap(
             "no_readable_material",
@@ -90,6 +141,14 @@ fn check(materials: &[Value], slots: &[Value], _expected: Option<u64>) -> Materi
         );
     }
     result
+}
+
+fn has_referenceable_text(material: &Value) -> bool {
+    material["blocks"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|block| block["ref"].as_str().is_some() && content::has_source_text(block))
 }
 
 fn has_text(material: &Value) -> bool {
@@ -126,31 +185,76 @@ mod tests {
     }
     #[test]
     fn existing_text_or_image_is_usable_without_complete_inventory() {
-        assert!(check(&[text()], &[], None).can_start());
-        assert!(check(&[], &[image()], None).can_start());
-        assert!(check(&[text()], &[image()], Some(20)).can_start());
+        assert!(check(&[text()], &[], false, true).can_start());
+        assert!(check(&[], &[image()], false, true).can_start());
+        assert!(check(&[text()], &[image()], false, true).can_start());
     }
     #[test]
     fn missing_or_restricted_content_is_not_usable() {
-        assert!(!check(&[], &[], None).can_start());
+        assert!(!check(&[], &[], false, true).can_start());
         let mut missing = image();
         missing["localReadable"] = json!(false);
-        assert!(!check(&[], &[missing], None).can_start());
+        assert!(!check(&[], &[missing], false, true).can_start());
         let mut restricted = image();
         restricted["sourceState"] = json!("restricted");
-        assert!(!check(&[], &[restricted], None).can_start());
+        assert!(!check(&[], &[restricted], false, true).can_start());
     }
     #[test]
-    fn video_can_use_caption_but_does_not_claim_video_understanding() {
+    fn video_requires_transcript_even_with_caption_and_cover() {
         let video = json!({"slotKey":"video:1","component":"motion","purpose":"video","sourceState":"present"});
-        let result = check(&[text()], &[video], None);
-        assert!(result.can_start());
+        let result = check(&[text()], std::slice::from_ref(&video), false, true);
+        assert!(!result.can_start());
+        assert!(check(&[text()], std::slice::from_ref(&video), false, false).can_start());
+        assert_eq!(result.gaps[0].code, "video_transcript_required");
         assert!(result.scope_note.unwrap().contains("不包含视频画面"));
+        let audio = json!({"kind":"audio","slotKey":"video:1","sourceState":"present","currentRevisionRef":"r","sourceRef":"00000000-0000-4000-8000-000000000001","sourceVersion":"v1","blocks":[{"ref":"text-1","kind":"paragraph","text":"有效的口播转录"}]});
+        assert!(check(&[text(), audio], &[video], false, true).can_start());
     }
+    #[test]
+    fn captured_video_type_blocks_when_video_slot_is_missing() {
+        let result = check(&[text()], &[], true, true);
+        assert_eq!(result.kind, NoteKind::Video);
+        assert!(!result.can_start());
+        assert_eq!(result.gaps[0].code, "video_transcript_required");
+        assert!(check(&[text()], &[], false, true).can_start());
+    }
+
+    #[test]
+    fn each_video_requires_its_own_nonempty_current_transcript() {
+        let first = json!({"slotKey":"video:1","component":"motion","purpose":"video","sourceState":"present"});
+        let second = json!({"slotKey":"video:2","component":"motion","purpose":"video","sourceState":"present"});
+        let audio = json!({"kind":"audio","slotKey":"video:1","sourceState":"present","currentRevisionRef":"r","sourceRef":"00000000-0000-4000-8000-000000000001","sourceVersion":"v1","blocks":[{"ref":"text-1","kind":"paragraph","text":"有效转录"}]});
+        let result = check(
+            &[text(), audio.clone()],
+            &[first.clone(), second],
+            false,
+            true,
+        );
+        assert!(!result.can_start());
+        assert_eq!(result.gaps[0].slot_key.as_deref(), Some("video:2"));
+        let mut unreferenced = audio.clone();
+        unreferenced["blocks"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("ref");
+        assert!(
+            !check(
+                &[text(), unreferenced],
+                std::slice::from_ref(&first),
+                false,
+                true
+            )
+            .can_start()
+        );
+        let mut empty = audio;
+        empty["blocks"] = json!([]);
+        assert!(!check(&[text(), empty], &[first], false, true).can_start());
+    }
+
     #[test]
     fn restricted_video_does_not_authorize_its_speech() {
         let video = json!({"slotKey":"video:1","component":"motion","purpose":"video","sourceState":"restricted"});
-        let audio = json!({"kind":"audio","slotKey":"video:1","sourceState":"present","currentRevisionRef":"r","blocks":[{"kind":"paragraph","text":"文字"}]});
-        assert!(!check(&[audio], &[video], None).can_start());
+        let audio = json!({"kind":"audio","slotKey":"video:1","sourceState":"present","currentRevisionRef":"r","sourceRef":"00000000-0000-4000-8000-000000000001","sourceVersion":"v1","blocks":[{"ref":"text-1","kind":"paragraph","text":"文字"}]});
+        assert!(!check(&[audio], &[video], false, true).can_start());
     }
 }

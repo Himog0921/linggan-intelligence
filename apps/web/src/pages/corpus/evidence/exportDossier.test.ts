@@ -1,7 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { dossierExport, dossierMarkdownExport, downloadFile } from './exportDossier';
 import { parseDossierPayload } from './dossierDecode';
-import { DOMAIN, dossierJson, workRef } from './evidenceFixtures';
+import { DOMAIN, dossierJson, dossierMaterialJson, workRef } from './evidenceFixtures';
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 it('JSON 导出保留全文，去掉内部诊断、页码与重复索引', () => {
   const raw = dossierJson(1, { bodyText: '全文'.repeat(60000) });
@@ -31,4 +31,26 @@ it('Markdown 文件单独读取冻结 asOf/revision，尚未点击下载时只�
   expect(file.data).toBe(text); expect(file.type).toBe('text/markdown;charset=utf-8'); expect(click).not.toHaveBeenCalled();
   const url = new URL(String(mock.mock.calls[0]?.[0]), 'http://localhost');
   expect(url.searchParams.get('asOf')).toBe(payload.dossier.asOf); expect(url.searchParams.get('expectedRevision')).toBe(payload.dossier.revision);
+});
+
+it('JSON 导出标明未核对的模型整理图片文字', () => {
+  const reading = { generatedBy: 'cloud_vision', adoption: 'automatic', verification: 'unchecked', ruleVersion: 'content-understanding.image-reading.v1', review: null };
+  const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { reading })] }));
+  const data = JSON.parse(dossierExport(payload).data);
+  expect(data.materials.find((item: { kind: string }) => item.kind === 'image').readingNote).toBe('图片文字由模型识读整理，引用前请对照原图。');
+});
+
+it('未核验的人工编辑仍保留未解决的模型来源提示', () => {
+  const reading = { generatedBy: 'human_edit', adoption: 'human_edited', verification: 'unchecked', ruleVersion: 'dossier-content.v2', review: null };
+  const issues = [{ key: 'model-formatted-image-reading', code: 'model_formatted_reading', message: '引用前请对照原图。', resolution: 'reading_edit' }];
+  const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { reading, issues })] }));
+  const data = JSON.parse(dossierExport(payload).data);
+  expect(data.materials.find((item: { kind: string }) => item.kind === 'image').readingNote).toBe('图片文字由模型识读整理，引用前请对照原图。');
+});
+
+it('未核验编辑即使解决提示，仍按不可变模型来源标注', () => {
+  const reading = { generatedBy: 'human_edit', adoption: 'human_edited', verification: 'unchecked', ruleVersion: 'dossier-content.v2', formattedOrigin: true, review: null };
+  const payload = parseDossierPayload(dossierJson(1, { materials: [dossierMaterialJson(1, { reading, issues: [] })] }));
+  const data = JSON.parse(dossierExport(payload).data);
+  expect(data.materials.find((item: { kind: string }) => item.kind === 'image').readingNote).toBe('图片文字由模型识读整理，引用前请对照原图。');
 });

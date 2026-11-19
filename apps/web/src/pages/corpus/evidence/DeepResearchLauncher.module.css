@@ -1,6 +1,58 @@
-.panel { display: grid; gap: var(--lgi-space-4); margin-block: var(--lgi-space-3); min-width: 0; }
+.trigger { min-height: var(--lgi-space-8); }
+
+.modal::backdrop {
+  background: color-mix(in srgb, var(--lgi-ink) 58%, transparent);
+}
+
+.modal {
+  box-sizing: border-box;
+  width: min(calc(var(--lgi-space-16) * 10), calc(100vw - var(--lgi-space-8)));
+  max-height: calc(100dvh - var(--lgi-space-8));
+  overflow: auto;
+  padding: 0;
+  border: 1px solid var(--lgi-ink);
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  box-shadow: 8px 8px 0 var(--lgi-ink);
+}
+
+.modalHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--lgi-space-4);
+  padding: var(--lgi-space-4) var(--lgi-space-5);
+  border-bottom: 1px solid var(--lgi-ink);
+}
+
+.modalHeader h2 {
+  margin: 0;
+  font: 600 var(--lgi-type-section-size) / 1.4 var(--lgi-font-ui);
+}
+
+.close {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: var(--lgi-space-8);
+  height: var(--lgi-space-8);
+  border: 1px solid var(--lgi-ink);
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font: 600 var(--lgi-type-section-size) / 1 var(--lgi-font-ui);
+}
+
+.close:hover { background: var(--lgi-ink); color: var(--lgi-canvas); }
+
+.modalBody {
+  display: grid;
+  gap: var(--lgi-space-4);
+  min-width: 0;
+  padding: var(--lgi-space-5);
+}
+
 .group { display: grid; gap: var(--lgi-space-2); min-width: 0; margin: 0; padding: 0; border: 0; }
 .label { padding: 0; color: var(--lgi-muted); font: var(--lgi-type-label-weight) var(--lgi-type-label-size) / var(--lgi-type-label-leading) var(--lgi-font-ui); }
 .row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--lgi-space-2); min-width: 0; }
-.question { flex: 1 1 16em; min-width: 0; min-height: var(--lgi-space-10); padding: 0 var(--lgi-space-3); border: 1px solid var(--lgi-border-strong); color: var(--lgi-ink); background: var(--lgi-canvas); font: var(--lgi-type-input-weight) var(--lgi-type-input-size) / var(--lgi-type-input-leading) var(--lgi-font-ui); }
+.question { flex: 1 1 16em; min-width: 0; min-height: var(--lgi-space-10); padding: 0 var(--lgi-space-3); border: 1px solid var(--lgi-ink); color: var(--lgi-ink); background: var(--lgi-canvas); font: var(--lgi-type-input-weight) var(--lgi-type-input-size) / var(--lgi-type-input-leading) var(--lgi-font-ui); }
 .question:focus-visible { outline: var(--lgi-focus-inset) solid var(--lgi-ink); outline-offset: 0; }
