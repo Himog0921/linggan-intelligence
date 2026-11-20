@@ -35,10 +35,15 @@ pub fn response(request: &Value) -> Value {
             } else {
                 vec![]
             };
+            let reason = match (signals.is_empty(), text.contains("合成咨询入口")) {
+                (true, true) => json!("广告/引流内容，非评论表达"),
+                (true, false) => json!("没有可提取的内容"),
+                (false, _) => Value::Null,
+            };
             json!({
                 "targetKey": target["targetKey"],
                 "outcome": if signals.is_empty() { "no_signal" } else { "signals" },
-                "reason": if signals.is_empty() { json!("没有可提取的内容") } else { Value::Null },
+                "reason": reason,
                 "signals": signals,
             })
         })

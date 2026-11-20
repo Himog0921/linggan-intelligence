@@ -287,7 +287,9 @@ async fn one_call_per_work_places_every_comment_and_the_next_unit_reuses_the_cat
     let c2 = env
         .comment(one, "c2", "我家也是不提醒就不动", "reader-b")
         .await;
-    let c3 = env.comment(one, "c3", "+1", "reader-c").await;
+    let c3 = env
+        .comment(one, "c3", "点合成咨询入口联系助理", "reader-c")
+        .await;
     let c4 = env.comment(one, "c4", "写作业特别磨蹭", "reader-d").await;
     let c5 = env.comment(one, "c5", "MISSING 也要提醒", "reader-e").await;
     let c6 = env.comment(one, "c6", "BADEVIDENCE", "reader-f").await;
@@ -360,11 +362,27 @@ async fn one_call_per_work_places_every_comment_and_the_next_unit_reuses_the_cat
         [
             row("c1", "succeeded", &["need"]),
             row("c2", "succeeded", &["need"]),
-            row("c3", "succeeded", &[]),
+            row("c3", "succeeded", &["promotion"]),
             row("c4", "succeeded", &["problem"]),
             row("c5", "failed", &[]),
             row("c6", "failed", &[]),
         ]
+    );
+    let promotions = crate::comment_study_catalog::read_comment_catalog(
+        &env.db,
+        &serde_json::from_value(json!({
+            "domain": support::D,
+            "workRef": w1,
+            "signalKind": "promotion",
+        }))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(promotions["items"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        promotions["items"][0]["commentKey"]["commentExternalId"],
+        "c3"
     );
     // The receipt of the run: calls and tokens come from the ledger, targets from their results.
     let run = read_run(&env.db, support::D, batch).await.unwrap();

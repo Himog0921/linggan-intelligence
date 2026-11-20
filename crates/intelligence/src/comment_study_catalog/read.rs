@@ -149,6 +149,7 @@ impl CommentCatalogQuery {
                         | "quote"
                         | "context"
                         | "question"
+                        | "promotion"
                 )
             })
             || self

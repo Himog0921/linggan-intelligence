@@ -31,6 +31,23 @@ describe('D3 actual four-view React boundary', () => {
   await waitFor(()=>expect(calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('q')).toBe('两字'));
   const call=calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)!;expect(call.url.searchParams.get('signalKind')).toBe('need');expect(call.url.searchParams.get('minLikes')).toBe('100');expect(router.state.location.search).toContain('signalKind=need');expect(call.url.searchParams.get('domain')).toBe(DOMAIN);
  });
+ it('shows the promotion label in the comment directory', async () => {
+  installFetch(url => url.pathname.endsWith('/comments') ? json({
+   domainRef: DOMAIN,
+   items: [{ ...comment(), signalKinds: ['promotion'] }],
+   summary: { displayableCommentCount: 1, eligibleCommentCount: 1 },
+   indexCoverage: { indexedCount: 1, pendingCount: 0 },
+   page: { nextCursor: null },
+  }) : undefined);
+  renderPage(`domain=${DOMAIN}&view=comments`);
+  const table = await screen.findByRole('table');
+  expect(within(table).getByText('引流话术')).toBeVisible();
+  await userEvent.click(screen.getByRole('combobox', { name: '研究标签' }));
+  await userEvent.click(screen.getByRole('option', { name: '引流话术' }));
+  await userEvent.click(screen.getByRole('button', { name: '筛选' }));
+  await userEvent.click(screen.getByRole('button', { name: '完成' }));
+  await waitFor(() => expect(calls.filter(call => call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('signalKind')).toBe('promotion'));
+ });
  it('keeps FIND clearing local until the user explicitly applies the comment filter',async()=>{
   installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
   const reads=()=>calls.filter(call=>call.url.pathname.endsWith('/comments')).length;
