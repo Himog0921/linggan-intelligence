@@ -846,6 +846,7 @@ G1 里给 `comment_understanding` 和 `comment_problem_consolidation` 注册任�
 | 隔离 PostgreSQL：`opportunity_postgres` 13、`opportunity_mentions_postgres` 6、`opportunity_asof_postgres` 4 | 全部通过 |
 | 隔离 PostgreSQL：V1 三阶段执行器 `comment_uses_target_dossier_and_both_permissions` | 通过：旧流程在 G2 之后仍可运行 |
 | lib 层 PostgreSQL（`topic_comment_source`、`topic_map_research`、`topic_research_automation`、`comment_study`、`content_understanding`、新的 `execution_tests`） | 15 通过，1 失败：`content_understanding::topic_tests::saved_core_drives_topic_queue_and_persisted_membership`（`topic_research_automation/tests.rs:29`，期望 4 个阶段、实际 1 个）。**在未改动的基线 `8891d71` 上同样失败**，与本包无关，未处理 |
+| **机会卡全套**（`opportunity::card::snapshot/groups` lib 测试、`opportunity_metrics_postgres`、机会卡 API 证明） | **G2 提交时本地没跑，被 PR 的 CI 抓到**：机会卡取快照时审计"实际用到的表都在 `SOURCE_TABLES` 里"，G2 的目录状态 SQL 新读了 `linggan_comment_research_result/_unit/_unit_target`，名单里没有，整组 `card::*` 和机会卡浏览器链路失败。已把三张表加入 `opportunity/card/snapshot.rs` 的 `SOURCE_TABLES`。修复后本地：lib 5/5，`opportunity_metrics_postgres` 47/48（唯一失败的 `card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices` 是 `SourcesBusy` 锁时序偶发，单独连跑 3 次通过），API 证明通过；浏览器链路本地未跑，靠 CI |
 | `cargo test -p linggan-intelligence --lib` | 431 通过，26 个忽略 |
 | `cargo check --workspace --tests`、`scripts/ci-preflight.sh origin/main` | 通过 |
 | `cargo test -p linggan-api` | 沿用 B.4：1 个基线上同样失败的页面测试，未重复运行 |
