@@ -152,6 +152,7 @@ pub async fn save_task_config(
                 | TaskKey::CreatorAccountResearch
                 | TaskKey::CommentStudy
                 | TaskKey::CommentUnderstanding
+                | TaskKey::CommentProblemConsolidation
                 | TaskKey::ContentUnderstanding
                 | TaskKey::ContentUnderstandingDeep
         ) && request

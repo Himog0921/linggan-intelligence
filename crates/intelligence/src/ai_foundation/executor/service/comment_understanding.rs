@@ -345,7 +345,7 @@ async fn settle(
         Some(p) => json!({
             "unitRef": prepared.unit_ref, "methodVersion": CONTRACT,
             "acceptedTargets": p.accepted, "rejectedTargets": p.rejected,
-            "newProblems": p.new_problems, "withheldTargets": withheld.len(),
+            "newProblems": p.new_problems, "newCandidates": p.new_candidates, "withheldTargets": withheld.len(),
             "ignoredEntries": p.ignored_entries,
         }),
         None => json!({"unitRef": prepared.unit_ref, "methodVersion": CONTRACT}),

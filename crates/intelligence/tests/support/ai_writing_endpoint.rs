@@ -47,8 +47,10 @@ impl Endpoint {
                             recorded.lock().unwrap().push(request);
                             let waiting=if probe {None} else {gate.lock().unwrap().take()};
                             if let Some((seen,release))=waiting {seen.send(()).unwrap();release.await.unwrap();}
-                            let understanding=serde_json::from_str::<Value>(&prompt).ok().filter(|v|v["contract"]=="comment-understanding.v1");
-                            let mut output=if probe {json!({"lingganProbe":"ok"})} else if let Some(request)=&understanding {comment_understanding_response::response(request)} else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["documents"].is_array()) {
+                            let comment_input=serde_json::from_str::<Value>(&prompt).ok();
+                            let understanding=comment_input.as_ref().filter(|v|v["contract"]=="comment-understanding.v1");
+                            let consolidation=comment_input.as_ref().filter(|v|v["contract"]=="comment-problem-consolidation.v1");
+                            let mut output=if probe {json!({"lingganProbe":"ok"})} else if let Some(request)=understanding {comment_understanding_response::response(request)} else if let Some(request)=consolidation {comment_understanding_response::consolidation(request)} else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["documents"].is_array()) {
                                 let packet:Value=serde_json::from_str(&prompt).unwrap();
                                 let citation=|index:usize| {let entries=packet["documents"][index]["fragments"].as_array().unwrap();entries.iter().find(|f|f["content"]["kind"]=="table").unwrap_or(&entries[0])["id"].clone()};
                                 json!({"relation":"mostly_repeated","claims":[{"kind":"shared_point","statement":"两侧合成材料均有步骤说明。","targetCitations":[citation(0)],"referenceCitations":[citation(1)]}],"limitations":["synthetic loopback fixture only"]})

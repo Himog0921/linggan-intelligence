@@ -51,6 +51,7 @@ fn connected(task: TaskKey) -> bool {
             | TaskKey::WorkComparison
             | TaskKey::CommentStudy
             | TaskKey::CommentUnderstanding
+            | TaskKey::CommentProblemConsolidation
             | TaskKey::CommentProblemResolution
             | TaskKey::CommentProblemPairReview
             | TaskKey::TopicResearch

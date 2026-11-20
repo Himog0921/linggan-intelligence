@@ -59,17 +59,50 @@ async fn environment(name: &str, variant: &'static str) -> Env {
     owner.request_drain().await.unwrap();
     owner.complete_drain().await.unwrap();
     drop(owner);
-    let revision: i64 = sqlx::query_scalar(
-        "SELECT revision FROM linggan_ai_task_setting WHERE task_key='comment_understanding'",
-    )
-    .fetch_one(db.pool())
-    .await
-    .unwrap();
-    let config = save_task_config(
+    let config = configure_comment_task(
         &db,
+        &configured,
+        TaskKey::CommentUnderstanding,
+        &[MaterialClass::NoteMaterial, MaterialClass::CommentMaterial],
+    )
+    .await;
+    if variant == "consolidation" {
+        configure_comment_task(
+            &db,
+            &configured,
+            TaskKey::CommentProblemConsolidation,
+            &[MaterialClass::CommentMaterial],
+        )
+        .await;
+    }
+    let probes = endpoint.requests.lock().unwrap().len();
+    Env {
+        db,
+        endpoint,
+        adapter,
+        task_config: config.task_config_ref,
+        task_revision: config.revision,
+        probes,
+    }
+}
+
+async fn configure_comment_task(
+    db: &Database,
+    configured: &setup::Configured,
+    task: TaskKey,
+    materials: &[MaterialClass],
+) -> crate::ai_foundation::task_config::TaskConfigReceipt {
+    let revision: i64 =
+        sqlx::query_scalar("SELECT revision FROM linggan_ai_task_setting WHERE task_key=$1")
+            .bind(task.as_str())
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let config = save_task_config(
+        db,
         &SaveTaskConfig {
             command_ref: Uuid::new_v4(),
-            task_key: TaskKey::CommentUnderstanding,
+            task_key: task,
             expected_revision: revision,
             model: Some(ModelSelection {
                 model_ref: configured.model,
@@ -89,28 +122,14 @@ async fn environment(name: &str, variant: &'static str) -> Env {
     for scope in [
         ControlScope::Global,
         ControlScope::Executor,
-        ControlScope::Task(TaskKey::CommentUnderstanding),
+        ControlScope::Task(task),
     ] {
-        setup::enable(&db, scope).await;
+        setup::enable(db, scope).await;
     }
-    for material in [MaterialClass::NoteMaterial, MaterialClass::CommentMaterial] {
-        setup::allow(
-            &db,
-            configured.endpoint,
-            TaskKey::CommentUnderstanding,
-            material,
-        )
-        .await;
+    for &material in materials {
+        setup::allow(db, configured.endpoint, task, material).await;
     }
-    let probes = endpoint.requests.lock().unwrap().len();
-    Env {
-        db,
-        endpoint,
-        adapter,
-        task_config: config.task_config_ref,
-        task_revision: config.revision,
-        probes,
-    }
+    config
 }
 
 impl Env {
@@ -852,4 +871,210 @@ async fn a_start_is_idempotent_and_refuses_a_plan_that_no_longer_matches() {
     };
     assert!(start(&env.db, &stale_revision).await.is_err());
     env.endpoint.finish().await;
+}
+
+async fn published_work_with_l1(env: &Env, external_id: &str, l1_config: Uuid) -> Uuid {
+    let package = support::fixture::submit_package_at(
+        &env.db,
+        "content_detail",
+        json!({"contentExternalId":external_id}),
+        json!({
+            "kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":external_id},
+            "payload":{
+                "title":"合成作品","bodyText":"合成正文：讲孩子做事的习惯。","authorId":"synthetic-creator",
+                "publishedAt":1791849600000_i64,"publishedAtSourceField":"publishTime",
+                "publishedAtSourceKind":"platform_epoch","publishedAtPrecision":"second",
+                "publishedAtParserVersion":"xhs-detail-time-v2",
+            },
+        }),
+        "2026-10-13T00:00:00Z",
+    )
+    .await;
+    let work: Uuid = sqlx::query_scalar(
+        "INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)
+         SELECT gen_random_uuid(),content_public_ref,$2,'primary','legacy_domain_migration',$1
+         FROM linggan_material_content_detail WHERE package_ref=$1 RETURNING content_public_ref",
+    )
+    .bind(package)
+    .bind(support::D)
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    topic_tests::seed_core(&env.db, work, l1_config, false).await;
+    work
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL and local loopback adapter"]
+async fn consolidates_duplicate_candidates_once_and_restores_opportunity_on_revoke() {
+    use super::{RevokeRedirect, consolidation_queue, revoke_redirect};
+    use crate::opportunity::{
+        CardRebuildMode, CommenterDigest, read_card, rebuild_opportunity_cards,
+    };
+
+    let env = environment("cu_consolidation", "consolidation").await;
+    let l1_config: Uuid = sqlx::query_scalar(
+        "SELECT config_ref FROM linggan_model_config ORDER BY created_at LIMIT 1",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    let first = published_work_with_l1(&env, "first-work", l1_config).await;
+    let second = published_work_with_l1(&env, "second-work", l1_config).await;
+    let reminder = env
+        .comment("first-work", "c1", "我的孩子得提醒才开始", "reader-a")
+        .await;
+    let prodding = env
+        .comment("second-work", "c2", "我家孩子要催促才动笔", "reader-b")
+        .await;
+    let slow = env
+        .comment("first-work", "c3", "我家孩子写作业磨蹭", "reader-c")
+        .await;
+    let (_, research_batch) = env
+        .run(
+            &[
+                selection(first, reminder),
+                selection(first, slow),
+                selection(second, prodding),
+            ],
+            false,
+        )
+        .await;
+    let queued = || async {
+        sqlx::query_scalar::<_, Uuid>(
+            "SELECT batch_ref FROM linggan_comment_problem_consolidation_batch WHERE research_batch_ref=$1",
+        )
+        .bind(research_batch)
+        .fetch_optional(env.db.pool())
+        .await
+        .unwrap()
+    };
+    consolidation_queue::tick(&env.db).await.unwrap();
+    assert_eq!(
+        queued().await,
+        None,
+        "open research cannot queue consolidation"
+    );
+    // The worker ticks in the background. Hold this fixture's consolidation switch until
+    // the candidate-only state has been checked, regardless of how long the two calls take.
+    use crate::ai_foundation::control_store::{Actor, ChangeControl, change_control};
+    let scope = ControlScope::Task(TaskKey::CommentProblemConsolidation);
+    let revision = sqlx::query_scalar("SELECT revision FROM linggan_ai_control WHERE scope_key=$1")
+        .bind(scope.key())
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap();
+    change_control(
+        &env.db,
+        &ChangeControl {
+            command_ref: Uuid::new_v4(),
+            scope: scope.clone(),
+            expected_revision: revision,
+            enabled: false,
+            reason: "Observe synthetic candidates before their automatic merge".into(),
+        },
+        Actor::Human,
+    )
+    .await
+    .unwrap();
+    env.settle(research_batch).await;
+
+    let before = env.problems().await;
+    assert_eq!(before.len(), 3);
+    assert!(
+        before
+            .iter()
+            .all(|(_, state, _, _, authors, _)| state == "candidate" && *authors == 1)
+    );
+    let digest = CommenterDigest::from_key(vec![7; 32]).unwrap();
+    rebuild_opportunity_cards(&env.db, support::D, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+
+    setup::enable(&env.db, scope).await;
+    consolidation_queue::tick(&env.db).await.unwrap();
+    let consolidation_batch = queued().await.expect("one batch for the completed run");
+    consolidation_queue::tick(&env.db).await.unwrap();
+    assert_eq!(queued().await, Some(consolidation_batch));
+    env.settle(consolidation_batch).await;
+    let requests = env.unit_requests();
+    assert_eq!(
+        requests.len(),
+        3,
+        "two research units and one consolidation"
+    );
+    assert_eq!(requests[2]["contract"], "comment-problem-consolidation.v1");
+    assert!(requests[2].get("targets").is_none());
+    assert!(!requests[2].to_string().contains("reader-"));
+    let (winner, loser, redirect, mapped_pairs): (Uuid, Uuid, Uuid, i32) = sqlx::query_as(
+        "SELECT redirect.to_problem_ref,redirect.from_problem_ref,redirect.redirect_ref,
+          (SELECT count(*)::int FROM jsonb_object_keys(dispatch.pairs))
+         FROM linggan_comment_problem_active_redirect redirect
+         JOIN linggan_comment_problem_consolidation_dispatch dispatch
+           ON dispatch.invocation_ref=redirect.decision_invocation_ref",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(mapped_pairs, 3);
+    let after = env.problems().await;
+    assert_eq!(after.len(), 2, "narrower is not merged");
+    assert!(
+        after
+            .iter()
+            .any(|(_, state, _, _, authors, works)| state == "formal"
+                && *authors == 2
+                && *works == 2)
+    );
+    rebuild_opportunity_cards(&env.db, support::D, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+
+    let card_author_count = async |problem: Uuid| {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT (payload #>> '{demand,groups,0,mentionersTotal}')::bigint
+             FROM linggan_opportunity_opportunity_card WHERE problem_ref=$1",
+        )
+        .bind(problem)
+        .fetch_one(env.db.pool())
+        .await
+        .unwrap()
+    };
+    assert_eq!(card_author_count(winner).await, 2);
+    let redirected_card = read_card(&env.db, loser).await.unwrap();
+    assert_eq!(redirected_card["problem"]["id"], json!(winner));
+    assert_eq!(redirected_card["problem"]["redirectedFrom"], json!(loser));
+    let active_loser_support: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_opportunity_current_comment_mention WHERE problem_ref=$1",
+    )
+    .bind(loser)
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert_eq!(active_loser_support, 0);
+    let revoke = RevokeRedirect {
+        command_ref: Uuid::new_v4(),
+        domain_ref: support::D,
+        redirect_ref: redirect,
+    };
+    let wrong_domain = RevokeRedirect {
+        domain_ref: Uuid::new_v4(),
+        ..revoke
+    };
+    assert!(matches!(
+        revoke_redirect(&env.db, &wrong_domain).await,
+        Err(crate::ai_foundation::store::FoundationError::NotFound)
+    ));
+    let receipt = revoke_redirect(&env.db, &revoke).await.unwrap();
+    assert_eq!(receipt["changed"], true);
+    assert_eq!(revoke_redirect(&env.db, &revoke).await.unwrap(), receipt);
+    assert_eq!(env.problems().await, before);
+    rebuild_opportunity_cards(&env.db, support::D, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    assert_eq!(card_author_count(winner).await, 1);
+    assert_eq!(card_author_count(loser).await, 1);
+    let restored_card = read_card(&env.db, loser).await.unwrap();
+    assert_eq!(restored_card["problem"]["id"], json!(loser));
+    assert!(restored_card["problem"]["redirectedFrom"].is_null());
 }

@@ -26,6 +26,8 @@ pub fn response(request: &Value) -> Value {
             let text = target["researchText"].as_str().unwrap_or("");
             let signals = if text.contains("BADEVIDENCE") {
                 vec![json!({"kind":"belief","proposition":"评论者发表了看法","evidence":"原文里并没有这句话","problem":null})]
+            } else if text.contains("催促") {
+                vec![json!({"kind":"need","proposition":"评论者的孩子需要催促才开始","evidence":"催促","problem":assignment(&catalog,"催促","n3")})]
             } else if text.contains("提醒") {
                 vec![json!({"kind":"need","proposition":"评论者的孩子需要有人提醒","evidence":"提醒","problem":assignment(&catalog,"提醒","n1")})]
             } else if text.contains("磨蹭") {
@@ -46,7 +48,34 @@ pub fn response(request: &Value) -> Value {
         "newProblems": [
             {"newKey":"n1","label":"孩子需要每天有人提醒","actor":"家长","goal":"孩子能自己开始做事","barrier":"需要每天有人提醒才会开始","context":null},
             {"newKey":"n2","label":"孩子写作业磨蹭","actor":"家长","goal":"孩子能按时写完作业","barrier":"写作业时拖拖拉拉","context":null},
+            {"newKey":"n3","label":"孩子需要家长催促","actor":"家长","goal":"孩子能自己开始做事","barrier":"需要家长催促才会开始","context":null},
         ],
         "targets": targets,
     })
+}
+
+pub fn consolidation(request: &Value) -> Value {
+    let catalog = request["catalog"]
+        .as_array()
+        .expect("consolidation catalog");
+    let mut pairs = Vec::new();
+    for (index, left) in catalog.iter().enumerate() {
+        for (right_index, right) in catalog.iter().enumerate().skip(index + 1) {
+            let labels = [
+                left["label"].as_str().unwrap(),
+                right["label"].as_str().unwrap(),
+            ];
+            let matches = |term| labels.iter().any(|label| label.contains(term));
+            let verdict = if matches("提醒") && matches("催促") {
+                "same"
+            } else {
+                "narrower"
+            };
+            pairs.push(json!({
+                "pairKey":format!("q{}-{}", index + 1, right_index + 1),
+                "verdict":verdict,"reason":"合成夹具按需求标签判定",
+            }));
+        }
+    }
+    json!({"contract":"comment-problem-consolidation.v1","pairs":pairs})
 }

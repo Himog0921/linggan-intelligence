@@ -17,6 +17,7 @@ pub struct Published {
     pub accepted: usize,
     pub rejected: usize,
     pub new_problems: usize,
+    pub new_candidates: i64,
     pub ignored_entries: usize,
 }
 
@@ -135,6 +136,15 @@ pub async fn publish_in(
                 published.accepted += 1;
             }
         }
+    }
+    if !created.is_empty() {
+        let refs: Vec<_> = created.values().map(|(problem, _)| *problem).collect();
+        published.new_candidates = sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_comment_problem_current WHERE problem_ref=ANY($1) AND state='candidate'",
+        )
+        .bind(&refs)
+        .fetch_one(&mut **tx)
+        .await?;
     }
     Ok(published)
 }

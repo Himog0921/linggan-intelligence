@@ -78,6 +78,9 @@ pub enum InputRef {
     CommentResearchUnit {
         unit_ref: Uuid,
     },
+    CommentProblemConsolidation {
+        domain_ref: Uuid,
+    },
     WritingRequest {
         request_ref: Uuid,
     },
@@ -134,6 +137,9 @@ impl InputRef {
             }
             Self::CommentResearch { .. } => task == TaskKey::CommentStudy && !trial,
             Self::CommentResearchUnit { .. } => task == TaskKey::CommentUnderstanding && !trial,
+            Self::CommentProblemConsolidation { .. } => {
+                task == TaskKey::CommentProblemConsolidation && !trial
+            }
             Self::WritingRequest { .. } => {
                 matches!(task, TaskKey::WritingLegacy | TaskKey::CreationTitle) && !trial
             }
@@ -189,7 +195,9 @@ impl BatchKind {
         }
         match task {
             TaskKey::ModelProbe => self == Self::Probe,
-            TaskKey::ContentUnderstanding => matches!(self, Self::Interactive | Self::Automatic),
+            TaskKey::ContentUnderstanding | TaskKey::CommentProblemConsolidation => {
+                matches!(self, Self::Interactive | Self::Automatic)
+            }
             TaskKey::ContentUnderstandingDeep
             | TaskKey::WorkComparison
             | TaskKey::CreatorResearch
@@ -337,6 +345,7 @@ pub async fn create_batch(
                 | TaskKey::CreatorAccountResearch
                 | TaskKey::CommentStudy
                 | TaskKey::CommentUnderstanding
+                | TaskKey::CommentProblemConsolidation
         )
     {
         return Err(FoundationError::Invalid);

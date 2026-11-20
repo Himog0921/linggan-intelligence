@@ -1,8 +1,8 @@
-# COMMENT-UNDERSTANDING-V2-001 · 交接：从 G3 继续
+# COMMENT-UNDERSTANDING-V2-001 · 交接：从 G5 继续
 
 > 状态: 活跃计划
-> 最后核对: 2026-11-19（本文写于 G2 之后；PR #621 的最新提交以 `git log` 为准）
-> 适用范围: 接手评论研究 V2 在同一 PR、同一分支上的剩余代码工作（P0、G3、G5、切换、G4/G6）
+> 最后核对: 2026-11-19（已接续至 G3；PR #621 的最新提交以 `git log` 为准）
+> 适用范围: 接手评论研究 V2 在同一 PR、同一分支上的剩余代码工作（P0、G5、切换、G4/G6）
 > 事实来源: [实施计划](comment-understanding-v2-001.md)（附录 A 改动清单、附录 B 的 G1 记录、附录 C 的 G2 记录）、[评论理解合同](../../data-contracts/comment-understanding.md)、分支 `claude/comment-understanding-v2` 的代码与测试、PR #621 的 CI
 > 冲突时以谁为准: Mog 最新明确授权、AGENTS.md、真实运行/数据库副作用、当前代码/migration/测试；本文只是入口，不复制计划
 
@@ -10,11 +10,11 @@
 
 ## 0. 摘要与启动指令
 
-**一句话：** 评论研究 V2 把"一条评论三次模型调用"改成"一个作品的若干评论一次调用"，需求（Problem）是稳定身份，候选/正式由有效作者数实时推导，合并只追加重定向。G0–G2 已完成（合同、迁移、规划、执行、读取），现在**没有任何入口调用它**，运行中的产品行为没有变化。剩下：候选整理与下游（G3）、接口与前端（G5）、旧流程退役（切换）、真实模型冒烟（P0，需 Mog 授权）。
+**一句话：** 评论研究 V2 把"一条评论三次模型调用"改成"一个作品的若干评论一次调用"，需求（Problem）是稳定身份，候选/正式由有效作者数实时推导，合并只追加重定向。G0–G3 已实现。G3 接通候选整理、撤销和 Opportunity。V2 暂无 HTTP 和前端入口，运行中的产品行为未变化。接下来是 G5、旧流程退役和需要 Mog 授权的 P0。
 
 **可直接粘贴给接手 agent 的启动指令：**
 
-> 接手 COMMENT-UNDERSTANDING-V2-001。仓库 `Himog0921/linggan-intelligence`，分支 `claude/comment-understanding-v2`，PR #621（Draft）。先读 `AGENTS.md`，再读 `docs/plans/active/comment-understanding-v2-001-handoff.md`（从第 0 节开始），按它的读取顺序往下读。工作在 `.worktrees/` 下的独立 worktree 里做，不要在 `main` 的共享 checkout 里改任何东西。先做第 3 节（确认 CI 修复已生效），再按第 6 节顺序推进 G3。第 9 节列出的事项必须停下来问 Mog，不要自行决定；尤其不要调用真实模型、不要对运行库写入、不要合并或部署。每个阶段完成后更新 PR 正文和相关文档，已实现/已测试/已合并/已部署分开写。
+> 接手 COMMENT-UNDERSTANDING-V2-001。仓库 `Himog0921/linggan-intelligence`，分支 `claude/comment-understanding-v2`，PR #621（Draft）。先读 `AGENTS.md`，再读 `docs/plans/active/comment-understanding-v2-001-handoff.md`（从第 0 节开始），按它的读取顺序往下读。工作在 `.worktrees/` 下的独立 worktree 里做，不要在 `main` 的共享 checkout 里改任何东西。确认 PR 当前提交和 CI 后，按第 6 节继续 G5。第 9 节列出的事项必须停下来问 Mog，不要自行决定；尤其不要调用真实模型、不要对运行库写入、不要合并或部署。每个阶段完成后更新 PR 正文和相关文档，已实现/已测试/已合并/已部署分开写。
 
 ## 1. 取得代码
 
@@ -37,8 +37,9 @@ cd .worktrees/comment-understanding-v2
 | 项 | 状态 |
 |---|---|
 | G0 基线确认、G1 合同与迁移、G2 单元执行 | 已实施，隔离 PostgreSQL 测试通过（计划附录 B、C） |
-| 迁移 `0230` | 只在隔离测试库应用过；**未应用到本机运行库**（`55432/linggan_intelligence_dev`，迁移头 `0229`），未部署 |
-| 新任务 `comment_understanding` | 已注册，停用，未配置模型和预算；**从未调用过真实模型** |
+| 迁移 `0230`、`0231` | **未应用到本机运行库**（`55432/linggan_intelligence_dev`，迁移头 `0229`），未部署 |
+| G3 候选整理与下游 | 已实现并通过隔离端到端，见第 6 节 |
+| 新任务 `comment_understanding`、`comment_problem_consolidation` | 已注册，停用，未配置模型和预算；**从未调用过真实模型** |
 | 旧三阶段评论研究 | 仍是运行中的流程，代码和测试都在 |
 | HTTP 接口、前端 | 没有任何入口调用 V2 |
 | 独立审阅 | 尚未进行 |
@@ -56,23 +57,25 @@ cd .worktrees/comment-understanding-v2
 | `comment_understanding/contract.rs`、`accept.rs` | 载荷与响应 Schema；单元接纳 `accept_unit` |
 | `comment_understanding/publish.rs`、`unit.rs`、`catalog.rs` | 同事务写入；单元读取与派发记录；需求目录 |
 | `comment_understanding/run.rs` | `read_run`、`cancel` |
-| `comment_understanding/consolidation.rs` | 整理合同与 `accept_consolidation`（**尚无调用方**） |
+| `comment_understanding/consolidation.rs` | 整理合同与 `accept_consolidation` |
 | `comment_understanding/execution_tests.rs` | 8 个端到端测试（lib 测试） |
 | `executor/service/comment_understanding.rs` | 执行器：准备、调用、结算 |
-| `executor/comment_understanding_order.sql` | 同领域串行的领取条件 |
+| `comment_understanding/consolidation_queue.rs`、`redirect.rs` | 整理调度、追加重定向和幂等撤销 |
+| `executor/service/comment_problem_consolidation.rs` | 整理调用，派发配对与结果结算 |
+| `executor/comment_understanding_order.sql` | 研究单元与整理任务共用同领域串行条件 |
 | `comment_research.rs` 的 `current_source_in` | 按方法版本分发的下游读取入口 |
 
 ## 3. G2 推送后发现的 CI 失败（已修，需确认）
 
-PR #621 在 G2 提交 `3424b542` 上有 3 个失败，**根因相同，是 G2 引入的**：
+PR #621 在 G2 提交 `3424b542` 上有 3 个失败。修复提交 `396e17ee` 已验证 CI 13 项通过，包含此前失败的三项。三个失败由 G2 同一变更引入：
 
 - `ai / foundation-contracts`：`opportunity_metrics_postgres` 的 `card::*` 整组失败；`web-real-chain / real-chain-core`：`opportunity_page_real_chain_browser_proof`；`Delivery gate` 是它们的汇总。
 - 报错：`SourceCoverage(["…linggan_comment_research_result", "…_unit", "…_unit_target"])`。
 - 原因：机会卡取快照时对 `opportunity/card/snapshot.rs` 的 `SOURCE_TABLES` 里每张表加锁，并在提交前审计"实际用到的表都在名单里"。G2 给评论目录的状态 SQL（`comment_study_catalog/facts.sql`、`history.sql`）加了 V2 分支，机会卡的计算会读到这三张表，名单里没有。**这组测试 G2 本地没跑**，所以漏了。
-- 修复：把这三张表加进 `SOURCE_TABLES`（按字母序）。**接手后第一件事：确认该修复已在分支上并已推送，重新看 CI。**
+- 修复：把这三张表加进 `SOURCE_TABLES`（按字母序）。
 - 本地验证（修复后）：`opportunity::card::snapshot::tests::` 与 `groups::tests::` 5/5；`opportunity_metrics_postgres` 47/48，唯一失败的 `card_uses_canonical_metrics_debounces_and_removes_withdrawn_voices` 是 `SourcesBusy`（取快照用 `LOCK TABLE … NOWAIT`，满负载下的锁时序），**单独连跑 3 次都通过**，判断为偶发，但以 CI 为准；`local_web::opportunity_api::tests::enabled_routes_return_cards_and_guard_changed_pages` 通过。浏览器链路 `opportunity_page_real_chain_browser_proof` 本地没跑（需要浏览器），同一根因，靠 CI 确认。
 
-**教训：** 凡是改了评论目录、评论研究表或它们的读取 SQL，推送前必须跑机会卡全套：`scripts/test-opportunity-postgres.sh` 里的 `opportunity::card::snapshot::tests::`、`opportunity::card::groups::tests::`、`opportunity_metrics_postgres`（先 `cargo build -p linggan-worker --bin linggan-opportunity` 并设 `OPPORTUNITY_TEST_WORKER_BIN`）和 `linggan-api` 的 `local_web::opportunity_api::tests::enabled_routes_return_cards_and_guard_changed_pages`。G3 要给机会卡改读视图，会再次碰这里。
+**教训：** 凡是改了评论目录、评论研究表或它们的读取 SQL，推送前必须跑机会卡全套：`scripts/test-opportunity-postgres.sh` 里的 `opportunity::card::snapshot::tests::`、`opportunity::card::groups::tests::`、`opportunity_metrics_postgres`（先 `cargo build -p linggan-worker --bin linggan-opportunity` 并设 `OPPORTUNITY_TEST_WORKER_BIN`）和 `linggan-api` 的 `local_web::opportunity_api::tests::enabled_routes_return_cards_and_guard_changed_pages`。G3 首次为领域建立机会卡时也发现同类缺口，已登记分类版本外键访问的 `observation_domain`。
 
 ## 4. 保护车道 Claim
 
@@ -91,18 +94,16 @@ L1 是评论研究必需上下文，不降级；同一领域串行；候选整�
 
 ## 6. 剩余工作、顺序与完成标准
 
-建议顺序：**确认第 3 节 → G3 → G5 → 切换 →（P0 随 Mog 授权并行）→ G4/G6**。每一步都保持提交可验证。
+建议顺序为 **G5 → 切换 → G4/G6**。P0 可在 Mog 授权后并行。
 
-### G3：候选整理与下游
+### G3：候选整理与下游（已实现）
 
-- 整理任务：注册 `comment_problem_consolidation`（照 `0230` 里 `comment_understanding` 的写法，新迁移编号以届时 `database/migrations` 为准）；`InputRef` 增加整理输入；`BatchKind` 允许 `interactive` 和 `automatic`；派发表记录被问的配对（`pairKey` → 两个 `problem_ref`）；执行器分发。合同和接纳函数已有（`consolidation_schema()`、`accept_consolidation()`），重定向写入由 `0230` 的触发器校验。
-- 配对生成：G3 用全量模式——候选总数不超过 `CONSOLIDATE_FULL_MAX`（150）时把全部需求交给模型找重复；向量排序属于 G4。
-- 触发：一次运行的所有单元结束后，若产生了新候选就排一个整理任务（`read_run` 的单元状态可判断运行结束）。
-- 存活方：正式优先、作者多优先、创建早优先，由程序决定。**只有 `same` 写重定向**，`narrower` 不合并。
-- 撤销：`0230` 有撤销表但**还没有撤销函数**，要补（命令幂等，写 `linggan_comment_problem_redirect_revocation`）。
-- Opportunity：`opportunity/mentions.rs` 约 137 行用 `membership.review_invocation_ref` 做内连接，**V2 的支持行被静默漏掉**，改读 `linggan_comment_problem_support`；核对 `linggan_opportunity_comment_mention` 对 `membership(request_ref, signal_ordinal)` 的外键、`linggan_opportunity_sync_problems` 函数和 `opportunity/card/snapshot.rs` 的表名单。
-- T4 刷新：`executor/service.rs` 的 `fill_slots` 只在 `CommentProblemPairReview` 成功后调用 `opportunity_sync.request()`；V2 要在单元成功和整理成功后触发。先读 `executor/service/opportunity_sync.rs`。
-- **完成标准：** 跨单元的重复候选被合并后，作者合计达到 2 位的自动成为正式需求；撤销后状态恢复；机会卡的作者数与 `linggan_comment_problem_current` 一致；第 3 节列的机会卡全套测试通过；有对应的端到端测试（仿 `execution_tests.rs`，提供方回复由评论文本决定）。
+- `0231_comment_problem_consolidation` 注册整理任务，允许自动和交互批次。任务初始化为停用、预算未配置、模型未绑定。整理须有 `comment_material` 外发许可。请求只含需求定义和短别名。
+- Mog 已确认：每次研究运行全部单元结束后，如果本次新建过候选，就排一次整理。以来源批次唯一约束幂等，不做领域级去抖。同一领域的研究单元和整理共享串行领取。
+- 全量整理按创建顺序给出候选和正式需求。上限为 150 个候选、200 个需求。派发前保存 `pairKey → [problem_ref, problem_ref]` 对照。只有 `same` 可写重定向；正式优先、作者多优先、创建早优先。同一命令可重放撤销回执。
+- Opportunity 的 V2 来源是 `linggan_comment_problem_support`。提及保留原始成员键和来源调用，重定向、撤销、更新研究结果或来源受限时按有效支持过滤。V1 路径在切换前仍服务原任务。研究单元和整理成功请求刷新，撤销由现有周期刷新重算。
+- 隔离端到端 8/8。新增用例验证跨作品候选只整理一次，`narrower` 保持独立，两个作者的同一需求转正式，机会卡作者数为 2，旧卡链接指向存活需求。幂等撤销后两张卡各恢复为 1 位作者。机会卡快照 4/4、分组 1/1、周期索引调度 1/1、指标 48/48、API 证明 1/1。预检通过。较早一轮指标运行有一次 `SourcesBusy`，最终整轮通过。本地未跑机会卡浏览器证明，CI 回执见 PR #621。
+- 未合并、未部署、未做生产验证。真实模型、真实数据规模和独立审阅尚未验证。
 
 ### G5：HTTP 接口与前端
 
@@ -165,9 +166,8 @@ G0–G3、G5 完成并合并已部署；在一个真实领域上端到端跑通�
 **当前开放的问题（需要 Mog 回答）：**
 
 1. 作品作者未知的评论要不要放开准入？（现在排除；影响可研究评论的数量。）
-2. 整理任务按"每次运行结束后一次"触发是否足够，还是需要按领域去抖？（计划写的是每次运行后。）
-3. 评论目录里"补 L1"入口要复用现有 L1 自动化还是单独做？（本机只有约 41% 的评论所属作品有 L1。）
-4. P0 的授权、样本和外发处置计划。
+2. 评论目录里"补 L1"入口要复用现有 L1 自动化还是单独做？（本机只有约 41% 的评论所属作品有 L1。）
+3. P0 的授权、样本和外发处置计划。
 
 ## 10. 本机残留（只与写本文的那台机器有关）
 

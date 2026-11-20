@@ -27,7 +27,7 @@ fn candidate_sql() -> String {
            likes.like_count,original.body_text IS NOT DISTINCT FROM current.body_text AS same_body \
          FROM qualified q JOIN eligible ON eligible.content_ref=q.content_public_ref \
            AND eligible.comment_external_id=q.comment_external_id \
-         JOIN linggan_opportunity_comment_mention mention ON mention.content_ref=q.content_public_ref \
+         JOIN linggan_opportunity_current_comment_mention mention ON mention.content_ref=q.content_public_ref \
            AND mention.comment_external_id=q.comment_external_id AND mention.problem_ref=$8 \
            AND mention.taxonomy_version=$9 AND mention.excluded_reason IS DISTINCT FROM 'marketing' \
          JOIN linggan_comment_problem_membership membership ON membership.request_ref=mention.source_request_ref \

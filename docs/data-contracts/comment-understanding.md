@@ -1,12 +1,12 @@
 # 评论理解合同（Comment Understanding V2）
 
 > 状态: 代码事实优先
-> 最后核对: 2026-11-19（G1 结构；G2 执行与读取）
-> 适用范围: `comment-understanding.v1`、`comment-problem-consolidation.v1`、研究单元、需求身份与派生状态（迁移 `0230`）
+> 最后核对: 2026-11-19（G1–G3）
+> 适用范围: `comment-understanding.v1`、`comment-problem-consolidation.v1`、研究单元、需求身份与派生状态（迁移 `0230`、`0231`）
 > 事实来源: `database/migrations/0230_comment_understanding.sql`、`crates/intelligence/src/ai_foundation/comment_understanding/`、[实施计划](../plans/active/comment-understanding-v2-001.md)
 > 冲突时以谁为准: 当前 migration/代码/隔离 PostgreSQL 测试；语义标准以计划第 3 节为准，提示词是它的实现
 
-本合同描述 G1、G2 已落地的结构和流程。旧的评论三阶段（`comment-research-semantic.v1`、`comment-problem-stage.v1`）仍是运行中的流程，直到计划的切换步骤才退役；届时[研究自动化执行合同](research-automation.md)中评论部分同步改写。
+本合同描述 G1–G3 已落地的结构和流程。旧的评论三阶段（`comment-research-semantic.v1`、`comment-problem-stage.v1`）仍是运行中的流程，直到计划的切换步骤才退役；届时[研究自动化执行合同](research-automation.md)中评论部分同步改写。
 
 ## 1. 一次调用与一个研究单元
 
@@ -65,7 +65,11 @@
 
 ## 5. `comment-problem-consolidation.v1`
 
-模型对程序提出的需求配对给出 `same` / `different` / `narrower`，只有 `same` 可成为重定向；存活方由程序按"正式优先、作者多优先、创建早优先"决定，模型不选。没被问到的、重复的、格式不对的配对不产生任何决定。整理任务和它的派发表随计划 G3 注册；本阶段只有合同和接纳函数 `accept_consolidation()`。
+模型对程序提出的需求配对给出 `same` / `different` / `narrower`，只有 `same` 可成为重定向；存活方由程序按"正式优先、作者多优先、创建早优先"决定，模型不选。没被问到的、重复的、格式不对的配对不产生任何决定。`0231` 注册 `comment_problem_consolidation`，支持 `automatic` 与 `interactive`。它初始停用、未配置预算、未绑定模型。派发前校验 `comment_material` 许可。同领域的整理和研究单元串行领取。
+
+自动整理以研究批次为单位。全部单元终止且本次新建过候选时，最多创建一个自动整理批次。派发时读取完整 V2 目录，上限 150 个候选、200 个需求。至少一方为候选的需求配对使用 `q<a>-<b>`（`a<b`），派发记录冻结每个别名对应的两个需求。没有可比较的需求或超过上限时跳过，且无模型调用。请求载荷为需求定义、状态和短别名。响应允许省略无结论的配对。
+
+写重定向时重新检查两方仍是当前需求。`revoke_redirect` 校验领域，在同一事务追加撤销和命令回执。同一命令重放返回原回执，重复撤销不新增记录。
 
 ## 6. 任务与失败码
 
@@ -99,3 +103,5 @@
 ## 10. 下游读取
 
 `comment_research::current_source_in(request)` 是 Topic Map、Topic 评论来源和评论概览读取"某条研究对应的评论"的唯一入口：V1 研究按冻结输入复核；V2 研究只要求评论仍可读，L1 与清洗版本不作为有效性条件。三处 SQL 以"该请求有成功结果行"判断成功，不看同批次其他条目的状态。评论目录的"最近一次研究"状态对 V2 请求从单元条目与结果行推导。
+
+Opportunity 从有效支持视图读取 V2 归属并保留原始支持键。当前指标和原声排除已失效或已移到另一需求的提及。研究单元和整理成功后请求刷新，撤销由现有周期刷新发现。机会卡仍按自身的分期、来源和作者资格计算指标。

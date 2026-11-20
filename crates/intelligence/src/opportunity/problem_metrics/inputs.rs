@@ -132,7 +132,7 @@ async fn read_mentions(
     let rows = sqlx::query(
         "SELECT mention.problem_ref, mention.content_ref, mention.comment_external_id,
                 mention.commenter_digest_version
-         FROM linggan_opportunity_comment_mention mention
+         FROM linggan_opportunity_current_comment_mention mention
          JOIN linggan_opportunity_problem problem USING(problem_ref)
          JOIN linggan_comment_problem_membership source
            ON source.request_ref=mention.source_request_ref

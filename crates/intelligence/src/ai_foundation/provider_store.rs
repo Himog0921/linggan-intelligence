@@ -63,6 +63,7 @@ impl MaterialClass {
                 TaskKey::NoteInterpretation
                     | TaskKey::CommentStudy
                     | TaskKey::CommentUnderstanding
+                    | TaskKey::CommentProblemConsolidation
                     | TaskKey::CommentProblemResolution
                     | TaskKey::CommentProblemPairReview
                     | TaskKey::TopicResearch

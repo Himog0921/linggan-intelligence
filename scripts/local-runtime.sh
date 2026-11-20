@@ -542,6 +542,7 @@ migrate() {
   apply_migration_once "0228_content_understanding_automation" "$project_root/database/migrations/0228_content_understanding_automation.sql"
   apply_migration_once "0229_retire_note_interpretation" "$project_root/database/migrations/0229_retire_note_interpretation.sql"
   apply_migration_once "0230_comment_understanding" "$project_root/database/migrations/0230_comment_understanding.sql"
+  apply_migration_once "0231_comment_problem_consolidation" "$project_root/database/migrations/0231_comment_problem_consolidation.sql"
 }
 
 case "$command_name" in

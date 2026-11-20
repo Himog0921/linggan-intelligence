@@ -11,6 +11,8 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_comment_clean_cache",
     "linggan_comment_problem_definition",
     "linggan_comment_problem_membership",
+    "linggan_comment_problem_redirect",
+    "linggan_comment_problem_redirect_revocation",
     "linggan_comment_research_request",
     "linggan_comment_research_result",
     "linggan_comment_research_stage",
@@ -65,6 +67,7 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_runtime_capture_package",
     "linggan_runtime_record_disposition",
     "linggan_runtime_task",
+    "observation_domain",
     "observation_domain_target",
 ];
 

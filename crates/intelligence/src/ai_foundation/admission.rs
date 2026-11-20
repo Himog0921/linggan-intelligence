@@ -12,6 +12,19 @@ pub(crate) async fn check_queue_input_scope(
     config: Uuid,
     input: &InputRef,
 ) -> Result<(), FoundationError> {
+    if task == TaskKey::CommentProblemConsolidation {
+        if !matches!(input, InputRef::CommentProblemConsolidation { .. }) {
+            return Err(FoundationError::Invalid);
+        }
+        return require_egress(
+            tx,
+            task,
+            config,
+            "comment_material",
+            "comment_egress_not_approved",
+        )
+        .await;
+    }
     if task.comment_stage().is_none()
         && task.topic_stage().is_none()
         && task != TaskKey::WorkComparison
@@ -68,13 +81,14 @@ pub(crate) async fn check_queue_input_scope(
         || task == TaskKey::CommentUnderstanding
         || topic_uses_comments
     {
-        let comments:bool=sqlx::query_scalar("SELECT COALESCE((SELECT permission.allowed FROM linggan_ai_task_config task JOIN linggan_model_config model ON model.config_ref=task.model_config_ref JOIN linggan_model_capability capability ON capability.capability_ref=model.capability_ref JOIN linggan_ai_current_egress permission ON permission.endpoint_ref=capability.endpoint_ref AND permission.task_key=task.task_key AND permission.material_class='comment_material' WHERE task.task_config_ref=$1),false)")
-            .bind(config).fetch_one(&mut **tx).await?;
-        if !comments {
-            return Err(FoundationError::AdmissionDenied(vec![
-                "comment_egress_not_approved".into(),
-            ]));
-        }
+        require_egress(
+            tx,
+            task,
+            config,
+            "comment_material",
+            "comment_egress_not_approved",
+        )
+        .await?;
     }
     if task == TaskKey::CreatorAccountResearch {
         let approved:bool=sqlx::query_scalar("SELECT COALESCE((SELECT permission.allowed FROM linggan_ai_task_config task JOIN linggan_model_config model ON model.config_ref=task.model_config_ref JOIN linggan_model_capability capability ON capability.capability_ref=model.capability_ref JOIN linggan_ai_current_egress permission ON permission.endpoint_ref=capability.endpoint_ref AND permission.task_key=task.task_key AND permission.material_class='public_author_bio' WHERE task.task_config_ref=$1),false)")
@@ -84,6 +98,27 @@ pub(crate) async fn check_queue_input_scope(
                 "author_bio_egress_not_approved".into(),
             ]));
         }
+    }
+    Ok(())
+}
+
+async fn require_egress(
+    tx: &mut Transaction<'_, Postgres>,
+    task: TaskKey,
+    config: Uuid,
+    material_class: &str,
+    reason: &str,
+) -> Result<(), FoundationError> {
+    let allowed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_ai_task_config task
+         JOIN linggan_model_config model ON model.config_ref=task.model_config_ref
+         JOIN linggan_model_capability capability ON capability.capability_ref=model.capability_ref
+         JOIN linggan_ai_current_egress permission ON permission.endpoint_ref=capability.endpoint_ref
+           AND permission.task_key=task.task_key AND permission.material_class=$3 AND permission.allowed
+         WHERE task.task_config_ref=$1 AND task.task_key=$2)",
+    ).bind(config).bind(task.as_str()).bind(material_class).fetch_one(&mut **tx).await?;
+    if !allowed {
+        return Err(FoundationError::AdmissionDenied(vec![reason.into()]));
     }
     Ok(())
 }

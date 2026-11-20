@@ -40,7 +40,8 @@ struct RawResponse {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawPair {
-    pair_key: String,
+    #[serde(rename = "pairKey")]
+    _pair_key: String,
     verdict: Verdict,
     reason: String,
 }
@@ -73,9 +74,9 @@ pub fn accept_consolidation(
         .pairs
         .into_iter()
         .filter_map(|value| {
-            let raw: RawPair = serde_json::from_value(value).ok()?;
-            let pair_key = trimmed(&raw.pair_key, 40)?;
+            let pair_key = trimmed(value.get("pairKey")?.as_str()?, 40)?;
             *count.entry(pair_key.clone()).or_default() += 1;
+            let raw: RawPair = serde_json::from_value(value).ok()?;
             let reason = trimmed(&raw.reason, REASON_MAX_CHARS)?;
             Some(ConsolidationDecision {
                 pair_key,
@@ -112,9 +113,11 @@ mod tests {
             {"pairKey":"q9","verdict":"same","reason":"没有被问到"},
             {"pairKey":"q4","verdict":"maybe","reason":"未知结论"},
             {"pairKey":"q5","verdict":"same","reason":"   "},
+            {"pairKey":"q6","verdict":"same","reason":"重复"},
+            {"pairKey":"q6","verdict":"invalid"},
         ]));
         let decisions =
-            accept_consolidation(&text, &asked(&["q1", "q2", "q3", "q4", "q5"])).unwrap();
+            accept_consolidation(&text, &asked(&["q1", "q2", "q3", "q4", "q5", "q6"])).unwrap();
         assert_eq!(
             decisions
                 .iter()

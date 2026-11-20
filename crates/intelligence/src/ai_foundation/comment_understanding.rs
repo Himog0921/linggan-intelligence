@@ -6,12 +6,14 @@
 mod accept;
 pub mod catalog;
 mod consolidation;
+pub(crate) mod consolidation_queue;
 mod context;
 mod contract;
 #[cfg(test)]
 mod execution_tests;
 mod plan;
 pub mod publish;
+pub(crate) mod redirect;
 mod run;
 mod start;
 mod target;
@@ -39,3 +41,6 @@ pub use start::{MAX_SELECTIONS, Receipt, Selection, Start, preview, start};
 pub use target::{
     CurrentSource, ParentContext, Target, current_source_in, read_in as read_target_in,
 };
+
+pub use consolidation_queue::{StartConsolidation, start_consolidation};
+pub use redirect::{RevokeRedirect, revoke_redirect};
