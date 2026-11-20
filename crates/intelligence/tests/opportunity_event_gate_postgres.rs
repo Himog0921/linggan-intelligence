@@ -2,7 +2,6 @@
 #[path = "../../evidence/tests/support/research_dossier_fixture.rs"]
 mod dossier;
 use dossier::fixture;
-use uuid::Uuid;
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and enabled opportunity executor"]

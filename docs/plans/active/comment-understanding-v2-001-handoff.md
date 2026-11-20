@@ -78,6 +78,10 @@ PR #621 在 G2 提交 `3424b542` 上有 3 个失败。修复提交 `396e17ee` �
 
 **教训：** 凡是改了评论目录、评论研究表或它们的读取 SQL，推送前必须跑机会卡全套：`scripts/test-opportunity-postgres.sh` 里的 `opportunity::card::snapshot::tests::`、`opportunity::card::groups::tests::`、`opportunity_metrics_postgres`（先 `cargo build -p linggan-worker --bin linggan-opportunity` 并设 `OPPORTUNITY_TEST_WORKER_BIN`）和 `linggan-api` 的 `local_web::opportunity_api::tests::enabled_routes_return_cards_and_guard_changed_pages`。G3 首次为领域建立机会卡时也发现同类缺口，已登记分类版本外键访问的 `observation_domain`。
 
+### 切换检查回归
+
+切换首次提交 `485d9b0e` 的 Core 检查仍请求旧研究路由。修复后验证现行 V2 路由的 JSON 错误响应，以及旧路由的 404。Opportunity Clippy 检查发现迁移后的来源门测试有未使用的导入。删去该导入，保留两项来源门证明。两个修复都只涉及测试与交接记录。失败日志见 [Delivery 44696451925](https://github.com/Himog0921/linggan-intelligence/actions/runs/44696451925)。
+
 ## 4. 保护车道 Claim
 
 | 项 | 内容 |

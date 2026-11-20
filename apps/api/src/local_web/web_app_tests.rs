@@ -765,8 +765,8 @@ async fn comments_entry_preserves_json_routes_and_retires_legacy_assets() {
         );
         assert!(!body.contains("<div id=\"root\">"), "{path}");
     }
-    for path in ["runs", "problems"] {
-        let url = format!("/api/local/comment-research/{path}?domainRef={domain}");
+    for path in ["overview", "runs", "problems"] {
+        let url = format!("/api/local/comment-research/v2/{path}?domainRef={domain}");
         let (status, headers, body) = send(app(), &url, "127.0.0.1:3000").await;
         assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{path}");
         assert!(
@@ -777,19 +777,17 @@ async fn comments_entry_preserves_json_routes_and_retires_legacy_assets() {
         );
         assert!(!body.contains("<div id=\"root\">"));
     }
-    for (path, expected) in [
-        ("overview", StatusCode::NOT_FOUND),
-        ("runs", StatusCode::METHOD_NOT_ALLOWED),
-        ("problem-cards", StatusCode::NOT_FOUND),
-        ("problem-candidates", StatusCode::NOT_FOUND),
+    for path in [
+        "/api/local/comment-study/overview",
+        "/api/local/comment-study/runs",
+        "/api/local/comment-study/problem-cards",
+        "/api/local/comment-study/problem-candidates",
+        "/api/local/comment-research/overview",
+        "/api/local/comment-research/runs",
+        "/api/local/comment-research/problems",
     ] {
-        let (status, _, body) = send(
-            app(),
-            &format!("/api/local/comment-study/{path}?domain={domain}"),
-            "127.0.0.1:3000",
-        )
-        .await;
-        assert_eq!(status, expected, "{path}");
+        let (status, _, body) = send(app(), path, "127.0.0.1:3000").await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "{path}");
         assert!(!body.contains("<div id=\"root\">"));
     }
 }
