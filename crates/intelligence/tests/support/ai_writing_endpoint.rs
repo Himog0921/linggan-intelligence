@@ -45,7 +45,9 @@ impl Endpoint {
                             let system=text(&request,"system");
                             let instruction=serde_json::from_str::<Value>(&prompt).ok().and_then(|v|v["authorInstruction"].as_str().map(str::to_owned)).unwrap_or_default();
                             recorded.lock().unwrap().push(request);
-                            let waiting=if probe {None} else {gate.lock().unwrap().take()};
+                            let waiting=if probe || (variant=="withdrawn_catalog" && !prompt.contains("GATED")) {
+                                None
+                            } else {gate.lock().unwrap().take()};
                             if let Some((seen,release))=waiting {seen.send(()).unwrap();release.await.unwrap();}
                             let comment_input=serde_json::from_str::<Value>(&prompt).ok();
                             let understanding=comment_input.as_ref().filter(|v|v["contract"]=="comment-understanding.v1");

@@ -25,7 +25,9 @@ pub async fn read_in(
     tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,
 ) -> Result<Vec<CatalogProblem>, FoundationError> {
-    let rows = sqlx::query("SELECT d.problem_ref,d.label,d.actor,d.goal,d.barrier,d.context FROM linggan_comment_problem_definition d JOIN linggan_comment_problem_resolution r ON r.problem_ref=d.problem_ref AND r.current_ref=d.problem_ref WHERE d.domain_ref=$1 ORDER BY d.created_at,d.problem_ref")
+    let rows = sqlx::query("SELECT d.problem_ref,d.label,d.actor,d.goal,d.barrier,d.context FROM linggan_comment_problem_definition d JOIN linggan_comment_problem_resolution r ON r.problem_ref=d.problem_ref AND r.current_ref=d.problem_ref WHERE d.domain_ref=$1 AND d.origin_invocation_ref IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM linggan_comment_problem_withdrawn_source x WHERE x.problem_ref=d.problem_ref)
+        ORDER BY d.created_at,d.problem_ref")
         .bind(domain)
         .fetch_all(&mut **tx)
         .await?;

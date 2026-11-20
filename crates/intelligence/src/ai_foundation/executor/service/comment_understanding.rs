@@ -35,6 +35,7 @@ struct Prepared {
     request: PiRequest,
     unit_ref: Uuid,
     prompt_version_ref: Uuid,
+    sent_comments: Vec<String>,
 }
 
 fn denied(reason: &str) -> ExecutorError {
@@ -172,6 +173,10 @@ async fn prepare(
         request,
         unit_ref,
         prompt_version_ref,
+        sent_comments: sent
+            .into_iter()
+            .flat_map(|(_, target)| [target.raw_text, target.cleaned.text])
+            .collect(),
     })
 }
 
@@ -257,7 +262,16 @@ async fn settle(
             Err(_) => withheld.push(frozen),
         }
     }
+    // A withdrawn definition was visible to the provider and may be repeated anywhere in
+    // the response. Preserve the usage receipt without admitting that response.
+    let catalog_withdrawn: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_comment_problem_withdrawn_source WHERE problem_ref=ANY($1))",
+    )
+    .bind(&catalog_refs)
+    .fetch_one(&mut *tx)
+    .await?;
     let allowed = !cancelled
+        && !catalog_withdrawn
         && admission::check_queue_configuration(&mut tx, item.task_key, item.task_config_ref, true)
             .await
             .is_ok()
@@ -272,6 +286,7 @@ async fn settle(
     let aliases: HashSet<String> = (0..catalog_refs.len())
         .map(understanding::catalog_alias)
         .collect();
+    let sent_comments: Vec<_> = prepared.sent_comments.iter().map(String::as_str).collect();
     let admitted = if !allowed {
         None
     } else if response.is_some_and(is_truncated) {
@@ -281,14 +296,14 @@ async fn settle(
             match r
                 .text
                 .as_deref()
-                .map(|text| understanding::accept_unit(text, &frames, &aliases))
+                .map(|text| understanding::accept_unit(text, &frames, &sent_comments, &aliases))
             {
                 Some(Ok(unit)) => Ok(unit),
                 _ => Err("unit_output_invalid"),
             }
         })
     };
-    let success = matches!(admitted, Some(Ok(_)));
+    let mut success = matches!(admitted, Some(Ok(_)));
     let mut failure =
         super::research_call::failure(response, allowed, success, "comment_publication_withheld");
     if let Some(Err(code)) = &admitted {
@@ -325,6 +340,17 @@ async fn settle(
             None
         }
     };
+    if published
+        .as_ref()
+        .is_some_and(|result| result.accepted == 0)
+    {
+        success = false;
+        failure = Some(if frames.is_empty() {
+            "comment_publication_withheld"
+        } else {
+            "unit_output_invalid"
+        });
+    }
     let mut result = response
         .map(safe_result)
         .unwrap_or_else(|| json!({"ok":false}));
@@ -358,7 +384,10 @@ async fn settle(
             cancelled,
             output: success.then_some(&safe_output),
             failure,
-            counts_as_failure: !success && allowed && !receipt::not_dispatched(response),
+            counts_as_failure: !success
+                && allowed
+                && !receipt::not_dispatched(response)
+                && failure != Some("comment_publication_withheld"),
         },
     )
     .await?;

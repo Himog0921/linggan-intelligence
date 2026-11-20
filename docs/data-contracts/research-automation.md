@@ -21,7 +21,7 @@
 | 接口（省略前缀） | 行为 |
 |---|---|
 | `POST /preview`、`POST /runs` | 预览最多 1000 个明确选中的来源，按作品分研究单元。启动校验计划指纹和任务配置版本。缺 L1 时在预览提供现有 L1 的入口，由运营在 L1 完成后重新选择评论。 |
-| `GET /runs`、`GET /runs/{batch}`、`POST /cancel` | 查看运行、单元和评论的回执。取消阻止余下派发，已进入调用的单元按批次规则结算。 |
+| `GET /runs`、`GET /runs/{batch}`、`POST /cancel` | 查看运行、单元和评论的回执。取消阻止后续派发和结果发布，已发出的调用仍结算用量。 |
 | `GET /latest`、`GET /overview` | 读取单条当前结果、目录覆盖、信号和需求统计。返回的原声复核当前来源资格。 |
 | `GET /problems`、`GET /problems/{problem}` | 查看需求、有效支持和重定向。至少两位不同的已知平台作者支持时，需求为正式。 |
 | `POST /consolidation`、`POST /redirects/revoke` | 手动请求候选整理，或撤销同领域的合并重定向。 |

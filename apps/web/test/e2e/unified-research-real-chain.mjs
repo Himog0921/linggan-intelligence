@@ -63,6 +63,7 @@ try {
   await post(page.getByRole('button',{name:'确认取消',exact:true}),commentV2+'/cancel');
   const run=await until(`${commentV2}/runs/${started.batchRef}?domainRef=${domain}`,r=>r.units.every(unit=>unit.state==='cancelled'));
   assert.equal(run.cancelRequested,true);assert.equal(run.targets[0].state,'cancelled');assert.deepEqual(run.retrySelections,[]);
+  assert.equal(run.usage.modelCalls,1);assert.ok(run.usage.inputTokens>0);assert.ok(run.usage.outputTokens>0);
   await page.getByRole('region',{name:'运行回执'}).getByText(/^已取消 · 2 条评论/).waitFor();
   await page.getByText('已请求取消。',{exact:true}).waitFor();
  });

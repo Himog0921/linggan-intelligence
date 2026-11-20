@@ -132,12 +132,14 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
                     count(*) FILTER(WHERE p.state='formal' AND (d.created_at AT TIME ZONE 'Asia/Shanghai')::date
                       =($2::timestamptz AT TIME ZONE 'Asia/Shanghai')::date-1)
              FROM linggan_comment_problem_current p JOIN linggan_comment_problem_definition d USING(problem_ref)
-             WHERE p.domain_ref=$1 AND d.origin_invocation_ref IS NOT NULL",
+             WHERE p.domain_ref=$1 AND d.origin_invocation_ref IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM linggan_comment_problem_withdrawn_source x WHERE x.problem_ref=p.problem_ref)",
         ).bind(domain).bind(&as_of).fetch_one(&mut *tx).await?;
         let top: Vec<Uuid> = sqlx::query_scalar(
             "SELECT p.problem_ref FROM linggan_comment_problem_current p
              JOIN linggan_comment_problem_definition d USING(problem_ref)
              WHERE p.domain_ref=$1 AND p.state='formal' AND d.origin_invocation_ref IS NOT NULL
+               AND NOT EXISTS (SELECT 1 FROM linggan_comment_problem_withdrawn_source x WHERE x.problem_ref=p.problem_ref)
              ORDER BY p.author_count DESC,p.last_researched_at DESC NULLS LAST,p.problem_ref LIMIT 3",
         ).bind(domain).fetch_all(&mut *tx).await?;
         let mut preview = Vec::new();

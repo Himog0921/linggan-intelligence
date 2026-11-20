@@ -2,7 +2,7 @@
 
 > 状态: 代码事实优先
 > 最后核对: 2026-11-19（G1–G3、G5 与切换候选）
-> 适用范围: `comment-understanding.v1`、`comment-problem-consolidation.v1`、研究单元、需求身份与派生状态（迁移 `0230`、`0231`、`0232`）
+> 适用范围: `comment-understanding.v1`、`comment-problem-consolidation.v1`、研究单元、需求身份与派生状态（迁移 `0230`–`0233`）
 > 事实来源: `database/migrations/0230_comment_understanding.sql`、`crates/intelligence/src/ai_foundation/comment_understanding/`、[实施计划](../plans/active/comment-understanding-v2-001.md)
 > 冲突时以谁为准: 当前 migration/代码/隔离 PostgreSQL 测试；语义标准以计划第 3 节为准，提示词是它的实现
 
@@ -94,11 +94,11 @@
 
 准备（一个事务）：核对任务配置与外发许可、单元与请求属于本次批次；逐条重读评论，不可读的写入失败结果；读冻结的 L1 卡并投影为作品语境；读需求目录（超过 200 条则跳过整个单元）；组装载荷并创建调用；**在调用之前**写入 `unit_dispatch`（有序目录）。
 
-结算（一个事务）：重读评论，调用期间被撤回的评论写 `comment_publication_withheld`；识别截断（适配器的 `output_limit` 失败或 `finish_reason=length`）为 `unit_truncated`；否则用 `accept_unit` 接纳，顶层不可用为 `unit_output_invalid`；成功则 `publish_in` 写入每条评论的结果、新需求（每个被引用的 `newKey` 一个）和支持关系，失败则给每条已发送的评论写失败结果。调用账本、批次条目状态在同一事务里结算。
+结算（一个事务）：重读评论，调用期间被撤回的评论写 `comment_publication_withheld`；识别截断（适配器的 `output_limit` 失败或 `finish_reason=length`）为 `unit_truncated`；否则用 `accept_unit` 接纳，顶层不可用或全部目标未接纳为 `unit_output_invalid`，逐条失败码单独保留；成功则 `publish_in` 写入每条评论的结果、新需求（每个被引用的 `newKey` 一个）和支持关系，失败则给每条已发送的评论写失败结果。调用账本、批次条目状态在同一事务里结算。
 
 ## 9. 运行回执与取消
 
-`read_run(domain, batch)`：每个单元的状态与失败码、目标按状态和失败码的计数、模型调用数与输入输出 Token（来自调用账本）。`cancel`：停止尚未开始的单元；已在调用中的单元正常结算。
+`read_run(domain, batch)`：每个单元的状态与失败码、目标按状态和失败码的计数、模型调用数与输入输出 Token（来自调用账本）。`cancel`：停止后续派发。已经发出的调用仍结算用量，取消后不接纳其尚未发布的结果。
 
 ## 10. 下游读取
 
@@ -106,6 +106,8 @@
 
 Opportunity 从有效支持视图读取 V2 归属并保留原始支持键。当前指标和原声排除已失效或已移到另一需求的提及。研究单元和整理成功后请求刷新，撤销由现有周期刷新发现。机会卡仍按自身的分期、来源和作者资格计算指标。
 
+
+需求的定义来源被限制后，历史身份和重定向记录保留。模型目录排除该定义。当前需求通常省略该定义。若仍有合并可撤销，列表及详情保留屏蔽定义和原声的撤销入口。重定向历史和机会卡只显示撤回提示。Opportunity 继续按可见评论计算支持。若研究单元派发后目录中的定义被撤回，该响应只结算用量，停止接纳。
 
 ## 11. 本机 V2 HTTP 入口（G5）
 

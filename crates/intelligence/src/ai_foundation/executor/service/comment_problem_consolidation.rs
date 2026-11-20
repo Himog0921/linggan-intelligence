@@ -70,7 +70,8 @@ async fn prepare(
     let states: BTreeMap<Uuid, String> = sqlx::query_as::<_, (Uuid, String)>(
         "SELECT current.problem_ref,current.state FROM linggan_comment_problem_current current
          JOIN linggan_comment_problem_definition definition USING(problem_ref)
-         WHERE current.domain_ref=$1 AND definition.origin_invocation_ref IS NOT NULL",
+         WHERE current.domain_ref=$1 AND definition.origin_invocation_ref IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM linggan_comment_problem_withdrawn_source x WHERE x.problem_ref=current.problem_ref)",
     )
     .bind(domain)
     .fetch_all(&mut *tx)

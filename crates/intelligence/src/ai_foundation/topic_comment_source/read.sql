@@ -4,7 +4,7 @@ WITH latest AS (
  FROM linggan_comment_research_request r
  JOIN linggan_comment_research_result result USING(request_ref)
  JOIN linggan_material_comment m ON m.material_ref=r.source_ref
- WHERE r.domain_ref=$1 AND r.method_version='comment-understanding.v1' AND ($2::uuid IS NULL OR r.work_ref=$2) AND ($3::uuid IS NULL OR r.request_ref=$3)
+ WHERE r.domain_ref=$1 AND r.method_version='comment-understanding.v1' AND ($2::uuid IS NULL OR r.work_ref=$2) AND (($3::uuid IS NULL AND result.result IS NOT NULL) OR r.request_ref=$3)
  ORDER BY r.work_ref,m.comment_external_id,r.created_at DESC,r.request_ref DESC
 )
 SELECT semantic.*,w.window_ref,result.core_json,dispatch.context,

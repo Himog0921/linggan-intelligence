@@ -37,11 +37,15 @@ impl StoredSignal {
 
 pub async fn read_problems(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
     let problems: Vec<Value> = sqlx::query_scalar(
-        "SELECT jsonb_build_object('problemRef',p.problem_ref,'label',p.label,'state',p.state,
+        "SELECT jsonb_build_object('problemRef',p.problem_ref,'label',CASE WHEN withdrawn.problem_ref IS NULL THEN p.label ELSE '需求来源已撤回' END,'state',p.state,
            'authorCount',p.author_count,'commentCount',p.comment_count,'workCount',p.work_count,
            'lastResearchedAt',p.last_researched_at)
          FROM linggan_comment_problem_current p JOIN linggan_comment_problem_definition d USING(problem_ref)
+         LEFT JOIN linggan_comment_problem_withdrawn_source withdrawn USING(problem_ref)
          WHERE p.domain_ref=$1 AND d.origin_invocation_ref IS NOT NULL
+         AND (withdrawn.problem_ref IS NULL OR EXISTS(
+           SELECT 1 FROM linggan_comment_problem_active_redirect edge WHERE edge.to_problem_ref=p.problem_ref
+         ))
          ORDER BY p.author_count DESC,p.last_researched_at DESC NULLS LAST,p.problem_ref",
     ).bind(domain).fetch_all(db.pool()).await?;
     Ok(json!({"domainRef":domain,"problems":problems}))
@@ -63,26 +67,40 @@ pub(in crate::ai_foundation) async fn problem_in(
     domain: Uuid,
     requested: Uuid,
 ) -> Result<Value, FoundationError> {
-    let (problem, mut detail): (Uuid, Value) = sqlx::query_as(
-        "SELECT p.problem_ref,jsonb_build_object('domainRef',p.domain_ref,'problemRef',p.problem_ref,
-           'label',p.label,'state',p.state,'authorCount',p.author_count,'commentCount',p.comment_count,
+    let (problem, withdrawn, mut detail): (Uuid, bool, Value) = sqlx::query_as(
+        "SELECT p.problem_ref,withdrawn.problem_ref IS NOT NULL,jsonb_build_object('domainRef',p.domain_ref,'problemRef',p.problem_ref,
+           'label',CASE WHEN withdrawn.problem_ref IS NULL THEN p.label ELSE '需求来源已撤回' END,'state',p.state,'authorCount',p.author_count,'commentCount',p.comment_count,
            'workCount',p.work_count,'lastResearchedAt',p.last_researched_at,
-           'actor',p.actor,'goal',p.goal,'barrier',p.barrier,'context',p.context)
+           'actor',CASE WHEN withdrawn.problem_ref IS NULL THEN p.actor END,
+           'goal',CASE WHEN withdrawn.problem_ref IS NULL THEN p.goal ELSE '需求来源已撤回' END,
+           'barrier',CASE WHEN withdrawn.problem_ref IS NULL THEN p.barrier ELSE '需求来源已撤回' END,
+           'context',CASE WHEN withdrawn.problem_ref IS NULL THEN p.context END)
          FROM linggan_comment_problem_resolution r
          JOIN linggan_comment_problem_current p ON p.problem_ref=r.current_ref
          JOIN linggan_comment_problem_definition d ON d.problem_ref=r.problem_ref
-         WHERE r.problem_ref=$1 AND p.domain_ref=$2 AND d.origin_invocation_ref IS NOT NULL",
+         LEFT JOIN linggan_comment_problem_withdrawn_source withdrawn ON withdrawn.problem_ref=p.problem_ref
+         WHERE r.problem_ref=$1 AND p.domain_ref=$2 AND d.origin_invocation_ref IS NOT NULL
+         AND (withdrawn.problem_ref IS NULL OR EXISTS(
+           SELECT 1 FROM linggan_comment_problem_active_redirect edge WHERE edge.to_problem_ref=p.problem_ref
+         ))",
     ).bind(requested).bind(domain).fetch_optional(&mut **tx).await?.ok_or(FoundationError::NotFound)?;
     detail["redirectedFrom"] = json!((problem != requested).then_some(requested));
-    detail["evidence"] = json!(voices(tx, domain, problem).await?);
+    detail["evidence"] = if withdrawn {
+        json!([])
+    } else {
+        json!(voices(tx, domain, problem).await?)
+    };
     let history: Vec<Value> = sqlx::query_scalar(
-        "SELECT jsonb_build_object('redirectRef',r.redirect_ref,'fromLabel',source.label,
-           'toLabel',destination.label,'createdAt',r.created_at,'revokedAt',v.created_at)
+        "SELECT jsonb_build_object('redirectRef',r.redirect_ref,
+           'fromLabel',CASE WHEN withdrawn_source.problem_ref IS NULL THEN source.label ELSE '需求来源已撤回' END,
+           'toLabel',CASE WHEN withdrawn_destination.problem_ref IS NULL THEN destination.label ELSE '需求来源已撤回' END,'createdAt',r.created_at,'revokedAt',v.created_at)
          FROM linggan_comment_problem_redirect r
          JOIN linggan_comment_problem_definition source ON source.problem_ref=r.from_problem_ref
          JOIN linggan_comment_problem_definition destination ON destination.problem_ref=r.to_problem_ref
          JOIN linggan_comment_problem_resolution source_current ON source_current.problem_ref=source.problem_ref
          JOIN linggan_comment_problem_resolution destination_current ON destination_current.problem_ref=destination.problem_ref
+         LEFT JOIN linggan_comment_problem_withdrawn_source withdrawn_source ON withdrawn_source.problem_ref=source.problem_ref
+         LEFT JOIN linggan_comment_problem_withdrawn_source withdrawn_destination ON withdrawn_destination.problem_ref=destination.problem_ref
          LEFT JOIN linggan_comment_problem_redirect_revocation v USING(redirect_ref)
          WHERE source.domain_ref=$2 AND $1 IN(source_current.current_ref,destination_current.current_ref)
          ORDER BY r.created_at DESC,r.redirect_ref DESC",
@@ -207,7 +225,8 @@ async fn read_signals(
            'state',p.state,'authorCount',p.author_count)
          FROM linggan_comment_problem_support support
          JOIN linggan_comment_problem_current p USING(problem_ref)
-         WHERE support.request_ref=$1",
+         WHERE support.request_ref=$1
+         AND NOT EXISTS (SELECT 1 FROM linggan_comment_problem_withdrawn_source x WHERE x.problem_ref=p.problem_ref)",
     ).bind(request).fetch_all(&mut **tx).await?.into_iter().collect();
     signals
         .iter()

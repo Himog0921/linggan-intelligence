@@ -100,7 +100,7 @@ function RunDetail({ domain, batch, nav, refreshList }: { domain: string; batch:
     {retry && !active && data.retrySelections.length ? <CommentResearchSelection domain={domain} selected={data.retrySelections} nav={nav} /> : null}
     {confirm ? <StudyDialog titleId="comment-run-cancel-title" onClose={() => { if (!busy) setConfirm(false); }} className={c('study-detail-dialog')}>
       <section className={c('study-detail-section')}><h3 id="comment-run-cancel-title">取消这次评论研究？</h3>
-        <p>停止尚未开始的单元。已保存的结果保留，在途调用以回执为准。</p>
+        <p>停止后续调用。已保存的结果保留。已发出的调用仍结算用量，取消后不再发布结果。</p>
         <ActionButton type="button" disabled={busy} onClick={() => setConfirm(false)}>继续等待</ActionButton>
         <ActionButton variant="danger" type="button" disabled={busy} onClick={() => void cancel()}>确认取消</ActionButton>
         {notice ? <p role="status">{notice}</p> : null}

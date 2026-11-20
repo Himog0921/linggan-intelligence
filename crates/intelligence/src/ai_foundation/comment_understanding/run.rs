@@ -18,8 +18,7 @@ pub struct Cancel {
     pub batch_ref: Uuid,
 }
 
-/// Stop what has not started. A unit already in a provider call settles normally, so its
-/// comments are neither lost nor left half written.
+/// Stop further dispatch and publication. Provider calls already sent still settle usage.
 pub async fn cancel(db: &Database, request: &Cancel) -> Result<Value, FoundationError> {
     let mut command = Command::begin(
         db,

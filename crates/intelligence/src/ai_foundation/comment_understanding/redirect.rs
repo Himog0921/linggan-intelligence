@@ -45,6 +45,7 @@ pub(crate) async fn apply_in(
              FROM linggan_comment_problem_current current
              JOIN linggan_comment_problem_definition definition USING(problem_ref)
              WHERE current.domain_ref=$1 AND current.problem_ref=ANY($2)
+             AND NOT EXISTS (SELECT 1 FROM linggan_comment_problem_withdrawn_source x WHERE x.problem_ref=current.problem_ref)
              ORDER BY current.author_count DESC,definition.created_at,current.problem_ref",
         )
         .bind(domain)

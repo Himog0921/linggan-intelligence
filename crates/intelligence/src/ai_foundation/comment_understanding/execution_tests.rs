@@ -45,7 +45,7 @@ async fn environment(name: &str, variant: &'static str) -> Env {
     // The saved L1 Cores are synthetic and need their own task configuration; they are made
     // before the comment task is configured so that nothing else touches its revision.
     topic_tests::configure_tasks_for_test(&db, l1_model_config).await;
-    let endpoint = wire::Endpoint::variant(false, variant).await;
+    let endpoint = wire::Endpoint::variant(variant == "withdrawn_catalog", variant).await;
     let adapter = PiAdapter::configured_with_test_command(
         std::env::var_os("AI_FOUNDATION_PROOF_NODE")
             .expect("runner supplies explicit Node")
@@ -732,6 +732,135 @@ async fn downstream_readers_see_v2_research_and_stop_at_a_restricted_comment() {
             .is_err()
     );
     tx.rollback().await.unwrap();
+    let problem: Uuid =
+        sqlx::query_scalar("SELECT problem_ref FROM linggan_comment_problem_definition")
+            .fetch_one(env.db.pool())
+            .await
+            .unwrap();
+    assert!(
+        super::read_problem(&env.db, support::D, problem)
+            .await
+            .is_ok()
+    );
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'c1','synthetic defining source withdrawal')")
+        .bind(w).execute(env.db.pool()).await.unwrap();
+    assert!(matches!(
+        super::read_problem(&env.db, support::D, problem).await,
+        Err(crate::ai_foundation::store::FoundationError::NotFound)
+    ));
+    assert_eq!(
+        super::read_problems(&env.db, support::D).await.unwrap()["problems"],
+        json!([])
+    );
+    let mut tx = env.db.pool().begin().await.unwrap();
+    assert!(
+        super::catalog::read_in(&mut tx, support::D)
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    tx.rollback().await.unwrap();
+    let historical: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM linggan_comment_problem_definition WHERE problem_ref=$1)",
+    )
+    .bind(problem)
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    assert!(historical);
+    env.endpoint.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and an owned loopback provider"]
+async fn a_definition_withdrawn_in_flight_withholds_the_full_response() {
+    let mut env = environment("cu_withdrawn_catalog", "withdrawn_catalog").await;
+    let l1_config: Uuid = sqlx::query_scalar(
+        "SELECT config_ref FROM linggan_model_config ORDER BY created_at LIMIT 1",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    let work = env.work_with_l1("withdraw-catalog-work", l1_config).await;
+    let defining = env
+        .comment(
+            "withdraw-catalog-work",
+            "defining",
+            "这个计划每天需要提醒",
+            "reader-a",
+        )
+        .await;
+    let (_, first) = env.run(&[selection(work, defining)], false).await;
+    env.settle(first).await;
+    assert_eq!(env.problems().await.len(), 1);
+
+    let other = env
+        .comment(
+            "withdraw-catalog-work",
+            "other",
+            "这个步骤需要提醒 GATED",
+            "reader-b",
+        )
+        .await;
+    let (_, second) = env.run(&[selection(work, other)], false).await;
+    let seen = env.endpoint.seen.take().unwrap();
+    let release = env.endpoint.release.take().unwrap();
+    let withdraw = async {
+        tokio::time::timeout(Duration::from_secs(10), seen)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            env.unit_requests()[1]["catalog"].as_array().unwrap().len(),
+            1
+        );
+        sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason)
+             VALUES($1,'defining','synthetic withdrawal during call')")
+            .bind(work).execute(env.db.pool()).await.unwrap();
+        release.send(()).unwrap();
+    };
+    tokio::join!(env.settle(second), withdraw);
+    let receipt = read_run(&env.db, support::D, second).await.unwrap();
+    assert_eq!(receipt["usage"]["modelCalls"], 1);
+    assert!(receipt["usage"]["inputTokens"].as_i64().unwrap() > 0);
+    assert_eq!(
+        receipt["units"][0]["failureCode"],
+        "comment_publication_withheld"
+    );
+    let results = env.results().await;
+    assert_eq!(
+        failure_of(&results, "other"),
+        Some("comment_publication_withheld")
+    );
+    env.endpoint.finish().await;
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and an owned loopback provider"]
+async fn a_valid_envelope_without_any_target_is_a_failed_unit_with_usage() {
+    let env = environment("cu_all_targets_missing", "normal").await;
+    let l1_config: Uuid = sqlx::query_scalar(
+        "SELECT config_ref FROM linggan_model_config ORDER BY created_at LIMIT 1",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    let work = env.work_with_l1("missing-work", l1_config).await;
+    let source = env
+        .comment(
+            "missing-work",
+            "missing",
+            "这个计划每天需要提醒 MISSING",
+            "reader",
+        )
+        .await;
+    let (_, batch) = env.run(&[selection(work, source)], false).await;
+    env.settle(batch).await;
+    let receipt = read_run(&env.db, support::D, batch).await.unwrap();
+    assert_eq!(receipt["usage"]["modelCalls"], 1);
+    assert_eq!(receipt["units"][0]["state"], "failed");
+    assert_eq!(receipt["units"][0]["failureCode"], "unit_output_invalid");
+    assert_eq!(receipt["targets"][0]["failureCode"], "target_missing");
     env.endpoint.finish().await;
 }
 
@@ -1065,18 +1194,52 @@ async fn consolidates_duplicate_candidates_once_and_restores_opportunity_on_revo
         revoke_redirect(&env.db, &wrong_domain).await,
         Err(crate::ai_foundation::store::FoundationError::NotFound)
     ));
+    let winner_source: (Uuid, String) = sqlx::query_as(
+        "SELECT source.content_public_ref,source.comment_external_id
+         FROM linggan_comment_problem_definition definition
+         JOIN linggan_comment_research_request request ON request.request_ref=definition.source_request_ref
+         JOIN linggan_material_comment source ON source.material_ref=request.source_ref WHERE definition.problem_ref=$1",
+    ).bind(winner).fetch_one(env.db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason)
+                  VALUES($1,$2,'synthetic winner withdrawal')").bind(winner_source.0).bind(&winner_source.1)
+        .execute(env.db.pool()).await.unwrap();
+    let masked = super::read_problem(&env.db, support::D, loser)
+        .await
+        .unwrap();
+    assert_eq!(masked["label"], "需求来源已撤回");
+    assert_eq!(masked["evidence"], json!([]));
+    assert_eq!(masked["history"][0]["toLabel"], "需求来源已撤回");
+    assert_eq!(masked["history"][0]["redirectRef"], json!(redirect));
     let receipt = revoke_redirect(&env.db, &revoke).await.unwrap();
     assert_eq!(receipt["changed"], true);
     assert_eq!(revoke_redirect(&env.db, &revoke).await.unwrap(), receipt);
-    assert_eq!(env.problems().await, before);
+    assert!(
+        super::read_problem(&env.db, support::D, loser)
+            .await
+            .is_ok()
+    );
     rebuild_opportunity_cards(&env.db, support::D, &digest, CardRebuildMode::Full)
         .await
         .unwrap();
-    assert_eq!(card_author_count(winner).await, 1);
     assert_eq!(card_author_count(loser).await, 1);
     let restored_card = read_card(&env.db, loser).await.unwrap();
     assert_eq!(restored_card["problem"]["id"], json!(loser));
     assert!(restored_card["problem"]["redirectedFrom"].is_null());
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason)
+         SELECT source.content_public_ref,source.comment_external_id,'synthetic definition withdrawal'
+         FROM linggan_comment_problem_definition definition
+         JOIN linggan_comment_research_request request ON request.request_ref=definition.source_request_ref
+         JOIN linggan_material_comment source ON source.material_ref=request.source_ref
+         WHERE definition.problem_ref=$1",
+    )
+    .bind(loser).execute(env.db.pool()).await.unwrap();
+    rebuild_opportunity_cards(&env.db, support::D, &digest, CardRebuildMode::Full)
+        .await
+        .unwrap();
+    let redacted_card = read_card(&env.db, loser).await.unwrap();
+    assert_eq!(redacted_card["problem"]["statement"], "需求来源已撤回");
+    assert_eq!(redacted_card["problem"]["id"], json!(loser));
 }
 
 #[tokio::test]

@@ -544,6 +544,7 @@ migrate() {
   apply_migration_once "0230_comment_understanding" "$project_root/database/migrations/0230_comment_understanding.sql"
   apply_migration_once "0231_comment_problem_consolidation" "$project_root/database/migrations/0231_comment_problem_consolidation.sql"
   apply_migration_once "0232_retire_comment_research_v1" "$project_root/database/migrations/0232_retire_comment_research_v1.sql"
+  apply_migration_once "0233_comment_problem_withdrawn_source" "$project_root/database/migrations/0233_comment_problem_withdrawn_source.sql"
 }
 
 case "$command_name" in

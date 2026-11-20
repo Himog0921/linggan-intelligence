@@ -355,6 +355,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0230_comment_understanding.sql"),
     include_str!("../../../../database/migrations/0231_comment_problem_consolidation.sql"),
     include_str!("../../../../database/migrations/0232_retire_comment_research_v1.sql"),
+    include_str!("../../../../database/migrations/0233_comment_problem_withdrawn_source.sql"),
     "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
@@ -527,4 +528,5 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0230_comment_understanding','7962bc54a0648300f998f0a430e77feeba22a06f2d3f4c323e3694d0ae33dc76');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0231_comment_problem_consolidation','f42c38fb4be7a97b27c5789d6293ca54ae21a8cf50735f7da699761821dff435');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0232_retire_comment_research_v1','3f73099afbf42abe94594ff0550cc6d193d0506ad1ba638c79aa9c2621d08169');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0233_comment_problem_withdrawn_source','e1d6dfdc4dd715f33ca2ce7dde1a8e762afc015e896ee5e48779a4386d50ae34');\n",
 );

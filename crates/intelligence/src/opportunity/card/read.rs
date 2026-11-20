@@ -15,6 +15,8 @@ const CARD_READ_TABLES: &[&str] = &[
     "linggan_comment_problem_definition",
     "linggan_comment_problem_redirect",
     "linggan_comment_problem_redirect_revocation",
+    "linggan_comment_research_request",
+    "linggan_material_comment",
     "linggan_material_comment_restriction",
     CARD_CHANGE_TABLE,
     "linggan_opportunity_opportunity_card",
@@ -22,8 +24,11 @@ const CARD_READ_TABLES: &[&str] = &[
     "linggan_opportunity_problem_lineage",
 ];
 const LIST_READ_TABLES: &[&str] = &[
+    "linggan_comment_problem_definition",
     "linggan_comment_problem_redirect",
     "linggan_comment_problem_redirect_revocation",
+    "linggan_comment_research_request",
+    "linggan_material_comment",
     "linggan_material_comment_restriction",
     CARD_CHANGE_TABLE,
     "linggan_opportunity_card_period_index",
@@ -342,11 +347,12 @@ async fn load_card(
     problem: Uuid,
 ) -> Result<StoredCard, OpportunityReadError> {
     let row = sqlx::query("SELECT p.domain_ref,c.payload,c.input_fingerprint,c.taxonomy_version,c.metric_def_version, \
+        EXISTS(SELECT 1 FROM linggan_comment_problem_withdrawn_source x WHERE x.problem_ref=p.source_ref) AS withdrawn_definition, \
         to_char(c.as_of AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS as_of \
         FROM linggan_opportunity_opportunity_card c JOIN linggan_opportunity_problem p USING(problem_ref) WHERE c.problem_ref=$1")
         .bind(problem).fetch_optional(&mut **tx).await?.ok_or(OpportunityReadError::NotFound)?;
     let raw: Value = row.try_get("payload")?;
-    let card: read_model::Card =
+    let mut card: read_model::Card =
         serde_json::from_value(raw).map_err(|_| OpportunityReadError::InvalidModel)?;
     let db_as_of: String = row.try_get("as_of")?;
     if card.problem.id != problem
@@ -379,6 +385,9 @@ async fn load_card(
     .await?;
     if restricted {
         return Err(OpportunityReadError::SourceUnavailable);
+    }
+    if row.try_get::<bool, _>("withdrawn_definition")? {
+        card.problem.statement = "需求来源已撤回".into();
     }
     Ok(StoredCard {
         domain: row.try_get("domain_ref")?,

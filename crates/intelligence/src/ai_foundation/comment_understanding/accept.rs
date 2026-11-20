@@ -191,6 +191,7 @@ struct RawAssignment {
 pub fn accept_unit(
     text: &str,
     targets: &[TargetFrame],
+    sent_comments: &[&str],
     catalog: &HashSet<String>,
 ) -> Result<AcceptedUnit, UnitRejection> {
     let unit: RawUnit = serde_json::from_str(text).map_err(|_| UnitRejection::OutputInvalid)?;
@@ -222,7 +223,7 @@ pub fn accept_unit(
             match entries.remove(&frame.alias) {
                 None => rejected("target_missing"),
                 Some(mut list) if list.len() == 1 => {
-                    match accept_target(list.remove(0), frame, catalog, &new_keys) {
+                    match accept_target(list.remove(0), frame, sent_comments, catalog, &new_keys) {
                         Ok(target) => TargetOutcome::Accepted(target),
                         Err(code) => rejected(code),
                     }
@@ -258,19 +259,20 @@ pub fn accept_unit(
 /// Definitions that satisfy the contract. A key declared twice is ambiguous and is dropped, so
 /// the signals naming it lose their assignment instead of silently picking one meaning.
 fn valid_new_problems(values: Vec<Value>) -> Vec<NewProblem> {
-    let parsed: Vec<NewProblem> = values.into_iter().filter_map(new_problem).collect();
-    let mut count: HashMap<&str, usize> = HashMap::new();
-    for problem in &parsed {
-        *count.entry(problem.key.as_str()).or_default() += 1;
+    let mut keys = HashMap::<String, usize>::new();
+    for value in &values {
+        if let Some(key) = value["newKey"].as_str() {
+            *keys.entry(key.trim().to_owned()).or_default() += 1;
+        }
     }
-    let unique: HashSet<String> = count
+    values
         .into_iter()
-        .filter(|(_, n)| *n == 1)
-        .map(|(k, _)| k.to_owned())
-        .collect();
-    parsed
-        .into_iter()
-        .filter(|p| unique.contains(&p.key))
+        .filter(|value| {
+            value["newKey"]
+                .as_str()
+                .is_some_and(|key| keys.get(key.trim()) == Some(&1))
+        })
+        .filter_map(new_problem)
         .collect()
 }
 
@@ -289,6 +291,7 @@ fn new_problem(value: Value) -> Option<NewProblem> {
 fn accept_target(
     entry: Value,
     frame: &TargetFrame,
+    sent_comments: &[&str],
     catalog: &HashSet<String>,
     new_keys: &HashSet<&str>,
 ) -> Result<AcceptedTarget, &'static str> {
@@ -321,7 +324,7 @@ fn accept_target(
     let mut seen = BTreeSet::new();
     let mut signals = Vec::new();
     for value in raw.signals.into_iter().take(MAX_SIGNALS_PER_TARGET) {
-        match accept_signal(value, frame, catalog, new_keys, &mut seen) {
+        match accept_signal(value, frame, sent_comments, catalog, new_keys, &mut seen) {
             Some(signal) => signals.push(signal),
             None => dropped_signals += 1,
         }
@@ -341,12 +344,21 @@ fn accept_target(
 fn accept_signal(
     value: Value,
     frame: &TargetFrame,
+    sent_comments: &[&str],
     catalog: &HashSet<String>,
     new_keys: &HashSet<&str>,
     seen: &mut BTreeSet<(&'static str, i32, i32)>,
 ) -> Option<AcceptedSignal> {
     let raw: RawSignal = serde_json::from_value(value).ok()?;
     let proposition = trimmed(&raw.proposition, TEXT_MAX_CHARS)?;
+    if sent_comments.iter().map(|raw| raw.trim()).any(|other| {
+        !other.is_empty()
+            && !frame.raw_text.contains(other)
+            && !frame.cleaned.text.contains(other)
+            && proposition.contains(other)
+    }) {
+        return None;
+    }
     let evidence = trimmed(&raw.evidence, TEXT_MAX_CHARS)?;
     let (start, end, original) = frame.cleaned.resolve(&evidence, &frame.raw_text).ok()?;
     let kind = raw.kind.as_str();
@@ -436,6 +448,55 @@ mod tests {
             TargetOutcome::Accepted(target) => target,
             other => panic!("expected an accepted target, got {other:?}"),
         }
+    }
+
+    fn accept_unit(
+        text: &str,
+        targets: &[TargetFrame],
+        catalog: &HashSet<String>,
+    ) -> Result<AcceptedUnit, UnitRejection> {
+        let sent: Vec<_> = targets
+            .iter()
+            .map(|target| target.raw_text.as_str())
+            .collect();
+        super::accept_unit(text, targets, &sent, catalog)
+    }
+
+    #[test]
+    fn valid_evidence_cannot_justify_a_proposition_citing_another_sent_comment() {
+        let frames = [frame("t1", "写作业每天都要催。")];
+        let other = frame("t2", "孩子周五想学滑冰！");
+        assert_ne!(other.raw_text, other.cleaned.text);
+        let mut borrowed = signal("belief", "每天都要催", json!(null));
+        borrowed["proposition"] = json!(format!("用户说：{}", other.cleaned.text));
+        let text = unit(json!([]), json!([target("t1", vec![borrowed])]));
+        let result = super::accept_unit(
+            &text,
+            &frames,
+            &[
+                frames[0].raw_text.as_str(),
+                &other.raw_text,
+                &other.cleaned.text,
+            ],
+            &catalog(&[]),
+        )
+        .unwrap();
+        assert_eq!(
+            result.targets[0],
+            TargetOutcome::Rejected {
+                alias: "t1".into(),
+                code: "target_all_signals_invalid"
+            }
+        );
+    }
+
+    #[test]
+    fn malformed_duplicate_also_disqualifies_a_new_key() {
+        let definitions = vec![
+            json!({"newKey":"n1","label":"任务启动","goal":"开始写作业","barrier":"需要提醒"}),
+            json!({"newKey":"n1"}),
+        ];
+        assert!(valid_new_problems(definitions).is_empty());
     }
 
     #[test]
