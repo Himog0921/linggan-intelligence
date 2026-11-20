@@ -4,8 +4,10 @@ import { chromium } from 'playwright';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 const directory=process.env.WEB_APP_PROOF_DIR;
-const {origin,domain,work,coreRef}=JSON.parse(await readFile(path.join(directory,'fixture.json'),'utf8'));
+const {origin,domain,work}=JSON.parse(await readFile(path.join(directory,'fixture.json'),'utf8'));
 assert.equal(new URL(origin).hostname,'127.0.0.1');assert.notEqual(new URL(origin).port,'3000');
+let coreRef;
+const commentV2='/api/local/comment-research/v2';
 const report={scope:'desktop synthetic materials and owned loopback provider; not model-quality evidence',steps:[],errors:[],blocked:[]};
 const browser=await chromium.launch({headless:true,...(process.env.DOSSIER_BROWSER_EXECUTABLE?{executablePath:process.env.DOSSIER_BROWSER_EXECUTABLE}:{})});
 const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
@@ -20,7 +22,7 @@ try {
   await page.goto(`${origin}/corpus/comments?domain=${domain}&view=overview`);
   const hero=page.getByRole('region',{name:'评论研究概览',exact:true});
   await hero.getByText('可研究评论',{exact:true}).waitFor();
-  const reading=await get(`/api/local/comment-research/overview?domainRef=${domain}`);
+  const reading=await get(`/api/local/comment-research/v2/overview?domainRef=${domain}`);
   assert.equal(reading.corpusSummary.eligibleCommentCount,2);assert.equal(reading.researchSummary.currentSignalCount,0);
   const metrics=page.locator('[aria-label="研究累计读数与昨日活动"]');
   const chart=page.getByRole('region',{name:'评论观察趋势',exact:true});
@@ -33,30 +35,64 @@ try {
   await page.getByRole('button',{name:'近 56 天',exact:true}).click();await page.getByRole('button',{name:'图表',exact:true}).click();
   await hero.getByRole('img',{name:'评论柱状与研究信号渐变曲线，共同横轴及采集覆盖',exact:true}).waitFor();
  });
- await step('select actual catalog comments, inspect dossier and start semantic/problem/review chain',async()=>{
+ await step('select real catalog comments and reuse L1 from the preview',async()=>{
   await page.goto(`${origin}/corpus/comments?domain=${domain}&view=comments`);
   await page.getByRole('button',{name:'选择评论',exact:true}).click();
-  const checks=page.getByRole('checkbox',{name:'选择这条评论',exact:true});await checks.first().waitFor();assert.equal(await checks.count(),2);
+  const checks=page.getByRole('checkbox',{name:'选择这条评论',exact:true});
+  await checks.first().waitFor();assert.equal(await checks.count(),2);
   await checks.nth(0).check();await checks.nth(1).check();
-  await page.getByRole('button',{name:'检查所选评论',exact:true}).click();
-  await page.getByRole('button',{name:'开始所选评论研究',exact:true}).click();
-  await page.getByText('已提交 2 条研究，结果尚未完成。',{exact:true}).waitFor();
-  const data=await until(`/api/local/comment-research/problems?domainRef=${domain}`,r=>r.problems.length===1);assert.equal(data.problems[0].evidence.length,2);const receipts=await until(`/api/local/comment-research/runs?domainRef=${domain}`,r=>r.runs.every(run=>run.state!=='running'));assert.ok(receipts.runs.every(run=>run.state==='succeeded'),JSON.stringify(receipts));
+  const preview=await post(page.getByRole('button',{name:'预览所选评论',exact:true}),commentV2+'/preview');
+  assert.equal(preview.waitingL1.targetCount,2);assert.deepEqual(preview.waitingL1.workRefs,[work]);
+  await page.getByText('L1 未就绪 2 条，涉及 1 个作品。',{exact:true}).waitFor();
+  const [response]=await Promise.all([
+    page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/local/content-understanding'),
+    page.getByRole('button',{name:'为缺 L1 的作品提交内容理解',exact:true}).click(),
+  ]);
+  assert.equal(response.status(),202,await response.text());coreRef=(await response.json()).requestRef;
+  const l1=await until(`/api/local/content-understanding/latest?domainRef=${domain}&workRef=${work}`,r=>r.analysis?.state==='succeeded');
+  assert.equal(l1.analysis.requestRef,coreRef);
+  assert.equal((await get(`${commentV2}/runs?domainRef=${domain}`)).runs.length,0);
+ });
+ await step('open the real unit receipt and cancel the in-flight synthetic run',async()=>{
+  await post(page.getByRole('button',{name:'预览所选评论',exact:true}),commentV2+'/preview');
+  const started=await post(page.getByRole('button',{name:'开始所选评论研究',exact:true}),commentV2+'/runs');
+  assert.equal(started.targetCount,2);assert.equal(started.unitCount,1);
+  await until(`${commentV2}/runs/${started.batchRef}?domainRef=${domain}`,r=>r.units.some(unit=>unit.state==='running')&&r.usage.modelCalls===1);
+  await page.getByRole('button',{name:'查看研究记录',exact:true}).click();
+  await page.getByRole('button',{name:'取消运行',exact:true}).click();
+  await post(page.getByRole('button',{name:'确认取消',exact:true}),commentV2+'/cancel');
+  const run=await until(`${commentV2}/runs/${started.batchRef}?domainRef=${domain}`,r=>r.units.every(unit=>unit.state==='cancelled'));
+  assert.equal(run.cancelRequested,true);assert.equal(run.targets[0].state,'cancelled');assert.deepEqual(run.retrySelections,[]);
+  assert.equal(run.usage.modelCalls,1);assert.ok(run.usage.inputTokens>0);assert.ok(run.usage.outputTokens>0);
+  await page.getByRole('region',{name:'运行回执'}).getByText(/^已取消 · 2 条评论/).waitFor();
+  await page.getByText('已请求取消。',{exact:true}).waitFor();
+ });
+ await step('start one unit for the selection and inspect a formal demand and its original voices',async()=>{
+  await page.getByRole('link',{name:'用户评论',exact:true}).click();
+  await post(page.getByRole('button',{name:'预览所选评论',exact:true}),commentV2+'/preview');
+  const started=await post(page.getByRole('button',{name:'开始所选评论研究',exact:true}),commentV2+'/runs');
+  const run=await until(`${commentV2}/runs/${started.batchRef}?domainRef=${domain}`,r=>r.units.every(unit=>unit.state==='succeeded'));
+  assert.equal(run.usage.modelCalls,1);
+  const data=await until(`${commentV2}/problems?domainRef=${domain}`,r=>r.problems.length===1);
+  assert.equal(data.problems[0].authorCount,2);
   await page.getByRole('link',{name:'用户问题',exact:true}).click();
-  await page.getByRole('heading',{name:'每日提醒需求',exact:true}).waitFor();assert.equal(await page.getByRole('blockquote').count(),2);
+  await page.getByRole('button',{name:'孩子需要每天有人提醒',exact:true}).click();
+  const detail=page.getByRole('dialog',{name:'孩子需要每天有人提醒',exact:true});
+  await detail.getByText('正式 · 2 位作者 · 2 条评论 · 1 个作品',{exact:true}).waitFor();
+  assert.equal(await detail.getByRole('blockquote').count(),2);
+  await page.screenshot({path:path.join(directory,'comment-v2-demand-detail.png'),fullPage:true});
+  await detail.getByRole('button',{name:/查看原声/}).first().click();
+  const comment=page.getByRole('region',{name:'研究这条评论',exact:true});
+  await comment.getByRole('heading',{name:'作品 L1 语境'}).waitFor();
+  await comment.getByText(/评论者的孩子需要有人提醒/).waitFor();
+  await comment.getByText('提醒',{exact:true}).waitFor();
  });
- await step('reopen an immutable research receipt and restore the exact raw quote',async()=>{
-  await page.getByRole('link',{name:'研究记录',exact:true}).click();
-  await page.getByRole('button',{name:'查看评论与研究依据',exact:true}).first().click();
-  const detail=page.getByRole('region',{name:'研究这条评论',exact:true});await detail.getByText('合成测试需要提醒',{exact:true}).waitFor();
-  await detail.getByText('我的孩子需要每天有人提醒',{exact:true}).waitFor();
- });
- await step('current overview counts qualified semantic outputs and independently reviewed problems',async()=>{
+ await step('overview counts accepted V2 results and formal demand',async()=>{
   await page.goto(`${origin}/corpus/comments?domain=${domain}&view=overview`);
   await page.getByRole('region',{name:'评论研究概览',exact:true}).waitFor();
-  const reading=await get(`/api/local/comment-research/overview?domainRef=${domain}`);
+  const reading=await get(`${commentV2}/overview?domainRef=${domain}`);
   assert.equal(reading.researchSummary.succeededCommentCount,2);assert.equal(reading.researchSummary.currentSignalCount,2);assert.equal(reading.knowledgeSummary.problemCount,1);
-  await page.getByRole('heading',{name:'每日提醒需求',exact:true}).waitFor();
+  await page.getByRole('heading',{name:'孩子需要每天有人提醒',exact:true}).waitFor();
  });
  await step('creator work and explicit account sample use their own configured tasks',async()=>{
   await page.goto(`${origin}/corpus/creators?domain=${domain}`);
@@ -155,5 +191,5 @@ try {
   await page.getByRole('region',{name:'评论主题挂靠',exact:true}).getByText('已匹配',{exact:true}).waitFor();
  });
  assert.deepEqual(report.errors,[]);
-} catch(error){report.failure=String(error.stack??error);report.runs=await get(`/api/local/comment-research/runs?domainRef=${domain}`);report.topic=await get(`/api/local/topic-research/runs?domainRef=${domain}`);await page.screenshot({path:path.join(directory,'research-failed.png'),fullPage:true});process.exitCode=1;console.error(error);}
+} catch(error){report.failure=String(error.stack??error);report.runs=await get(`${commentV2}/runs?domainRef=${domain}`).catch(()=>null);report.topic=await get(`/api/local/topic-research/runs?domainRef=${domain}`);await page.screenshot({path:path.join(directory,'research-failed.png'),fullPage:true});process.exitCode=1;console.error(error);}
 finally{await writeFile(path.join(directory,'report.json'),JSON.stringify(report,null,2));await browser.close();}

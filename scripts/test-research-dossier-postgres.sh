@@ -135,7 +135,7 @@ if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-foundation" || "${1:-}"
     exit 0
   fi
   if [[ "${1:-}" == "--comment-executor" ]]; then
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test comment_research_executor_postgres --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --lib --locked -- --ignored --nocapture --test-threads=1 comment_understanding::execution_tests
     echo "Comment research executor proof passed"
     exit 0
   fi

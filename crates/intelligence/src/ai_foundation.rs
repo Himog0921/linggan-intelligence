@@ -6,9 +6,8 @@ pub mod batch_control;
 pub mod batch_store;
 pub mod capability;
 pub mod catalog;
-pub mod comment_problem;
-pub mod comment_research;
 pub mod comment_research_overview;
+pub mod comment_understanding;
 pub mod control;
 pub mod control_store;
 mod creator_account_input;
@@ -66,9 +65,8 @@ pub enum TaskKey {
     ModelProbe,
     OcrRecognition,
     WorkComparison,
-    CommentStudy,
-    CommentProblemResolution,
-    CommentProblemPairReview,
+    CommentUnderstanding,
+    CommentProblemConsolidation,
     TopicResearch,
     TopicResearchExtractReview,
     TopicResearchResolve,
@@ -95,9 +93,8 @@ impl TaskKey {
             Self::ModelProbe => "model_probe",
             Self::OcrRecognition => "ocr_recognition",
             Self::WorkComparison => "work_comparison",
-            Self::CommentStudy => "comment_study",
-            Self::CommentProblemResolution => "comment_problem_resolution",
-            Self::CommentProblemPairReview => "comment_problem_pair_review",
+            Self::CommentUnderstanding => "comment_understanding",
+            Self::CommentProblemConsolidation => "comment_problem_consolidation",
             Self::TopicResearch => "topic_research",
             Self::TopicResearchExtractReview => "topic_research_extract_review",
             Self::TopicResearchResolve => "topic_research_resolve",
@@ -108,14 +105,6 @@ impl TaskKey {
             Self::LegacyCreatorDiscovery => "legacy_creator_discovery",
             Self::LegacyTopicMap => "legacy_topic_map",
             Self::LegacyUnclassified => "legacy_unclassified",
-        }
-    }
-    pub(crate) fn comment_stage(self) -> Option<u8> {
-        match self {
-            Self::CommentStudy => Some(0),
-            Self::CommentProblemResolution => Some(1),
-            Self::CommentProblemPairReview => Some(2),
-            _ => None,
         }
     }
     pub(crate) fn topic_stage(self) -> Option<u8> {

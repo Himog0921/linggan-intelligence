@@ -1,5 +1,5 @@
 //! Existing qualified semantic signals are assignment inputs, never a second understanding pass.
-use super::{comment_research, store::FoundationError};
+use super::{comment_understanding, store::FoundationError};
 use crate::{
     topic_map_research::ResearchInput,
     topic_map_research_analysis::{Citation, Discussion},
@@ -23,9 +23,9 @@ pub(crate) async fn load_in(
     tx: &mut Transaction<'_, Postgres>,
     request: Uuid,
 ) -> Result<ResearchInput, FoundationError> {
-    let row = sqlx::query("SELECT r.domain_ref,r.work_ref,r.knowledge_cutoff::text AS cutoff,result.result FROM linggan_comment_research_request r JOIN linggan_comment_research_result result USING(request_ref) JOIN linggan_ai_batch_item i USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.request_ref=$1 AND c.state='succeeded'")
+    let row = sqlx::query("SELECT r.domain_ref,r.work_ref,r.knowledge_cutoff::text AS cutoff,result.result FROM linggan_comment_research_request r JOIN linggan_comment_research_result result USING(request_ref) WHERE r.request_ref=$1 AND r.method_version='comment-understanding.v1' AND result.result IS NOT NULL")
         .bind(request).fetch_optional(&mut **tx).await?.ok_or_else(unavailable)?;
-    let (selected, prepared) = comment_research::frozen_in(tx, request).await?;
+    let selected = comment_understanding::current_source_in(tx, request).await?;
     let domain: Uuid = row.get("domain_ref");
     let work: Uuid = row.get("work_ref");
     let cutoff: String = row.get("cutoff");
@@ -62,13 +62,13 @@ pub(crate) async fn load_in(
             .collect();
         fragments.push(Fragment {
             fragment_id: format!("{}.comment.{}.signal.{ordinal}",work.work_ref,selected.comment_external_id),
-            source_ref: selected.source.source_ref, field: "studied_comment".into(), source_version: prepared.raw_sha256.clone(),
+            source_ref: selected.source_ref, field: "studied_comment".into(), source_version: selected.raw_sha256.clone(),
             start,end,text:text.clone(),speaker:"commenter".into(),
             structure:json!({"kind":"paragraph","text":text,"speaker":"commenter","semanticRequestRef":request,"signalOrdinal":ordinal,"signal":signal}),
             ..Default::default()
         });
     }
-    let hash = creator_discovery::hash(&json!({"contract":CONTRACT,"requestRef":request,"inputHash":prepared.input_hash,"signals":signals}).to_string());
+    let hash = creator_discovery::hash(&json!({"contract":CONTRACT,"requestRef":request,"inputHash":selected.input_hash,"signals":signals}).to_string());
     Ok(ResearchInput {
         work,
         fragments,

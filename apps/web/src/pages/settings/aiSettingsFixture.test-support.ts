@@ -20,7 +20,7 @@ export function settingsFixture() {
 export function businessSettingsFixture() {
   const root = settingsFixture();
   const lanes = [
-    { taskKey: 'comment_study', label: '评论研究', lifecycle: 'frozen' },
+    { taskKey: 'comment_understanding', label: '评论研究', lifecycle: 'frozen' },
     { taskKey: 'legacy_creator_discovery', label: '旧创作者分析', lifecycle: 'retired' },
     { taskKey: 'legacy_topic_map', label: '旧主题研究', lifecycle: 'retired' },
   ];

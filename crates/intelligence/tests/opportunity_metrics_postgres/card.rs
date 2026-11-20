@@ -1803,11 +1803,15 @@ async fn insert_offline_membership(db: &linggan_storage_postgres::Database) {
         SELECT md5('offline-cli-request')::uuid,md5('offline-cli-command')::uuid,
           '00000000-0000-4000-8000-000000000001',comment.content_public_ref,comment.material_ref,
           'primary','2026-11-05T00:00:00Z',repeat('b',64),repeat('c',64),setting.current_config_ref,
-          md5('offline-cli-batch')::uuid,'comment-research-semantic.v1','2026-11-05T00:00:00Z'
+          md5('offline-cli-batch')::uuid,'comment-understanding.v1','2026-11-05T00:00:00Z'
         FROM linggan_material_comment comment CROSS JOIN linggan_ai_task_setting setting
-        WHERE comment.comment_external_id='c-work-0-30' AND setting.task_key='comment_study';
+        WHERE comment.comment_external_id='c-work-0-30' AND setting.task_key='comment_understanding';
         ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
-        INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at)
+        INSERT INTO linggan_comment_research_result(request_ref,invocation_ref,result,created_at)
+        SELECT request_ref,'00000000-0000-4000-8000-000000004003','{}',created_at
+        FROM linggan_comment_research_request
+        ON CONFLICT (request_ref) DO NOTHING;
+        INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,origin_invocation_ref,created_at)
         VALUES(md5('offline-cli-request')::uuid,0,md5('metric-definition:1')::uuid,
           '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z');
     "#).execute(db.pool()).await.unwrap();
@@ -1873,10 +1877,14 @@ async fn card_and_memberships_share_the_same_concurrent_snapshot() {
         SELECT md5('snapshot-late-request')::uuid,md5('snapshot-late-command')::uuid,
           '00000000-0000-4000-8000-000000000001',comment.content_public_ref,comment.material_ref,
           'primary','2026-11-05T00:00:00Z',repeat('b',64),repeat('c',64),setting.current_config_ref,
-          md5('snapshot-late-batch')::uuid,'comment-research-semantic.v1','2026-11-05T00:00:00Z'
+          md5('snapshot-late-batch')::uuid,'comment-understanding.v1','2026-11-05T00:00:00Z'
         FROM linggan_material_comment comment CROSS JOIN linggan_ai_task_setting setting
-        WHERE comment.comment_external_id='c-work-0-31' AND setting.task_key='comment_study';
+        WHERE comment.comment_external_id='c-work-0-31' AND setting.task_key='comment_understanding';
         ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
+        INSERT INTO linggan_comment_research_result(request_ref,invocation_ref,result,created_at)
+        SELECT request_ref,'00000000-0000-4000-8000-000000004003','{}',created_at
+        FROM linggan_comment_research_request
+        ON CONFLICT (request_ref) DO NOTHING;
         CREATE FUNCTION synthetic_mention_snapshot_barrier() RETURNS trigger LANGUAGE plpgsql AS $$
         BEGIN
           IF NEW.comment_external_id='c-work-0-30' THEN
@@ -1900,7 +1908,7 @@ async fn card_and_memberships_share_the_same_concurrent_snapshot() {
         rebuild_opportunity_cards(&rebuild_db, domain, &digest, CardRebuildMode::Full).await
     });
     wait_for_lock(&db, "%INSERT INTO linggan_opportunity_comment_mention%").await;
-    sqlx::query("INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at) \
+    sqlx::query("INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,origin_invocation_ref,created_at) \
          VALUES(md5('snapshot-late-request')::uuid,0,md5('metric-definition:1')::uuid, \
            '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z')")
         .execute(db.pool()).await.unwrap();
@@ -2362,7 +2370,7 @@ async fn withdrawal_does_not_deadlock_when_a_voice_moves_between_cards() {
         FROM linggan_material_comment WHERE comment_external_id IN ('c-work-0-20','c-work-0-21','c-work-0-22');
         DELETE FROM linggan_comment_clean_cache WHERE source_ref IN
          (SELECT material_ref FROM linggan_material_comment WHERE comment_external_id='c-work-0-4');
-        INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at)
+        INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,origin_invocation_ref,created_at)
         VALUES(md5('metric-request:c-work-0-1')::uuid,1,md5('metric-definition:2')::uuid,
           '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z');
     "#).execute(db.pool()).await.unwrap();

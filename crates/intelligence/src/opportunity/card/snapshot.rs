@@ -11,8 +11,12 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_comment_clean_cache",
     "linggan_comment_problem_definition",
     "linggan_comment_problem_membership",
+    "linggan_comment_problem_redirect",
+    "linggan_comment_problem_redirect_revocation",
     "linggan_comment_research_request",
-    "linggan_comment_research_stage",
+    "linggan_comment_research_result",
+    "linggan_comment_research_unit",
+    "linggan_comment_research_unit_target",
     "linggan_historical_image_inventory",
     "linggan_local_schema_migration",
     "linggan_material_author_profile",
@@ -62,6 +66,7 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_runtime_capture_package",
     "linggan_runtime_record_disposition",
     "linggan_runtime_task",
+    "observation_domain",
     "observation_domain_target",
 ];
 

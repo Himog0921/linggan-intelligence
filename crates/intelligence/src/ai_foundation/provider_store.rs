@@ -47,9 +47,7 @@ impl MaterialClass {
                     | TaskKey::WorkComparison
                     | TaskKey::CreatorResearch
                     | TaskKey::CreatorAccountResearch
-                    | TaskKey::CommentStudy
-                    | TaskKey::CommentProblemResolution
-                    | TaskKey::CommentProblemPairReview
+                    | TaskKey::CommentUnderstanding
                     | TaskKey::TopicResearch
                     | TaskKey::TopicResearchExtractReview
                     | TaskKey::TopicResearchResolve
@@ -60,9 +58,8 @@ impl MaterialClass {
             Self::CommentMaterial => matches!(
                 task,
                 TaskKey::NoteInterpretation
-                    | TaskKey::CommentStudy
-                    | TaskKey::CommentProblemResolution
-                    | TaskKey::CommentProblemPairReview
+                    | TaskKey::CommentUnderstanding
+                    | TaskKey::CommentProblemConsolidation
                     | TaskKey::TopicResearch
                     | TaskKey::TopicResearchExtractReview
                     | TaskKey::TopicResearchResolve

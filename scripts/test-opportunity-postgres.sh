@@ -154,44 +154,17 @@ LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" LINGGAN_LOCAL_MED
     -- --ignored --test-threads=1
 echo "Synthetic API media fixtures retained: $proof_media_dir"
 
-# Exercise the real 0177 publication path with an owned loopback model stub. The synthetic digest
-# key exists only in this temporary private directory and is never printed or committed.
-[[ -d apps/pi-adapter/node_modules ]] || { echo "pi-adapter dependencies are required for the synthetic publication proof" >&2; exit 1; }
+# Exercise Opportunity source-gate activation and draining with an owned key.
 proof_support_dir="$(mktemp -d "${TMPDIR:-/tmp}/linggan-opportunity-support.XXXXXXXX")"
 chmod 700 "$proof_support_dir"
 mkdir -m 700 "$proof_support_dir/opportunity"
 openssl rand 32 > "$proof_support_dir/opportunity/commenter-digest.key"
 chmod 600 "$proof_support_dir/opportunity/commenter-digest.key"
-for proof_mode in enabled missing_key disabled locked_release locked_drain; do
-  proof_lock=""
-  proof_periodic=0
-  case "$proof_mode" in
-    enabled) proof_flag=enabled; proof_missing=0; proof_periodic=1 ;;
-    missing_key)
-      proof_flag=enabled; proof_missing=1
-      rm "$proof_support_dir/opportunity/commenter-digest.key"
-      ;;
-    disabled) proof_flag=disabled; proof_missing=0 ;;
-    locked_release) proof_flag=enabled; proof_missing=0; proof_lock=release ;;
-    locked_drain) proof_flag=enabled; proof_missing=0; proof_lock=drain ;;
-  esac
-  LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
-    LINGGAN_SUPPORT_DIR="$proof_support_dir" LINGGAN_OPPORTUNITY_CARD="$proof_flag" \
-    OPPORTUNITY_TEST_MISSING_KEY="$proof_missing" OPPORTUNITY_TEST_LOCK_MODE="$proof_lock" \
-    OPPORTUNITY_TEST_PERIODIC="$proof_periodic" \
-    AI_FOUNDATION_PROOF_NODE="$(command -v node)" \
-    cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
-      -- --ignored --exact comment_uses_target_dossier_and_both_permissions --test-threads=1
-  if [[ "$proof_mode" == enabled ]]; then
-    for gate_case in event_gate_activates_with_overlapping_source_writes event_gate_wait_does_not_block_executor_drain; do
-      LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
-        LINGGAN_SUPPORT_DIR="$proof_support_dir" LINGGAN_OPPORTUNITY_CARD=enabled \
-        AI_FOUNDATION_PROOF_NODE="$(command -v node)" \
-        cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
-          -- --ignored --exact "$gate_case" --test-threads=1
-    done
-  fi
-done
+LOCAL_001_PROOF_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
+  LINGGAN_SUPPORT_DIR="$proof_support_dir" LINGGAN_OPPORTUNITY_CARD=enabled \
+  AI_FOUNDATION_PROOF_NODE="$(command -v node)" \
+  cargo test -p linggan-intelligence --test opportunity_event_gate_postgres --locked \
+    -- --ignored --test-threads=1
 
 LINGGAN_LOCAL_DATABASE_URL="$OPPORTUNITY_PROOF_DATABASE_URL" \
   cargo run -q -p linggan-worker --bin linggan-opportunity --locked -- \

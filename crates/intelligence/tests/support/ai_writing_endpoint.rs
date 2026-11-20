@@ -1,3 +1,5 @@
+#[path = "comment_understanding_response.rs"]
+mod comment_understanding_response;
 #[path = "note_analysis_response.rs"]
 mod note_analysis_response;
 // Owned loopback SSE endpoint. It never forwards traffic or reads credentials/files.
@@ -43,9 +45,14 @@ impl Endpoint {
                             let system=text(&request,"system");
                             let instruction=serde_json::from_str::<Value>(&prompt).ok().and_then(|v|v["authorInstruction"].as_str().map(str::to_owned)).unwrap_or_default();
                             recorded.lock().unwrap().push(request);
-                            let waiting=if probe {None} else {gate.lock().unwrap().take()};
+                            let waiting=if probe || (variant=="withdrawn_catalog" && !prompt.contains("GATED")) {
+                                None
+                            } else {gate.lock().unwrap().take()};
                             if let Some((seen,release))=waiting {seen.send(()).unwrap();release.await.unwrap();}
-                            let mut output=if probe {json!({"lingganProbe":"ok"})} else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["documents"].is_array()) {
+                            let comment_input=serde_json::from_str::<Value>(&prompt).ok();
+                            let understanding=comment_input.as_ref().filter(|v|v["contract"]=="comment-understanding.v1");
+                            let consolidation=comment_input.as_ref().filter(|v|v["contract"]=="comment-problem-consolidation.v1");
+                            let mut output=if probe {json!({"lingganProbe":"ok"})} else if let Some(request)=understanding {comment_understanding_response::response(request)} else if let Some(request)=consolidation {comment_understanding_response::consolidation(request)} else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["documents"].is_array()) {
                                 let packet:Value=serde_json::from_str(&prompt).unwrap();
                                 let citation=|index:usize| {let entries=packet["documents"][index]["fragments"].as_array().unwrap();entries.iter().find(|f|f["content"]["kind"]=="table").unwrap_or(&entries[0])["id"].clone()};
                                 json!({"relation":"mostly_repeated","claims":[{"kind":"shared_point","statement":"两侧合成材料均有步骤说明。","targetCitations":[citation(0)],"referenceCitations":[citation(1)]}],"limitations":["synthetic loopback fixture only"]})
@@ -95,7 +102,9 @@ impl Endpoint {
                                     output["decisions"][0]["newTopicId"]=json!("n1");
                                 }
                             }
-                            respond(&mut socket,&output.to_string()).await;
+                            if understanding.is_some() && variant=="understanding_invalid" {output=json!({"contract":"wrong"});}
+                            let finish=if understanding.is_some() && variant=="understanding_truncated" {"length"} else {"stop"};
+                            respond_finish(&mut socket,&output.to_string(),finish).await;
                         });
                     }
                 }
@@ -178,9 +187,12 @@ pub(crate) async fn read(socket: &mut TcpStream) -> Value {
     request
 }
 pub(crate) async fn respond(socket: &mut TcpStream, text: &str) {
+    respond_finish(socket, text, "stop").await
+}
+pub(crate) async fn respond_finish(socket: &mut TcpStream, text: &str, finish: &str) {
     let body = format!(
         "data: {}\n\ndata: [DONE]\n\n",
-        json!({"id":"synthetic-writing","object":"chat.completion.chunk","created":0,"model":"synthetic-writing","choices":[{"index":0,"delta":{"role":"assistant","content":text},"finish_reason":"stop"}],"usage":{"prompt_tokens":17,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":0}}})
+        json!({"id":"synthetic-writing","object":"chat.completion.chunk","created":0,"model":"synthetic-writing","choices":[{"index":0,"delta":{"role":"assistant","content":text},"finish_reason":finish}],"usage":{"prompt_tokens":17,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":0}}})
     );
     let head = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",

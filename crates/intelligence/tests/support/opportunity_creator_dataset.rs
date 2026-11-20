@@ -164,10 +164,14 @@ SELECT md5('creator-request:'||seed.comment_external_id)::uuid,
  md5('creator-command:'||seed.comment_external_id)::uuid,
  '00000000-0000-4000-8000-000000000001',seed.content_public_ref,seed.material_ref,
  'primary','2026-11-05T00:00:00Z',repeat('b',64),repeat('c',64),setting.current_config_ref,
- md5('creator-batch:'||seed.comment_external_id)::uuid,'comment-research-semantic.v1','2026-11-05T00:00:00Z'
-FROM creator_seed_membership seed CROSS JOIN linggan_ai_task_setting setting WHERE setting.task_key='comment_study';
+ md5('creator-batch:'||seed.comment_external_id)::uuid,'comment-understanding.v1','2026-11-05T00:00:00Z'
+FROM creator_seed_membership seed CROSS JOIN linggan_ai_task_setting setting WHERE setting.task_key='comment_understanding';
 ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
-INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at)
+        INSERT INTO linggan_comment_research_result(request_ref,invocation_ref,result,created_at)
+        SELECT request_ref,'00000000-0000-4000-8000-000000004003','{}',created_at
+        FROM linggan_comment_research_request
+        ON CONFLICT (request_ref) DO NOTHING;
+INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,origin_invocation_ref,created_at)
 SELECT md5('creator-request:'||seed.comment_external_id)::uuid,0,md5('metric-definition:1')::uuid,
  '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z'
 FROM creator_seed_membership seed;

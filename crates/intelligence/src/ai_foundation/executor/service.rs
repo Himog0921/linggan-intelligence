@@ -13,8 +13,8 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use uuid::Uuid;
-mod comment_problem;
-mod comment_research;
+mod comment_problem_consolidation;
+mod comment_understanding;
 mod content_understanding;
 mod content_understanding_deep;
 mod creator_account_research;
@@ -149,6 +149,9 @@ async fn work_loop(
                     if let Err(error) = crate::ai_foundation::content_understanding::automation_tick(db, &mut understanding_cursor).await {
                         eprintln!("content understanding automation scan deferred: {error}");
                     }
+                    if let Err(error) = crate::ai_foundation::comment_understanding::consolidation_queue::tick(db).await {
+                        eprintln!("comment consolidation scan deferred: {error}");
+                    }
                     automation_scan = Instant::now() + Duration::from_secs(5);
                 }
                 if let Err(error)=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery,&opportunity_sync).await{
@@ -213,11 +216,11 @@ async fn fill_slots(
                 TaskKey::WorkComparison => {
                     work_comparison::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
-                TaskKey::CommentProblemResolution | TaskKey::CommentProblemPairReview => {
-                    comment_problem::execute(&db, &item, secrets.as_ref(), &adapter).await
+                TaskKey::CommentProblemConsolidation => {
+                    comment_problem_consolidation::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
-                TaskKey::CommentStudy => {
-                    comment_research::execute(&db, &item, secrets.as_ref(), &adapter).await
+                TaskKey::CommentUnderstanding => {
+                    comment_understanding::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
                 TaskKey::CreatorAccountResearch => {
                     creator_account_research::execute(&db, &item, secrets.as_ref(), &adapter).await
@@ -230,11 +233,20 @@ async fn fill_slots(
                 }
                 _ => Err(ExecutorError::Invalid),
             };
-            if item.task_key == TaskKey::CommentProblemPairReview
-                && result.is_ok()
-                && let Some(sync) = opportunity_sync
-            {
-                sync.request();
+            if result.is_ok() && let Some(sync) = opportunity_sync {
+                if matches!(item.task_key, TaskKey::CommentUnderstanding | TaskKey::CommentProblemConsolidation) {
+                    let succeeded = sqlx::query_scalar(
+                        "SELECT state='succeeded' FROM linggan_ai_batch_item_control WHERE item_ref=$1",
+                    )
+                    .bind(item.item_ref)
+                    .fetch_one(db.pool())
+                    .await;
+                    match succeeded {
+                        Ok(true) => sync.request(),
+                        Ok(false) => {}
+                        Err(error) => sync.defer(&error),
+                    }
+                }
             }
             result
         });

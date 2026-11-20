@@ -14,7 +14,6 @@ use linggan_intelligence::{
         provider_store::MaterialClass,
         task_config::{ModelSelection, SaveTaskConfig, save_task_config},
     },
-    comment_study_source::{self, StudySourceRole},
 };
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
@@ -22,7 +21,7 @@ use uuid::Uuid;
 const DOMAIN: Uuid = Uuid::from_u128(0x00000000000040008000000000000001);
 #[tokio::test]
 #[ignore = "only test-unified-research-real-notes.sh may supply an owned restored database"]
-async fn real_note_reaches_each_owner_with_exact_dossier_sources() {
+async fn real_note_reaches_creator_and_topic_owners_with_exact_dossier_sources() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let db = Database::connect(&url).await.unwrap();
     let database: String = sqlx::query_scalar("SELECT current_database()")
@@ -60,9 +59,6 @@ async fn real_note_reaches_each_owner_with_exact_dossier_sources() {
     let tasks = [
         TaskKey::CreatorResearch,
         TaskKey::CreatorAccountResearch,
-        TaskKey::CommentStudy,
-        TaskKey::CommentProblemResolution,
-        TaskKey::CommentProblemPairReview,
         TaskKey::TopicResearch,
         TaskKey::TopicResearchExtractReview,
         TaskKey::TopicResearchResolve,
@@ -136,60 +132,6 @@ async fn real_note_reaches_each_owner_with_exact_dossier_sources() {
     )
     .await
     .unwrap();
-    let cutoff: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
-    let sources =
-        comment_study_source::eligible_sources_for_works(&db, DOMAIN, &cutoff, &[work], 20)
-            .await
-            .unwrap();
-    let mut authors = std::collections::HashSet::new();
-    let mut selected = Vec::new();
-    for source in sources {
-        let author: String = sqlx::query_scalar(
-            "SELECT author_external_id FROM linggan_material_comment WHERE material_ref=$1",
-        )
-        .bind(source.source_ref)
-        .fetch_one(db.pool())
-        .await
-        .unwrap();
-        if authors.insert(author) {
-            selected.push(source.source_ref);
-        }
-        if selected.len() == 2 {
-            break;
-        }
-    }
-    assert_eq!(
-        selected.len(),
-        2,
-        "the selected note must have two independent eligible reader comments"
-    );
-    let mut comments = Vec::new();
-    for source in &selected {
-        let p = ai::comment_research::preview(&db, DOMAIN, work, *source, StudySourceRole::Primary)
-            .await
-            .unwrap();
-        comments.push(
-            ai::comment_research::start(
-                &db,
-                &ai::comment_research::Start {
-                    command_ref: Uuid::new_v4(),
-                    domain_ref: DOMAIN,
-                    work_ref: work,
-                    source_ref: *source,
-                    observation_role: StudySourceRole::Primary,
-                    knowledge_cutoff: p["knowledgeCutoff"].as_str().unwrap().into(),
-                    expected_input_hash: p["inputHash"].as_str().unwrap().into(),
-                    task_config_ref: serde_json::from_value(p["taskConfigRef"].clone()).unwrap(),
-                    expected_task_revision: p["taskRevision"].as_i64().unwrap(),
-                },
-            )
-            .await
-            .unwrap(),
-        );
-    }
     let topic = ai::topic_research::start(
         &db,
         &ai::topic_research::Start {
@@ -224,16 +166,7 @@ async fn real_note_reaches_each_owner_with_exact_dossier_sources() {
                 "a real-input topic stage failed: {}",
                 topic
             );
-            let mut done = c["state"] == "succeeded" && topic["pendingStageCount"] == 0;
-            for c in &comments {
-                let r = ai::comment_research::read(&db, c.request_ref)
-                    .await
-                    .unwrap();
-                assert_ne!(r["state"], "failed");
-                done &= r["state"] == "succeeded";
-                assert!(r["sourceAvailable"].as_bool().unwrap());
-            }
-            if done {
+            if c["state"] == "succeeded" && topic["pendingStageCount"] == 0 {
                 break;
             }
             assert!(!running.is_finished());
@@ -313,9 +246,9 @@ async fn real_note_reaches_each_owner_with_exact_dossier_sources() {
         v2, 1,
         "the later account command must use the switched method"
     );
-    assert!(v1 >= 7);
+    assert!(v1 >= 5);
     let traces:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('taskKey',task_key,'promptVersion',result->>'promptVersion','state',state,'invocationRef',invocation_ref,'taskConfigRef',task_config_ref) FROM linggan_model_invocation WHERE task_config_ref IS NOT NULL AND result->>'producer'='ai-gen1-executor.v1' ORDER BY created_at").fetch_all(db.pool()).await.unwrap();
-    let report = json!({"proof":"real-material.synthetic-provider.v1","notModelQualityEvidence":true,"workRef":work,"title":before.note["displayTitle"],"dossierRevision":before.revision,"materialRevision":before.material_revision,"coverage":before.coverage,"selectedCommentSourceRefs":selected,"creatorRequestRef":creator.request_ref,"accountRequestRef":account.request_ref,"topicRunRef":topic.run_ref,"topicWindows":topic.window_count,"frozenV1Calls":v1,"subsequentV2Calls":v2,"totalSyntheticCalls":requests.len(),"traces":traces,"rawSourcesUnchanged":true});
+    let report = json!({"proof":"real-material.synthetic-provider.v1","notModelQualityEvidence":true,"workRef":work,"title":before.note["displayTitle"],"dossierRevision":before.revision,"materialRevision":before.material_revision,"coverage":before.coverage,"creatorRequestRef":creator.request_ref,"accountRequestRef":account.request_ref,"topicRunRef":topic.run_ref,"topicWindows":topic.window_count,"frozenV1Calls":v1,"subsequentV2Calls":v2,"totalSyntheticCalls":requests.len(),"traces":traces,"rawSourcesUnchanged":true});
     std::fs::write(
         std::env::var("UNIFIED_RESEARCH_REPORT").unwrap(),
         serde_json::to_vec_pretty(&report).unwrap(),

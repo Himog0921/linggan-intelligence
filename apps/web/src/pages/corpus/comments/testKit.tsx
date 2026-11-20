@@ -32,9 +32,9 @@ export function defaultReply(url: URL) {
  if (endpoint === 'word-cloud') return wordCloud(domain, Number(url.searchParams.get('days') || 56));
  if (endpoint === 'comments') return { domainRef: domain, items: [comment(), comment('c2', false)], summary: { displayableCommentCount: 200, eligibleCommentCount: 100 }, indexCoverage: { indexedCount: 200, pendingCount: null }, page: { nextCursor: null } };
  if (endpoint === 'works') return { domainRef: domain, items: [{ workRef: WORK, displayTitle: '合成作品', displayTitleSource: 'platform_title', observationRole: 'primary', eligibleCommentCount: 100 }], totalWorkCount: 1, indexCoverage: { indexedCount: 100, pendingCount: null }, page: { nextCursor: null } };
- if (url.pathname === '/api/local/comment-research/overview') return overview(url.searchParams.get('domainRef') || DOMAIN);
- if (url.pathname === '/api/local/comment-research/runs') return { domainRef: domain, runs: [], limit: 100 };
- if (url.pathname === '/api/local/comment-research/problems') return { domainRef: domain, problems: [], candidates: [] };
+ if (url.pathname === '/api/local/comment-research/v2/overview') return overview(url.searchParams.get('domainRef') || DOMAIN);
+ if (url.pathname === '/api/local/comment-research/v2/runs') return { domainRef: domain, runs: [], consolidationTaskRevision: 1, consolidations: [] };
+ if (url.pathname === '/api/local/comment-research/v2/problems') return { domainRef: domain, problems: [], candidates: [] };
  throw new Error('Unexpected test endpoint ' + url.pathname);
 }
 export function installFetch(custom?: (url: URL, options: RequestInit) => Promise<Response> | Response | undefined) {

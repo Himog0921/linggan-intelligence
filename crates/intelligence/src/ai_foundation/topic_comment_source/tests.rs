@@ -36,7 +36,6 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     for scope in [
         ControlScope::Global,
         ControlScope::Executor,
-        ControlScope::Task(crate::ai_foundation::TaskKey::CommentStudy),
     ]
     .into_iter()
     .chain(super::super::topic_research::CURRENT_TASKS.map(ControlScope::Task))
@@ -66,7 +65,7 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     sqlx::query("INSERT INTO linggan_model_egress_event(event_ref,endpoint_ref,task_key,material_class,allowed,actor_kind,reason) SELECT gen_random_uuid(),cap.endpoint_ref,t.task_key,material.class,true,'human','SYNTHETIC isolated fixture, no network' FROM linggan_ai_task t CROSS JOIN (VALUES('note_material'),('comment_material')) material(class) CROSS JOIN linggan_model_config c JOIN linggan_model_capability cap USING(capability_ref) WHERE c.config_ref=$1 AND t.task_key LIKE 'topic_research%'")
         .bind(model_config).execute(db.pool()).await.unwrap();
 
-    let semantic = seed_semantic(&db, model_config, work, source, raw).await;
+    let semantic = seed_semantic(&db, model_config, work, source, raw, false).await;
     let executor =
         crate::ai_foundation::executor::ExecutorSession::acquire(&db, "synthetic-comment-map", 4)
             .await
@@ -245,6 +244,23 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
             .unwrap(),
         0
     );
+    let failed = seed_semantic(&db, model_config, work, source, raw, true).await;
+    let topic_filter = Query {
+        domain_ref: support::D,
+        work_ref: Some(work),
+        request_ref: None,
+        topic_ref: Some(topic),
+    };
+    let still_current = read(&db, &topic_filter).await.unwrap();
+    assert_eq!(still_current["items"][0]["requestRef"], json!(semantic));
+    let failed_request = Query {
+        request_ref: Some(failed),
+        topic_ref: None,
+        ..topic_filter
+    };
+    let unavailable = read(&db, &failed_request).await.unwrap();
+    assert_eq!(unavailable["items"][0]["requestRef"], json!(failed));
+    assert_eq!(unavailable["items"][0]["sourceAvailable"], false);
     let map = crate::topic_map::read_topic_map(
         &db,
         &crate::topic_map::TopicMapQuery {
@@ -371,23 +387,24 @@ async fn fail_item(
     tx.commit().await.unwrap();
 }
 
-async fn seed_semantic(db: &Database, model: Uuid, work: Uuid, source: Uuid, raw: &str) -> Uuid {
-    let preview = super::super::comment_research::preview(
-        db,
-        support::D,
-        work,
-        source,
-        crate::comment_study_source::StudySourceRole::Primary,
-    )
-    .await
-    .unwrap();
+async fn seed_semantic(
+    db: &Database,
+    model: Uuid,
+    work: Uuid,
+    source: Uuid,
+    raw: &str,
+    failed: bool,
+) -> Uuid {
+    let cutoff = linggan_evidence::research_dossier::cutoff_in(
+        &mut db.pool().begin().await.unwrap(), None
+    ).await.unwrap();
     let selected = crate::comment_study_source::selected_source_in(
         &mut db.pool().begin().await.unwrap(),
         support::D,
         work,
         source,
         crate::comment_study_source::StudySourceRole::Primary,
-        preview["knowledgeCutoff"].as_str().unwrap(),
+        &cutoff,
     )
     .await
     .unwrap()
@@ -409,18 +426,23 @@ async fn seed_semantic(db: &Database, model: Uuid, work: Uuid, source: Uuid, raw
         Uuid::new_v4(),
         Uuid::new_v4(),
     );
-    let config: Uuid = serde_json::from_value(preview["taskConfigRef"].clone()).unwrap();
+    let config: Uuid = sqlx::query_scalar(
+        "SELECT current_config_ref FROM linggan_ai_task_setting WHERE task_key='comment_understanding'",
+    ).fetch_one(db.pool()).await.unwrap();
     let mut tx = db.pool().begin().await.unwrap();
     sqlx::query("INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt) VALUES($1,'SYNTHETIC_SAVED_COMMENT','{}','{}')").bind(command).execute(&mut *tx).await.unwrap();
-    sqlx::query("INSERT INTO linggan_ai_batch(batch_ref,task_key,task_config_ref,kind,inputs_sha256,item_count,command_ref) VALUES($1,'comment_study',$2,'interactive',$3,1,$4)").bind(batch).bind(config).bind(&prepared.input_hash).bind(command).execute(&mut *tx).await.unwrap();
-    sqlx::query("INSERT INTO linggan_ai_batch_item(item_ref,batch_ref,position,item_key,input_ref) VALUES($1,$2,0,'synthetic',$3)").bind(item).bind(batch).bind(json!({"type":"comment_research","requestRef":request})).execute(&mut *tx).await.unwrap();
-    sqlx::query("INSERT INTO linggan_comment_research_request(request_ref,command_ref,domain_ref,work_ref,source_ref,observation_role,knowledge_cutoff,input_hash,input_fingerprint,task_config_ref,batch_ref,method_version) VALUES($1,$2,$3,$4,$5,'primary',$6::timestamptz,$7,$8,$9,$10,'comment-research-semantic.v1')")
-        .bind(request).bind(command).bind(support::D).bind(work).bind(source).bind(preview["knowledgeCutoff"].as_str().unwrap()).bind(prepared.input_hash).bind(prepared.input_fingerprint).bind(config).bind(batch).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_ai_batch(batch_ref,task_key,task_config_ref,kind,inputs_sha256,item_count,command_ref) VALUES($1,'comment_understanding',$2,'interactive',$3,1,$4)").bind(batch).bind(config).bind(&prepared.input_hash).bind(command).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_ai_batch_item(item_ref,batch_ref,position,item_key,input_ref) VALUES($1,$2,0,'synthetic',$3)").bind(item).bind(batch).bind(json!({"type":"comment_research_unit","unitRef":item})).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_comment_research_request(request_ref,command_ref,domain_ref,work_ref,source_ref,observation_role,knowledge_cutoff,input_hash,input_fingerprint,task_config_ref,batch_ref,method_version) VALUES($1,$2,$3,$4,$5,'primary',$6::timestamptz,$7,$8,$9,$10,'comment-understanding.v1')")
+        .bind(request).bind(command).bind(support::D).bind(work).bind(source).bind(&cutoff).bind(prepared.input_hash).bind(prepared.input_fingerprint).bind(config).bind(batch).execute(&mut *tx).await.unwrap();
     let first = "孩子每天开始作业前需要提醒。".chars().count();
-    let result = json!({"contract":"comment-research-semantic.v1","signals":[
+    let result = json!({"contract":"comment-understanding.v1","signals":[
         {"kind":"need","proposition":"孩子开始作业需要提醒","sourceRef":source,"evidenceSpan":{"start":0,"end":first},"problemFrame":null,"eligibilityState":"eligible","eligibilityReason":null},
         {"kind":"experience","proposition":"评论者喜欢蓝色笔盒","sourceRef":source,"evidenceSpan":{"start":first,"end":raw.chars().count()},"problemFrame":null,"eligibilityState":"not_applicable","eligibilityReason":null}]});
-    sqlx::query("INSERT INTO linggan_comment_research_result(request_ref,invocation_ref,result) VALUES($1,$2,$3)").bind(request).bind(invocation(db,model).await).bind(result).execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_comment_research_result(request_ref,invocation_ref,result,failure_code) VALUES($1,$2,$3,$4)")
+        .bind(request).bind(invocation(db,model).await)
+        .bind((!failed).then_some(result)).bind(failed.then_some("target_missing"))
+        .execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
     request
 }

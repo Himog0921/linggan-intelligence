@@ -13,9 +13,12 @@ const RULES: [(&str, &str); 7] = [
     ("creatorVoice", "voice_role = 'creator'"),
 ];
 
-pub(crate) fn sql_case() -> String {
+pub(crate) fn sql_case(allow_unknown_authors: bool) -> String {
     let mut sql = String::from("CASE");
     for (code, predicate) in RULES {
+        if allow_unknown_authors && matches!(code, "workAuthorUnknown" | "commentAuthorUnknown") {
+            continue;
+        }
         sql.push_str(&format!(" WHEN {predicate} THEN '{code}'"));
     }
     sql.push_str(" ELSE NULL END");
@@ -45,7 +48,7 @@ mod tests {
             flags[index..].fill(true);
             assert_eq!(exclusion(flags), Some(RULES[index].0));
         }
-        assert_eq!(sql_case().matches(" WHEN ").count(), 7);
+        assert_eq!(sql_case(false).matches(" WHEN ").count(), 7);
         assert_eq!(rule_index("commentAuthorUnknown"), Some(5));
     }
 }

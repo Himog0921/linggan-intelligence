@@ -1,5 +1,7 @@
 # 评论研究产品化：开发、数据库升级与验收手册
 
+> 文档沿革：旧评论执行流程保留作历史记录。当前候选见[评论研究 V2 执行合同](../data-contracts/research-automation.md)。
+
 > 状态: 历史归档
 > 替代入口: [统一研究自动化工作包](../plans/active/unified-research-automation-001.md)
 > 最后核对: 2026-10-06

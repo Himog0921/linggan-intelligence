@@ -1,5 +1,7 @@
 # 评论研究产品化：架构、来源与差异
 
+> 文档沿革：旧评论执行流程保留作历史记录。当前候选见[评论研究 V2 执行合同](../data-contracts/research-automation.md)。
+
 > 状态: 历史归档
 > 最后核对: 2026-09-27
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 架构来源、复用和边界
