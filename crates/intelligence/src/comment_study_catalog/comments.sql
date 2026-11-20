@@ -4,12 +4,20 @@
 -- $17 like-count-after (NULL with a cursor means the page continues inside the unknown-likes tail).
 , signal_kinds AS MATERIALIZED (
     SELECT original.content_public_ref,original.comment_external_id,
-           array_agg(DISTINCT signal.value->>'kind' ORDER BY signal.value->>'kind') AS kinds
+           array_agg(DISTINCT label.kind ORDER BY label.kind) AS kinds
     FROM success
     JOIN linggan_comment_research_result result USING(request_ref)
     JOIN linggan_material_comment original ON original.material_ref=success.source_ref
     JOIN latest ON latest.material_ref=original.material_ref
-    CROSS JOIN LATERAL jsonb_array_elements(COALESCE(result.result->'signals','[]'::jsonb)) signal
+    CROSS JOIN LATERAL (
+        SELECT signal.value->>'kind' AS kind
+        FROM jsonb_array_elements(COALESCE(result.result->'signals','[]'::jsonb)) signal
+        UNION ALL
+        -- A positive promotion judgment is a directory label even when no research signal was emitted.
+        SELECT 'promotion'
+        WHERE result.result->>'outcome' = 'no_signal'
+          AND result.result->>'reason' ~ '^[[:space:]]*(纯[[:space:]]*)?(广告[[:space:]]*[/／、][[:space:]]*)?(引流|导流)(话术|内容)?([[:space:]，。；：、,.;:]|$)'
+    ) label
     WHERE NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction
         WHERE restriction.content_public_ref=original.content_public_ref
           AND restriction.comment_external_id IN (original.comment_external_id,original.parent_comment_external_id))

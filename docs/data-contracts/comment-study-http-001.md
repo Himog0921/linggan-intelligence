@@ -54,7 +54,7 @@ costSummary 恰含 recordingState(`full/legacy_partial/unavailable`)、tokenLimi
 
 | 方法／路径 | 请求 | 响应职责 |
 |---|---|---|
-| GET `/comments` | domain、q、workRef、voiceRole、studyState、signalKind、sort、minLikes、postUsage、cursor、limit | 有效文本原声目录，不依赖 runRef；每行 `signalKinds` 来自当前有效 Signal；`sort`/`minLikes`/`postUsage` 见下方高赞原话库补充 |
+| GET `/comments` | domain、q、workRef、voiceRole、studyState、signalKind、sort、minLikes、postUsage、cursor、limit | 有效文本原声目录，不依赖 runRef；每行 `signalKinds` 来自当前有效评论研究结果；`sort`/`minLikes`/`postUsage` 见下方高赞原话库补充 |
 | GET `/comments/detail` | domain、workRef、commentExternalId | 当前原声＋历史版本＋作品与父评论＋研究历史入口 |
 | GET `/works` | domain、q、studyState、cursor、limit | 可浏览全部作品与研究覆盖；不截断前 100 |
 | GET `/catalog-summary` | 同目录筛选（含 minLikes、postUsage；不含 sort），但无 cursor/limit | 当前原声、可研究、身份未知、作者声音、无效、待清洗数量及 asOf |
@@ -64,7 +64,7 @@ q 是 1–200 字的**字面子串**，Unicode 正常文本可查；空字符串
 
 voiceRole 闭集 reader/creator/unknown/reader_and_unknown/all，默认 reader_and_unknown；creator 只可查阅，不进入当前研究。studyState 闭集 all/never_studied/in_progress/studied/needs_context/failed/input_changed。这些是投影，不新增落库研究状态。
 
-`signalKind` 可空；非空时只接受当前九类 `problem/need/belief/emotion/experience/solution/quote/context/question`，筛选整个目录中至少有一条该类**当前有效** Signal 的稳定评论。`signalKinds` 是同一当前有效评论的去重类型数组；无当前有效 Signal 返回 `[]`，不能从历史 Run 的旧 Signal 回填。来源受限、原声变化或父语境受限时按有效 Signal 视图降级；`signalKind` 计入目录游标 scopeHash，`catalog-summary` 用同一筛选口径统计，不允许仅过滤已取回的一页。
+`signalKind` 支持九类研究信号 `problem/need/belief/emotion/experience/solution/quote/context/question` 及目录标签 `promotion`（引流话术）。当前有效研究结果为 `no_signal` 且明确判定为引流或导流时，目录投影 `promotion`，其余研究信号与需求计数按原有结果计算。`signalKinds` 是同一当前有效评论的去重标签数组。没有有效标签时返回 `[]`。来源受限、原声变化或父语境受限时按有效 Signal 视图降级；`signalKind` 计入目录游标 scopeHash，`catalog-summary` 用同一筛选口径统计，不允许仅过滤已取回的一页。
 
 CommentItem 必填：`commentKey:{workRef,commentExternalId},sourceRef,commentText,researchText,observationRole,voiceRole,cleanState,cleanReasons,sourceState,studyEligibility,latestStudy,effectiveStudy,effectiveState,signalKinds,observedAt,receivedAt`。`observationRole` 取该作品在当前 Domain 已登记的 primary/reference 来源角色；同一作品两种角色均有时，列表及精确评论启动默认使用 primary。可空：authorDisplayName、authorExternalId、parentCommentKey、likeCount、likeCountAsOf、publishedAt。原材料没有可靠点赞／发布时间就为 NULL；不得从作品点赞推评论点赞，observedAt 不当 publishedAt。
 

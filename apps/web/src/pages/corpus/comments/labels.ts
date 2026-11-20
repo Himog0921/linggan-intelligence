@@ -46,7 +46,7 @@ export const pairDecisionLabel: Record<string, string | null> = {
 };
 export const signalKindLabel: Record<string, string | null> = {
   problem: '问题', need: '需求', belief: '观念', emotion: '情绪', experience: '经历',
-  solution: '解决方案', quote: '引述', context: '语境', question: '疑问'
+  solution: '解决方案', quote: '引述', context: '语境', question: '疑问', promotion: '引流话术'
 };
 export const problemStateLabel: Record<string, string | null> = { active: '生效中', retired: '已停用' };
 export const problemSupportLabel: Record<string, string | null> = {supported:'有不同作者支持',support_insufficient:'当前支持不足',definition_stale:'定义依据已失效'};
