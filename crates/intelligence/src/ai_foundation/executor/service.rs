@@ -13,9 +13,7 @@ use tokio::{
     time::{Instant, MissedTickBehavior},
 };
 use uuid::Uuid;
-mod comment_problem;
 mod comment_problem_consolidation;
-mod comment_research;
 mod comment_understanding;
 mod content_understanding;
 mod content_understanding_deep;
@@ -218,12 +216,6 @@ async fn fill_slots(
                 TaskKey::WorkComparison => {
                     work_comparison::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
-                TaskKey::CommentProblemResolution | TaskKey::CommentProblemPairReview => {
-                    comment_problem::execute(&db, &item, secrets.as_ref(), &adapter).await
-                }
-                TaskKey::CommentStudy => {
-                    comment_research::execute(&db, &item, secrets.as_ref(), &adapter).await
-                }
                 TaskKey::CommentProblemConsolidation => {
                     comment_problem_consolidation::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
@@ -242,9 +234,7 @@ async fn fill_slots(
                 _ => Err(ExecutorError::Invalid),
             };
             if result.is_ok() && let Some(sync) = opportunity_sync {
-                if item.task_key == TaskKey::CommentProblemPairReview {
-                    sync.request();
-                } else if matches!(item.task_key, TaskKey::CommentUnderstanding | TaskKey::CommentProblemConsolidation) {
+                if matches!(item.task_key, TaskKey::CommentUnderstanding | TaskKey::CommentProblemConsolidation) {
                     let succeeded = sqlx::query_scalar(
                         "SELECT state='succeeded' FROM linggan_ai_batch_item_control WHERE item_ref=$1",
                     )

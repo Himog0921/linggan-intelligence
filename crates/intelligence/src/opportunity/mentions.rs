@@ -6,7 +6,6 @@ use super::{
     OpportunityMetricParams, PeriodBasis, TierInput, TierParams, evidence_tier,
     load_current_metric_definition,
 };
-use crate::ai_foundation::{comment_problem, store::FoundationError};
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use sqlx::{Postgres, Row, Transaction};
@@ -37,8 +36,6 @@ pub enum MentionSyncError {
     SyncBusy,
     #[error("opportunity_mention_source_scope_mismatch: {rows} rows")]
     SourceScopeMismatch { rows: usize },
-    #[error("opportunity_mention_publication_check_failed")]
-    Publication(#[from] FoundationError),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -115,8 +112,7 @@ async fn read_sources(
     let rows = sqlx::query(
         "SELECT comment.content_public_ref, comment.comment_external_id, problem.problem_ref,
                 version.version AS taxonomy_version, request.source_ref, support.request_ref,
-                membership.signal_ordinal, CASE WHEN membership.origin_invocation_ref IS NULL
-                  THEN comment.author_external_id ELSE NULLIF(btrim(comment.author_external_id),'') END AS observed_author,
+                membership.signal_ordinal, NULLIF(btrim(comment.author_external_id),'') AS observed_author,
                 fact.commenter_external_id AS canonical_author,
                 fact.commenter_external_id_conflict AS identity_conflict,
                 fact.content_ref IS NULL AS missing_fact,
@@ -125,7 +121,7 @@ async fn read_sources(
                 config.prompt_version_ref::text AS prompt_version, model.model_id AS model,
                 request.input_fingerprint AS content_hash,
                 membership.created_at <= ledger.applied_at AS historical
-         FROM linggan_opportunity_comment_problem_support support
+         FROM linggan_comment_problem_support support
          JOIN linggan_comment_problem_membership membership USING (request_ref,signal_ordinal)
          JOIN linggan_comment_problem_definition definition USING (definition_ref)
          JOIN linggan_comment_research_request request USING (request_ref)
@@ -136,7 +132,7 @@ async fn read_sources(
            ON fact.content_ref = comment.content_public_ref
           AND fact.comment_external_id = comment.comment_external_id
          LEFT JOIN linggan_model_invocation invocation
-           ON invocation.invocation_ref = COALESCE(membership.origin_invocation_ref,membership.review_invocation_ref)
+           ON invocation.invocation_ref = membership.origin_invocation_ref
          LEFT JOIN linggan_ai_task_config config ON config.task_config_ref = invocation.task_config_ref
          LEFT JOIN linggan_model_entry model ON model.model_ref = invocation.model_ref
          CROSS JOIN linggan_local_schema_migration ledger
@@ -291,16 +287,15 @@ async fn collect_eligibility(
         PeriodBasis::WorkPublishedCohort => "work_published_cohort",
         PeriodBasis::CommentPublished => "comment_published",
     };
-    let domains: Vec<Uuid> = sqlx::query_scalar(
-        "SELECT DISTINCT domain_ref FROM linggan_opportunity_problem WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref",
+    let published: HashSet<Uuid> = sqlx::query_scalar(
+        "SELECT problem_ref FROM linggan_comment_problem_current
+         WHERE state='formal' AND ($1::uuid IS NULL OR domain_ref=$1)",
     )
     .bind(domain)
     .fetch_all(&mut **tx)
-    .await?;
-    let mut published = HashSet::new();
-    for domain in domains {
-        published.extend(comment_problem::qualified_problem_refs_in(tx, domain).await?);
-    }
+    .await?
+    .into_iter()
+    .collect();
     let rows = sqlx::query(
         "WITH source AS MATERIALIZED (
            SELECT mention.*, problem.domain_ref, fact.first_observed_at

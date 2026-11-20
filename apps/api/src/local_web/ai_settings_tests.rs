@@ -837,8 +837,6 @@ async fn ai_settings_http_comment_creator_and_topic_execution_cannot_be_reenable
     let db = fixture::proof_database("ai_retired_business_routes").await;
     let app = app_with_database(db.clone());
     for (uri, payload) in [
-        ("/api/local/comment-study/runs".to_string(), json!({})),
-        ("/api/local/comment-study/policy".to_string(), json!({})),
         (
             "/api/local/creator-discovery-analysis/retry".to_string(),
             json!({"domain":Uuid::new_v4()}),

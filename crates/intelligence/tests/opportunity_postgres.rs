@@ -743,7 +743,7 @@ async fn problem_sync_lineage_and_resolution_match_the_taxonomy_rules() {
 ALTER TABLE linggan_comment_problem_definition DISABLE TRIGGER ALL;
 INSERT INTO linggan_comment_problem_definition(
  definition_ref, problem_ref, domain_ref, identity_hash, label, actor, goal, barrier,
- context, source_request_ref, source_signal_ordinal, review_invocation_ref
+ context, source_request_ref, source_signal_ordinal, origin_invocation_ref
 ) VALUES
  ('00000000-0000-4000-8000-000000002001','00000000-0000-4000-8000-000000001001',
   '00000000-0000-4000-8000-000000000001',repeat('a',64),'source-one','actor','goal','barrier',

@@ -75,8 +75,8 @@ INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model
  reserved_tokens,charged_tokens,task_key,task_config_ref,budget_day,usage_state,dispatch_state,finished_at)
 SELECT '00000000-0000-4000-8000-000000004003','00000000-0000-4000-8000-000000004002',
  '00000000-0000-4000-8000-000000004001','analyze',repeat('a',64),'succeeded',1,1,
- 'comment_problem_pair_review',current_config_ref,'2026-11-01','unknown_reserved','started','2026-11-04T00:00:00Z'
-FROM linggan_ai_task_setting WHERE task_key='comment_problem_pair_review';
+ 'comment_understanding',current_config_ref,'2026-11-01','unknown_reserved','started','2026-11-04T00:00:00Z'
+FROM linggan_ai_task_setting WHERE task_key='comment_understanding';
 ALTER TABLE linggan_model_invocation ENABLE TRIGGER ALL;
 ALTER TABLE linggan_comment_research_request DISABLE TRIGGER ALL;
 INSERT INTO linggan_comment_research_request(request_ref,command_ref,domain_ref,work_ref,source_ref,
@@ -85,22 +85,26 @@ SELECT md5('metric-request:' || comment.comment_external_id)::uuid,
  md5('metric-command:' || comment.comment_external_id)::uuid,
  '00000000-0000-4000-8000-000000000001', comment.content_public_ref, comment.material_ref,
  'primary', '2026-11-05T00:00:00Z',repeat('b',64),repeat('c',64),setting.current_config_ref,
- md5('metric-batch:' || comment.comment_external_id)::uuid,'comment-research-semantic.v1',
+ md5('metric-batch:' || comment.comment_external_id)::uuid,'comment-understanding.v1',
  CASE WHEN comment.comment_external_id='c-work-0-late-1' THEN '2026-11-10T01:30:00Z'::timestamptz
       ELSE '2026-11-05T00:00:00Z'::timestamptz END
 FROM linggan_material_comment comment JOIN metric_seed_membership seed ON seed.comment_id=comment.comment_external_id
-CROSS JOIN linggan_ai_task_setting setting WHERE setting.task_key='comment_study';
+CROSS JOIN linggan_ai_task_setting setting WHERE setting.task_key='comment_understanding';
 ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
+        INSERT INTO linggan_comment_research_result(request_ref,invocation_ref,result,created_at)
+        SELECT request_ref,'00000000-0000-4000-8000-000000004003','{}',created_at
+        FROM linggan_comment_research_request
+        ON CONFLICT (request_ref) DO NOTHING;
 ALTER TABLE linggan_comment_problem_definition DISABLE TRIGGER ALL;
 INSERT INTO linggan_comment_problem_definition(definition_ref,problem_ref,domain_ref,identity_hash,label,actor,goal,
- barrier,source_request_ref,source_signal_ordinal,review_invocation_ref,created_at)
+ barrier,source_request_ref,source_signal_ordinal,origin_invocation_ref,created_at)
 SELECT md5('metric-definition:' || n)::uuid,md5('metric-problem:' || n)::uuid,
  '00000000-0000-4000-8000-000000000001',repeat(n::text,64),'synthetic P' || n,'actor','goal','barrier',
  md5('metric-request:' || CASE n WHEN 1 THEN 'c-work-0-1' WHEN 2 THEN 'c-work-0-20' ELSE 'c-work-0-23' END)::uuid,
  0,'00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z'
 FROM generate_series(1,3) n;
 ALTER TABLE linggan_comment_problem_definition ENABLE TRIGGER ALL;
-INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at)
+INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,origin_invocation_ref,created_at)
 SELECT md5('metric-request:' || seed.comment_id)::uuid,0,md5('metric-definition:' || seed.problem_number)::uuid,
  '00000000-0000-4000-8000-000000004003',
  CASE WHEN seed.comment_id='c-work-0-late-1' THEN '2026-11-10T01:30:00Z'::timestamptz

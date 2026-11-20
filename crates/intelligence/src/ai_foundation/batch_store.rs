@@ -68,13 +68,6 @@ pub enum InputRef {
     CreatorWorkResearch {
         request_ref: Uuid,
     },
-    CommentProblemStage {
-        request_ref: Uuid,
-        stage_number: u8,
-    },
-    CommentResearch {
-        request_ref: Uuid,
-    },
     CommentResearchUnit {
         unit_ref: Uuid,
     },
@@ -132,10 +125,6 @@ impl InputRef {
                 task == TaskKey::CreatorAccountResearch && !trial
             }
             Self::CreatorWorkResearch { .. } => task == TaskKey::CreatorResearch && !trial,
-            Self::CommentProblemStage { stage_number, .. } => {
-                task.comment_stage() == Some(*stage_number) && *stage_number > 0 && !trial
-            }
-            Self::CommentResearch { .. } => task == TaskKey::CommentStudy && !trial,
             Self::CommentResearchUnit { .. } => task == TaskKey::CommentUnderstanding && !trial,
             Self::CommentProblemConsolidation { .. } => {
                 task == TaskKey::CommentProblemConsolidation && !trial
@@ -190,9 +179,6 @@ impl BatchKind {
         if task.topic_stage().is_some() {
             return matches!(self, Self::Interactive | Self::Automatic);
         }
-        if task.comment_stage().is_some() {
-            return self == Self::Interactive;
-        }
         match task {
             TaskKey::ModelProbe => self == Self::Probe,
             TaskKey::ContentUnderstanding | TaskKey::CommentProblemConsolidation => {
@@ -202,7 +188,6 @@ impl BatchKind {
             | TaskKey::WorkComparison
             | TaskKey::CreatorResearch
             | TaskKey::CreatorAccountResearch
-            | TaskKey::CommentStudy
             | TaskKey::CommentUnderstanding => self == Self::Interactive,
             TaskKey::WritingLegacy
             | TaskKey::CreationTitle
@@ -335,15 +320,13 @@ pub async fn create_batch(
         return Err(FoundationError::Invalid);
     }
     // These tasks freeze their material scope through their owning commands.
-    if request.task_key.comment_stage().is_some()
-        || request.task_key.topic_stage().is_some()
+    if request.task_key.topic_stage().is_some()
         || matches!(
             request.task_key,
             TaskKey::ContentUnderstandingDeep
                 | TaskKey::WorkComparison
                 | TaskKey::CreatorResearch
                 | TaskKey::CreatorAccountResearch
-                | TaskKey::CommentStudy
                 | TaskKey::CommentUnderstanding
                 | TaskKey::CommentProblemConsolidation
         )

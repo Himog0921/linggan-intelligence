@@ -55,6 +55,9 @@ for name in ['prepare_historical_comment_schema','apply_migration_once','migrate
   if '  apply_migration_once "0195_observation_transition_immutable" ' not in prefix:
    raise SystemExit('missing pre-upgrade migration')
   print(prefix.replace('migrate() {','migrate_before_content_understanding() {',1)+'}')
+  boundary='  apply_migration_once "0232_retire_comment_research_v1" '
+  prefix=body[:body.index(boundary)]
+  print(prefix.replace('migrate() {','migrate_before_comment_cutover() {',1)+'}')
 PY
 ensure_migration_ledger(){ psql_in_container >/dev/null <<'SQL'
 CREATE TABLE IF NOT EXISTS linggan_local_schema_migration(migration_id text PRIMARY KEY,migration_sha256 text NOT NULL CHECK(migration_sha256 ~ '^[0-9a-f]{64}$'),applied_at timestamptz NOT NULL DEFAULT clock_timestamp());
@@ -64,7 +67,7 @@ SQL
 source "$proof_dir/migration-functions.sh"
 migrate > "$proof_dir/first.log" 2>&1
 migrate > "$proof_dir/repeat.log" 2>&1
-legacy="$(psql_in_container -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND (table_name LIKE 'linggan_comment_study_%' OR table_name LIKE 'linggan_topic_map_research_%' OR table_name IN('linggan_creator_discovery_policy','linggan_creator_discovery_work_analysis','linggan_creator_discovery_author_analysis'))")"
+legacy="$(psql_in_container -Atc "SELECT count(*) FROM information_schema.tables WHERE table_schema='public' AND (table_name LIKE 'linggan_comment_study_%' OR table_name LIKE 'linggan_topic_map_research_%' OR table_name IN('linggan_creator_discovery_policy','linggan_creator_discovery_work_analysis','linggan_creator_discovery_author_analysis','linggan_comment_research_stage','linggan_comment_problem_dispatch','linggan_comment_problem_stage_result'))")"
 [[ "$legacy" == 0 ]] || { echo 'Retired research tables remain' >&2;exit 1; }
 head="$(psql_in_container -Atc "SELECT max(migration_id) FROM linggan_local_schema_migration")"
 # The ordered chain must reach the last migration the runtime registers, whichever that is.
@@ -72,6 +75,77 @@ expected_head="$(sed -n 's/^  apply_migration_once "\([^"]*\)" .*/\1/p' "$projec
 [[ -n "$expected_head" && "$head" == "$expected_head" ]] || { echo "Migration head $head is not the last registered migration $expected_head" >&2; exit 1; }
 printf '{"head":"%s","retiredTables":%s,"freshAndRepeatPassed":true,"scope":"ordered schema migration only"}\n' "$head" "$legacy" > "$proof_dir/result.json"
 echo 'Fresh and repeat runtime schema migration passed; retired tables absent.'
+fresh_database="$proof_database"
+psql_in_container -c "CREATE DATABASE ${fresh_database}_cutover" >/dev/null
+proof_database="${fresh_database}_cutover"
+migrate_before_comment_cutover > "$proof_dir/cutover-before.log" 2>&1
+psql_in_container > "$proof_dir/cutover-seed.log" 2>&1 <<'SQL'
+DO $$
+DECLARE task text; command uuid; batch uuid; config uuid;
+BEGIN
+ FOREACH task IN ARRAY ARRAY['comment_study','comment_problem_resolution','comment_problem_pair_review'] LOOP
+  command := gen_random_uuid();
+  batch := gen_random_uuid();
+  SELECT current_config_ref INTO STRICT config FROM linggan_ai_task_setting WHERE task_key=task;
+  INSERT INTO linggan_ai_command(command_ref,operation,payload,receipt)
+  VALUES(command,'synthetic_cutover_seed','{}','{}');
+  UPDATE linggan_ai_control SET enabled=true,revision=revision+1,actor_kind='human',
+   reason='Synthetic pre-cutover control',command_ref=command WHERE task_key=task;
+  INSERT INTO linggan_ai_batch(batch_ref,task_key,task_config_ref,kind,inputs_sha256,item_count,command_ref)
+  VALUES(batch,task,config,'interactive',repeat('a',64),1,command);
+  INSERT INTO linggan_ai_batch_item(item_ref,batch_ref,position,item_key,input_ref)
+  VALUES(gen_random_uuid(),batch,0,'queued','{"type":"synthetic_cutover"}');
+ END LOOP;
+END $$;
+SQL
+# Inject and roll back a stage row inside the attempted migration transaction.
+# The fixture skips only foreign-key checks because no old request body is required.
+if {
+  cat <<'SQL'
+BEGIN;
+SET LOCAL session_replication_role=replica;
+INSERT INTO linggan_comment_research_stage(item_ref,request_ref,stage_number)
+SELECT item_ref,gen_random_uuid(),0 FROM linggan_ai_batch_item ORDER BY item_ref LIMIT 1;
+SET LOCAL session_replication_role=origin;
+SQL
+  cat "$project_root/database/migrations/0232_retire_comment_research_v1.sql"
+  printf 'COMMIT;\n'
+} | psql_in_container > "$proof_dir/cutover-nonempty.log" 2>&1; then
+  echo 'Comment research cutover unexpectedly accepted a nonempty stage table' >&2
+  exit 1
+fi
+grep -Fq 'Retired comment research stage tables must be empty' "$proof_dir/cutover-nonempty.log"
+migrate > "$proof_dir/cutover-apply.log" 2>&1
+migrate > "$proof_dir/cutover-repeat.log" 2>&1
+psql_in_container > "$proof_dir/cutover-assertions.log" 2>&1 <<'SQL'
+DO $$
+BEGIN
+ IF (SELECT count(*) FROM linggan_ai_task task JOIN linggan_ai_control control USING(task_key)
+     JOIN linggan_ai_command command USING(command_ref)
+     WHERE task.task_key IN ('comment_study','comment_problem_resolution','comment_problem_pair_review')
+       AND task.lifecycle='retired' AND NOT control.enabled AND control.reason='task_retired'
+       AND command.operation='task_retire') <> 3
+    OR (SELECT count(*) FROM linggan_ai_batch batch JOIN linggan_ai_batch_control run USING(batch_ref)
+        JOIN linggan_ai_batch_item item USING(batch_ref)
+        JOIN linggan_ai_batch_item_control state USING(item_ref)
+        WHERE batch.task_key IN ('comment_study','comment_problem_resolution','comment_problem_pair_review')
+          AND run.state='cancelled' AND state.state='cancelled' AND state.failure_code='task_retired') <> 3
+    OR (SELECT count(*) FROM linggan_ai_command WHERE operation='task_retire'
+         AND payload->>'taskKey' IN ('comment_study','comment_problem_resolution','comment_problem_pair_review')) <> 3
+    OR (SELECT count(*) FROM linggan_ai_task_setting setting
+        JOIN linggan_ai_task_config config ON config.task_config_ref=setting.current_config_ref
+        JOIN linggan_ai_control control ON control.task_key=setting.task_key
+        WHERE setting.task_key IN ('comment_understanding','comment_problem_consolidation')
+         AND NOT control.enabled AND config.model_config_ref IS NULL AND config.budget_mode='unconfigured') <> 2
+    OR to_regclass('linggan_comment_research_stage') IS NOT NULL
+    OR to_regclass('linggan_comment_problem_dispatch') IS NOT NULL
+    OR to_regclass('linggan_comment_problem_stage_result') IS NOT NULL
+    OR EXISTS(SELECT 1 FROM linggan_model_invocation)
+ THEN RAISE EXCEPTION 'comment_research_cutover_incomplete'; END IF;
+END $$;
+SQL
+proof_database="$fresh_database"
+echo 'Comment research cutover settled queued legacy work and preserved disabled V2 configuration.'
 if [[ "$populated_upgrade" == 1 ]]; then
   upgrade_database="${proof_database}_upgrade"
   psql_in_container -c "CREATE DATABASE $upgrade_database" >/dev/null
@@ -124,7 +198,8 @@ END $$;
 COMMIT;
 CREATE SCHEMA upgrade_proof;
 CREATE TABLE upgrade_proof.baseline_table AS
- SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename<>'linggan_local_schema_migration';
+ SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename NOT IN ('linggan_local_schema_migration',
+  'linggan_comment_research_stage','linggan_comment_problem_dispatch','linggan_comment_problem_stage_result');
 CREATE TABLE upgrade_proof.topic_prompts AS
  SELECT to_jsonb(p) AS row FROM linggan_ai_prompt_version p WHERE task_key LIKE 'topic_research%';
 CREATE TABLE upgrade_proof.topic_configs AS
@@ -154,8 +229,14 @@ BEGIN
    WHEN entry.tablename='linggan_ai_control_event'
     THEN 'WHERE reason IS DISTINCT FROM ''task_retired'''
    WHEN entry.tablename='linggan_ai_failure_code'
-    THEN 'WHERE code NOT IN (''content_understanding_publication_withheld'',''content_understanding_deep_insufficient_evidence'',''content_understanding_deep_rejected_excess'')'
+    THEN 'WHERE code NOT IN (''content_understanding_publication_withheld'',''content_understanding_deep_insufficient_evidence'',''content_understanding_deep_rejected_excess'',''unit_output_invalid'',''unit_truncated'',''target_missing'',''target_invalid'',''target_all_signals_invalid'')'
    ELSE '' END;
+  IF entry.tablename IN ('linggan_ai_task','linggan_ai_round','linggan_ai_control','linggan_ai_task_round_state',
+                         'linggan_ai_prompt_version','linggan_ai_task_config','linggan_ai_task_setting','linggan_skill_binding')
+  THEN
+   predicate := predicate || CASE WHEN predicate='' THEN 'WHERE ' ELSE ' AND ' END ||
+    '(task_key IS NULL OR task_key NOT IN (''comment_study'',''comment_problem_resolution'',''comment_problem_pair_review'',''comment_understanding'',''comment_problem_consolidation''))';
+  END IF;
   RETURN QUERY EXECUTE format(
    'SELECT %L::text,count(*),md5(COALESCE(string_agg(to_jsonb(row)::text,E''\n'' ORDER BY to_jsonb(row)::text),'''')) FROM public.%I row %s',
    entry.tablename,entry.tablename,predicate);

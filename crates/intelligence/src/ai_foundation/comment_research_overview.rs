@@ -1,5 +1,5 @@
 //! Current source catalog and independently qualified research, never retired read tables.
-use super::{comment_problem, comment_research, comment_understanding, store::FoundationError};
+use super::{comment_understanding, store::FoundationError};
 use crate::{comment_cleaning::CLEANER_VERSION, comment_study_catalog};
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
@@ -8,22 +8,9 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
-    read_for(db, domain, false).await
-}
-
-pub async fn read_v2(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
-    read_for(db, domain, true).await
-}
-
-async fn read_for(db: &Database, domain: Uuid, v2: bool) -> Result<Value, FoundationError> {
     if domain.is_nil() {
         return Err(FoundationError::Invalid);
     }
-    let legacy_problems = if v2 {
-        None
-    } else {
-        Some(comment_problem::read_problems(db, domain).await?)
-    };
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
@@ -69,7 +56,6 @@ async fn read_for(db: &Database, domain: Uuid, v2: bool) -> Result<Value, Founda
         .bind(CLEANER_VERSION)
         .bind(Option::<Uuid>::None)
         .bind(Option::<String>::None)
-        .bind(v2)
         .fetch_all(&mut *tx)
         .await?;
     let mut succeeded = 0;
@@ -83,7 +69,7 @@ async fn read_for(db: &Database, domain: Uuid, v2: bool) -> Result<Value, Founda
     let mut experiences = Vec::new();
     for row in rows {
         let request: Uuid = row.get("request_ref");
-        let source = match comment_research::current_source_in(&mut tx, request).await {
+        let source = match comment_understanding::current_source_in(&mut tx, request).await {
             Ok(v) => v,
             Err(FoundationError::AdmissionDenied(_)) => continue,
             Err(e) => return Err(e),
@@ -140,7 +126,7 @@ async fn read_for(db: &Database, domain: Uuid, v2: bool) -> Result<Value, Founda
     .bind(&as_of)
     .fetch_one(&mut *tx)
     .await?;
-    let (problem_count, candidate_count, problem_preview, yesterday) = if v2 {
+    let (problem_count, candidate_count, problem_preview, yesterday) = {
         let (formal, candidates, yesterday): (i64, i64, i64) = sqlx::query_as(
             "SELECT count(*) FILTER(WHERE p.state='formal'),count(*) FILTER(WHERE p.state='candidate'),
                     count(*) FILTER(WHERE p.state='formal' AND (d.created_at AT TIME ZONE 'Asia/Shanghai')::date
@@ -159,28 +145,6 @@ async fn read_for(db: &Database, domain: Uuid, v2: bool) -> Result<Value, Founda
             preview.push(comment_understanding::read::problem_in(&mut tx, domain, problem).await?);
         }
         (formal as usize, candidates as usize, preview, yesterday)
-    } else {
-        let problems = legacy_problems.ok_or(FoundationError::Invalid)?;
-        let problem_rows = problems["problems"]
-            .as_array()
-            .ok_or(FoundationError::Invalid)?;
-        let candidates = problems["candidates"]
-            .as_array()
-            .ok_or(FoundationError::Invalid)?;
-        let refs: Vec<Uuid> = problem_rows
-            .iter()
-            .map(|v| {
-                serde_json::from_value(v["definitionRef"].clone())
-                    .map_err(|_| FoundationError::Invalid)
-            })
-            .collect::<Result<_, _>>()?;
-        let yesterday:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_comment_problem_definition WHERE definition_ref=ANY($1) AND (created_at AT TIME ZONE 'Asia/Shanghai')::date=($2::timestamptz AT TIME ZONE 'Asia/Shanghai')::date-1").bind(&refs).bind(&as_of).fetch_one(&mut *tx).await?;
-        (
-            problem_rows.len(),
-            candidates.len(),
-            problem_rows.iter().take(3).cloned().collect(),
-            yesterday,
-        )
     };
     tx.commit().await?;
     Ok(

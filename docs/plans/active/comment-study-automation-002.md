@@ -1,5 +1,7 @@
 # 下一阶段：评论研究自动化衔接合同
 
+> 文档沿革：旧评论执行流程保留作历史记录。当前候选见[评论研究 V2 执行合同](../../data-contracts/research-automation.md)。
+
 > 状态: 活跃计划
 > 最后核对: 2026-09-27
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 后续每日自动化设计，不含当前 P2 实施

@@ -36,9 +36,9 @@ INSERT INTO linggan_model_invocation(
 SELECT '00000000-0000-4000-8000-000000004003',
        '00000000-0000-4000-8000-000000004002',
        '00000000-0000-4000-8000-000000004001', 'analyze', repeat('a',64), 'succeeded',
-       1, 1, 'comment_problem_pair_review', current_config_ref, '2026-11-01',
+       1, 1, 'comment_understanding', current_config_ref, '2026-11-01',
        'unknown_reserved', 'started', '2026-11-04T00:00:00Z'
-FROM linggan_ai_task_setting WHERE task_key = 'comment_problem_pair_review';
+FROM linggan_ai_task_setting WHERE task_key = 'comment_understanding';
 ALTER TABLE linggan_model_invocation ENABLE TRIGGER ALL;
 
 ALTER TABLE linggan_comment_research_request DISABLE TRIGGER ALL;
@@ -52,16 +52,20 @@ SELECT md5('request-' || n)::uuid, md5('command-' || n)::uuid,
        '00000000-0000-4000-8000-000000000100',
        md5('opportunity-comment:00000000-0000-4000-8000-000000000100:' || n)::uuid,
        'primary', '2026-11-05T00:00:00Z', repeat('b',64), repeat('c',64),
-       setting.current_config_ref, md5('batch-' || n)::uuid, 'comment-research-semantic.v1',
+       setting.current_config_ref, md5('batch-' || n)::uuid, 'comment-understanding.v1',
        '2026-11-05T00:00:00Z'
 FROM (VALUES (1), (2), (3), (1000)) seed(n)
-CROSS JOIN linggan_ai_task_setting setting WHERE setting.task_key = 'comment_study';
+CROSS JOIN linggan_ai_task_setting setting WHERE setting.task_key = 'comment_understanding';
 ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
+        INSERT INTO linggan_comment_research_result(request_ref,invocation_ref,result,created_at)
+        SELECT request_ref,'00000000-0000-4000-8000-000000004003','{}',created_at
+        FROM linggan_comment_research_request
+        ON CONFLICT (request_ref) DO NOTHING;
 
 ALTER TABLE linggan_comment_problem_definition DISABLE TRIGGER ALL;
 INSERT INTO linggan_comment_problem_definition(
  definition_ref, problem_ref, domain_ref, identity_hash, label, actor, goal, barrier,
- source_request_ref, source_signal_ordinal, review_invocation_ref, created_at
+ source_request_ref, source_signal_ordinal, origin_invocation_ref, created_at
 )
 VALUES ('00000000-0000-4000-8000-000000002001',
         '00000000-0000-4000-8000-000000001001',
@@ -71,12 +75,12 @@ VALUES ('00000000-0000-4000-8000-000000002001',
 ALTER TABLE linggan_comment_problem_definition ENABLE TRIGGER ALL;
 
 INSERT INTO linggan_comment_problem_membership(request_ref, signal_ordinal, definition_ref,
- review_invocation_ref, created_at)
+ origin_invocation_ref, created_at)
 SELECT md5('request-' || n)::uuid, 0, '00000000-0000-4000-8000-000000002001',
        '00000000-0000-4000-8000-000000004003', '2026-11-05T00:00:00Z'
 FROM (VALUES (1), (2), (1000)) seed(n);
 INSERT INTO linggan_comment_problem_membership(request_ref, signal_ordinal, definition_ref,
- review_invocation_ref, created_at)
+ origin_invocation_ref, created_at)
 VALUES (md5('request-1')::uuid, 1, '00000000-0000-4000-8000-000000002001',
         '00000000-0000-4000-8000-000000004003', '2026-11-05T00:00:00Z');
 "#,
@@ -101,7 +105,7 @@ async fn existing_and_incremental_memberships_are_idempotent_and_pseudonymous() 
     assert_eq!(first.reconciliations[0].projected_mentioners, 2);
     assert!(first.reconciliations[0].reasons.is_empty());
     assert_eq!(first.reconciliations[0].eligible_mentioners, 2);
-    assert!(!first.reconciliations[0].currently_published);
+    assert!(first.reconciliations[0].currently_published);
     let unknown = first.reconciliations[0]
         .eligibility
         .iter()
@@ -124,7 +128,7 @@ async fn existing_and_incremental_memberships_are_idempotent_and_pseudonymous() 
         MentionSyncError::DigestKeyOrSourceMismatch { .. }
     ));
 
-    sqlx::query("INSERT INTO linggan_comment_problem_membership(request_ref, signal_ordinal, definition_ref, review_invocation_ref) VALUES (md5('request-3')::uuid,0,'00000000-0000-4000-8000-000000002001','00000000-0000-4000-8000-000000004003')")
+    sqlx::query("INSERT INTO linggan_comment_problem_membership(request_ref, signal_ordinal, definition_ref, origin_invocation_ref) VALUES (md5('request-3')::uuid,0,'00000000-0000-4000-8000-000000002001','00000000-0000-4000-8000-000000004003')")
         .execute(db.pool()).await.unwrap();
     let incremental = sync_comment_mentions(&db, &digest).await.unwrap();
     assert_eq!(incremental.inserted, 1);
@@ -313,15 +317,19 @@ SELECT md5('cross-domain-request')::uuid,md5('cross-domain-command')::uuid,
  input_hash,input_fingerprint,task_config_ref,md5('cross-domain-batch')::uuid,method_version,created_at
 FROM linggan_comment_research_request WHERE request_ref=md5('request-1')::uuid;
 ALTER TABLE linggan_comment_research_request ENABLE TRIGGER ALL;
+        INSERT INTO linggan_comment_research_result(request_ref,invocation_ref,result,created_at)
+        SELECT request_ref,'00000000-0000-4000-8000-000000004003','{}',created_at
+        FROM linggan_comment_research_request
+        ON CONFLICT (request_ref) DO NOTHING;
 ALTER TABLE linggan_comment_problem_definition DISABLE TRIGGER ALL;
 INSERT INTO linggan_comment_problem_definition(definition_ref,problem_ref,domain_ref,identity_hash,label,actor,goal,
- barrier,source_request_ref,source_signal_ordinal,review_invocation_ref,created_at)
+ barrier,source_request_ref,source_signal_ordinal,origin_invocation_ref,created_at)
 SELECT md5('cross-domain-definition')::uuid,md5('cross-domain-problem')::uuid,
  '00000000-0000-4000-8000-000000000002',repeat('e',64),'synthetic second domain',actor,goal,barrier,
- md5('cross-domain-request')::uuid,0,review_invocation_ref,created_at
+ md5('cross-domain-request')::uuid,0,origin_invocation_ref,created_at
 FROM linggan_comment_problem_definition WHERE definition_ref='00000000-0000-4000-8000-000000002001';
 ALTER TABLE linggan_comment_problem_definition ENABLE TRIGGER ALL;
-INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,review_invocation_ref,created_at)
+INSERT INTO linggan_comment_problem_membership(request_ref,signal_ordinal,definition_ref,origin_invocation_ref,created_at)
 VALUES(md5('cross-domain-request')::uuid,0,md5('cross-domain-definition')::uuid,
  '00000000-0000-4000-8000-000000004003','2026-11-05T00:00:00Z');
 "#).execute(db.pool()).await.unwrap();

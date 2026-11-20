@@ -89,7 +89,7 @@ async fn retained_counts(db: &Database) -> Value {
         (SELECT count(*) FROM linggan_material_comment), \
         (SELECT count(*) FROM linggan_comment_clean_cache), \
         (SELECT count(*) FROM linggan_comment_research_request), \
-        (SELECT count(*) FROM linggan_comment_research_stage), \
+        (SELECT count(*) FROM linggan_comment_research_unit), \
         (SELECT count(*) FROM linggan_model_invocation))",
     )
     .fetch_one(db.pool())

@@ -279,13 +279,13 @@ async fn unified_research_real_chain_browser_proof() {
     assert!(drained.unwrap().unwrap().is_ok());
     assert!(status.success(), "inspect unified research browser report");
     cancellation_gate.await.unwrap();
-    let overview = ai::comment_research_overview::read_v2(&db, dossier::DOMAIN)
+    let overview = ai::comment_research_overview::read(&db, dossier::DOMAIN)
         .await
         .unwrap();
     assert_eq!(overview["researchSummary"]["currentSignalCount"], 2);
     assert_eq!(overview["knowledgeSummary"]["problemCount"], 1);
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'reader-a','synthetic source withdrawal')").bind(work).execute(db.pool()).await.unwrap();
-    let withdrawn = ai::comment_research_overview::read_v2(&db, dossier::DOMAIN)
+    let withdrawn = ai::comment_research_overview::read(&db, dossier::DOMAIN)
         .await
         .unwrap();
     assert_eq!(withdrawn["researchSummary"]["currentSignalCount"], 1);
@@ -295,7 +295,7 @@ async fn unified_research_real_chain_browser_proof() {
     linggan_intelligence::comment_study_catalog::refresh_clean_cache(&db, dossier::DOMAIN, 200)
         .await
         .unwrap();
-    let current = ai::comment_research_overview::read_v2(&db, dossier::DOMAIN)
+    let current = ai::comment_research_overview::read(&db, dossier::DOMAIN)
         .await
         .unwrap();
     assert_eq!(current["corpusSummary"]["eligibleCommentCount"], 1);

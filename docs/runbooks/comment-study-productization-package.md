@@ -1,5 +1,7 @@
 # 评论研究产品化 · 完整手册与执行入口
 
+> 文档沿革：旧评论执行流程保留作历史记录。当前候选见[评论研究 V2 执行合同](../data-contracts/research-automation.md)。
+
 > 状态: 权威当前
 > 最后核对: 2026-09-23
 > 适用范围: COMMENT-STUDY-PRODUCTIZATION-001 的文档、实现步骤与阶段验收

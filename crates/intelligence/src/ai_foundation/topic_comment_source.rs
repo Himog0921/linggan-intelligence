@@ -1,5 +1,5 @@
 //! Existing qualified semantic signals are assignment inputs, never a second understanding pass.
-use super::{comment_research, store::FoundationError};
+use super::{comment_understanding, store::FoundationError};
 use crate::{
     topic_map_research::ResearchInput,
     topic_map_research_analysis::{Citation, Discussion},
@@ -23,9 +23,9 @@ pub(crate) async fn load_in(
     tx: &mut Transaction<'_, Postgres>,
     request: Uuid,
 ) -> Result<ResearchInput, FoundationError> {
-    let row = sqlx::query("SELECT r.domain_ref,r.work_ref,r.knowledge_cutoff::text AS cutoff,result.result FROM linggan_comment_research_request r JOIN linggan_comment_research_result result USING(request_ref) WHERE r.request_ref=$1 AND result.result IS NOT NULL")
+    let row = sqlx::query("SELECT r.domain_ref,r.work_ref,r.knowledge_cutoff::text AS cutoff,result.result FROM linggan_comment_research_request r JOIN linggan_comment_research_result result USING(request_ref) WHERE r.request_ref=$1 AND r.method_version='comment-understanding.v1' AND result.result IS NOT NULL")
         .bind(request).fetch_optional(&mut **tx).await?.ok_or_else(unavailable)?;
-    let selected = comment_research::current_source_in(tx, request).await?;
+    let selected = comment_understanding::current_source_in(tx, request).await?;
     let domain: Uuid = row.get("domain_ref");
     let work: Uuid = row.get("work_ref");
     let cutoff: String = row.get("cutoff");

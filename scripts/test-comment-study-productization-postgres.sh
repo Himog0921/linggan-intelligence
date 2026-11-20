@@ -71,15 +71,9 @@ RUST_TEST_THREADS=1 cargo test -p linggan-intelligence \
   --test comment_study_start_postgres \
   --test comment_understanding_schema_postgres --locked \
   -- --ignored --nocapture --test-threads=1
-# Current three-stage workflow is exercised with opportunity disabled and an owned loopback provider.
 proof_support_dir="$(mktemp -d "${TMPDIR:-/tmp}/linggan-comment-study-support.XXXXXXXX")"
 chmod 700 "$proof_support_dir"
 mkdir -m 700 "$proof_support_dir/opportunity"
-AI_FOUNDATION_PROOF_NODE="$(command -v node)" LINGGAN_OPPORTUNITY_CARD=disabled \
-  LINGGAN_SUPPORT_DIR="$proof_support_dir" OPPORTUNITY_TEST_PERIODIC=0 \
-  OPPORTUNITY_TEST_MISSING_KEY=0 OPPORTUNITY_TEST_LOCK_MODE='' RUST_TEST_THREADS=1 \
-  cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
-    -- --ignored --exact comment_uses_target_dossier_and_both_permissions --nocapture --test-threads=1
 # Research units (V2): one provider call per work, end to end on a synthetic saved L1 and an
 # owned loopback provider. The filter must select tests; an empty selection is a failure.
 AI_FOUNDATION_PROOF_NODE="$(command -v node)" RUST_TEST_THREADS=1 \
@@ -91,7 +85,7 @@ chmod 600 "$proof_support_dir/opportunity/commenter-digest.key"
 for gate_case in event_gate_activates_with_overlapping_source_writes event_gate_wait_does_not_block_executor_drain; do
   AI_FOUNDATION_PROOF_NODE="$(command -v node)" LINGGAN_OPPORTUNITY_CARD=enabled \
     LINGGAN_SUPPORT_DIR="$proof_support_dir" RUST_TEST_THREADS=1 \
-    cargo test -p linggan-intelligence --test comment_research_executor_postgres --locked \
+    cargo test -p linggan-intelligence --test opportunity_event_gate_postgres --locked \
       -- --ignored --exact "$gate_case" --nocapture --test-threads=1
 done
 # Patrol now owns only local maintenance. The AI owner/signal/usage proofs run in
@@ -102,4 +96,4 @@ RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locke
 RUST_TEST_THREADS=1 cargo test -p linggan-worker --test startup_contract --locked \
   sigterm_drains_even_while_the_collection_tick_is_blocked \
   -- --ignored --nocapture --test-threads=1
-printf '%s\n' 'Current comment catalog, three-stage workflow and patrol ownership proofs passed'
+printf '%s\n' 'Current comment catalog, V2 research and patrol ownership proofs passed'

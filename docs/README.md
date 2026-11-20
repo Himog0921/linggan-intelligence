@@ -40,9 +40,9 @@
 
 ## 2026-11-19 · 评论研究 V2（评论理解）
 
-- [COMMENT-UNDERSTANDING-V2-001 实施计划](plans/active/comment-understanding-v2-001.md)：按作品分单元的批量理解、稳定需求身份、合并重定向、派生候选/正式状态、任务编排 T0–T4 与 G0–G6；G0、G1 已实施，未合并、未部署。
-- [交接：从 G2 继续](plans/active/comment-understanding-v2-001-handoff.md)：同一分支和 PR 上的剩余工作、已确认决定、落点与容易踩的坑、验证配方、必须回到 Mog 的事项。
-- [评论理解合同](data-contracts/comment-understanding.md)：`comment-understanding.v1`、研究单元表、接纳规则、需求当前状态视图（迁移 `0230`）；旧评论三阶段在切换前仍是运行流程。
+- [COMMENT-UNDERSTANDING-V2-001 实施计划](plans/active/comment-understanding-v2-001.md)：按作品分单元的批量理解、稳定需求身份、合并重定向、派生候选/正式状态、任务编排 T0–T4 与 G0–G6；G0–G3、G5 和旧流程退役已实施，未合并、未部署。
+- [交接：旧流程退役后续](plans/active/comment-understanding-v2-001-handoff.md)：同一分支和 PR 上的剩余工作、已确认决定、落点与容易踩的坑、验证配方、必须回到 Mog 的事项。
+- [评论理解合同](data-contracts/comment-understanding.md)：`comment-understanding.v1`、研究单元、接纳、需求当前状态、整理与退役（迁移 `0230`–`0232`）。
 
 ## 2026-11-15 · L2 单篇深入研究 V0.3
 

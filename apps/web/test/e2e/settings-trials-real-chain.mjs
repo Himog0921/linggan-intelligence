@@ -113,7 +113,7 @@ try{
    assert.equal((await root()).execution.dailyUsage.reduce((n,row)=>n+Number(row.calls),0),3);
   });
   await step('each research method can edit and roll back prompts and skills without dispatch',async()=>{
-   for(const taskKey of ['comment_study','comment_problem_resolution','comment_problem_pair_review','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research']){
+   for(const taskKey of ['comment_understanding','comment_problem_consolidation','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research']){
     await goto('skills',taskKey);
     const initial=await page.request.get(`${origin}/api/local/ai-settings/prompts/${taskKey}`);assert.equal(initial.status(),200);
     const before=await initial.json();
@@ -132,7 +132,7 @@ try{
     assert.equal((await post(page.getByRole('button',{name:'切换做法版本',exact:true}),'/skills/switch')).versionRef,fixture.firstVersionRef);
     const task=(await root()).tasks.find(item=>item.taskKey===taskKey);
     assert.equal(task.lifecycle,'active');
-    assert.equal(task.handlerContract,taskKey==='creator_research'?'creator-work-research.v1':taskKey==='creator_account_research'?'creator-account-research.v1':taskKey==='comment_study'?'comment-research-semantic.v1':taskKey.startsWith('comment_problem_')?'comment-problem-stage.v1':'topic-research-stage.v1');
+    assert.equal(task.handlerContract,taskKey==='creator_research'?'creator-work-research.v1':taskKey==='creator_account_research'?'creator-account-research.v1':taskKey==='comment_understanding'?'comment-understanding.v1':taskKey==='comment_problem_consolidation'?'comment-problem-consolidation.v1':'topic-research-stage.v1');
    }
    assert.equal((await root()).execution.dailyUsage.reduce((n,row)=>n+Number(row.calls),0),3);
   });

@@ -431,9 +431,8 @@ async fn research_methods_are_editable_and_switching_never_dispatches() {
     .await
     .unwrap();
     for task in [
-        TaskKey::CommentStudy,
-        TaskKey::CommentProblemResolution,
-        TaskKey::CommentProblemPairReview,
+        TaskKey::CommentUnderstanding,
+        TaskKey::CommentProblemConsolidation,
         TaskKey::TopicResearch,
         TaskKey::TopicResearchExtractReview,
         TaskKey::TopicResearchResolve,
@@ -527,9 +526,8 @@ async fn research_methods_are_editable_and_switching_never_dispatches() {
                 "active".into(),
                 Some(
                     match task {
-                        TaskKey::CommentStudy => "comment-research-semantic.v1",
-                        TaskKey::CommentProblemResolution | TaskKey::CommentProblemPairReview =>
-                            "comment-problem-stage.v1",
+                        TaskKey::CommentUnderstanding => "comment-understanding.v1",
+                        TaskKey::CommentProblemConsolidation => "comment-problem-consolidation.v1",
                         TaskKey::CreatorResearch => "creator-work-research.v1",
                         TaskKey::CreatorAccountResearch => "creator-account-research.v1",
                         _ => "topic-research-stage.v1",

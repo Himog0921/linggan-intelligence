@@ -1,13 +1,17 @@
 //! Actual SDK request succeeds, then the child reply is lost. No shared data/provider.
+#[path = "support/topic_core_fixture.rs"]
+mod core_fixture;
 #[path = "../../evidence/tests/support/research_dossier_fixture.rs"]
 mod dossier;
+#[path = "support/content_understanding_fixture.rs"]
+mod l1_setup;
 #[path = "support/ai_writing_fixture.rs"]
 mod setup;
 #[path = "support/ai_writing_endpoint.rs"]
 mod wire;
 use linggan_intelligence::{
     ai_foundation::{
-        self as ai, TaskKey,
+        self as ai, TaskKey, comment_understanding as comments,
         control::BudgetPolicy,
         control_store::{Actor, ChangeControl, ControlScope, change_control},
         provider_store::MaterialClass,
@@ -22,8 +26,11 @@ use uuid::Uuid;
 async fn lost_research_receipts_hold_quota_and_block_new_commands_even_after_control_withholding() {
     let db = dossier::fixture::proof_database("research_lost_receipts").await;
     let work = dossier::work(&db).await;
-    dossier::fixture::submit_package(&db,"comments",json!({"contentExternalId":"dossier-note"}),json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"commentId":"reader","noteId":"dossier-note","text":"我的孩子需要每天有人提醒。","authorId":"independent-reader"}})).await;
-    let source: Uuid = sqlx::query_scalar(
+    dossier::current_image_reading_with_bytes(&db, Some(core_fixture::bytes())).await;
+    dossier::fixture::submit_package(&db, "comments", json!({"contentExternalId":"dossier-note"}),
+        json!({"kind":"comment","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},
+            "payload":{"commentId":"reader","noteId":"dossier-note","text":"我的孩子需要每天有人提醒。","authorId":"independent-reader"}})).await;
+    let source = sqlx::query_scalar(
         "SELECT material_ref FROM linggan_material_comment WHERE comment_external_id='reader'",
     )
     .fetch_one(db.pool())
@@ -40,16 +47,21 @@ async fn lost_research_receipts_hold_quota_and_block_new_commands_even_after_con
     let mut owner = ai::executor::ExecutorSession::acquire(&db, "unknown-proof-bootstrap", 4)
         .await
         .unwrap();
-    let configured = setup::prepare_with_actual_probe(&db, &endpoint.url, &owner, &adapter).await;
+    let mut configured =
+        setup::prepare_with_actual_probe(&db, &endpoint.url, &owner, &adapter).await;
+    let l1_config = l1_setup::configure_high(&db, &configured).await;
+    configured.capability = sqlx::query_scalar("SELECT m.capability_ref FROM linggan_ai_task_config t JOIN linggan_model_config m ON m.config_ref=t.model_config_ref WHERE t.task_config_ref=$1").bind(l1_config).fetch_one(db.pool()).await.unwrap();
+    for scope in [ControlScope::Global, ControlScope::Executor] {
+        setup::enable(&db, scope).await;
+    }
+    core_fixture::prepare(&db, work, &owner).await;
     owner.request_drain().await.unwrap();
     owner.complete_drain().await.unwrap();
     drop(owner);
     for task in [
         TaskKey::CreatorResearch,
         TaskKey::CreatorAccountResearch,
-        TaskKey::CommentStudy,
-        TaskKey::CommentProblemResolution,
-        TaskKey::CommentProblemPairReview,
+        TaskKey::CommentUnderstanding,
         TaskKey::TopicResearch,
         TaskKey::TopicResearchExtractReview,
         TaskKey::TopicResearchResolve,
@@ -133,29 +145,29 @@ async fn lost_research_receipts_hold_quota_and_block_new_commands_even_after_con
     ai::creator_account_research::start(&db, &account)
         .await
         .unwrap();
-    let p =
-        ai::comment_research::preview(&db, dossier::DOMAIN, work, source, StudySourceRole::Primary)
-            .await
-            .unwrap();
-    let mut comment = ai::comment_research::Start {
-        command_ref: Uuid::new_v4(),
-        domain_ref: dossier::DOMAIN,
+    let selections = vec![comments::Selection {
         work_ref: work,
         source_ref: source,
         observation_role: StudySourceRole::Primary,
-        knowledge_cutoff: p["knowledgeCutoff"].as_str().unwrap().into(),
-        expected_input_hash: p["inputHash"].as_str().unwrap().into(),
-        task_config_ref: serde_json::from_value(p["taskConfigRef"].clone()).unwrap(),
-        expected_task_revision: p["taskRevision"].as_i64().unwrap(),
+    }];
+    let preview = comments::preview(&db, dossier::DOMAIN, &selections, false)
+        .await
+        .unwrap();
+    let mut comment = comments::Start {
+        command_ref: Uuid::new_v4(),
+        domain_ref: dossier::DOMAIN,
+        selections,
+        knowledge_cutoff: preview["knowledgeCutoff"].as_str().unwrap().into(),
+        expected_plan_hash: preview["planHash"].as_str().unwrap().into(),
+        task_config_ref: serde_json::from_value(preview["taskConfigRef"].clone()).unwrap(),
+        expected_task_revision: preview["taskRevision"].as_i64().unwrap(),
+        rerun: false,
     };
-    ai::comment_research::start(&db, &comment).await.unwrap();
-    let package=dossier::fixture::submit_package(&db,"content_detail",json!({"contentExternalId":"unknown-topic-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"unknown-topic-note"},"payload":{"title":"未知回执专用主题材料","bodyText":"结尾不能丢失🙂","authorId":"another-author"}})).await;
-    let topic_work:Uuid=sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='unknown-topic-note'").fetch_one(db.pool()).await.unwrap();
-    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(topic_work).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
+    let research = comments::start(&db, &comment).await.unwrap();
     let mut topic = ai::topic_research::Start {
         command_ref: Uuid::new_v4(),
         domain_ref: dossier::DOMAIN,
-        work_refs: vec![topic_work],
+        work_refs: vec![work],
     };
     ai::topic_research::start(&db, &topic).await.unwrap();
     // The wrapper performs the fixed SDK request, discards its valid reply, and emits
@@ -213,16 +225,26 @@ async fn lost_research_receipts_hold_quota_and_block_new_commands_even_after_con
         first.request_ref,
         "same command only replays receipt"
     );
+    assert_eq!(comments::start(&db, &comment).await.unwrap(), research);
+    let retry = comments::preview(&db, dossier::DOMAIN, &comment.selections, false)
+        .await
+        .unwrap();
+    assert_eq!(retry["dispatchUnresolvedCount"], 1);
+    assert_eq!(retry["units"], json!([]));
+    comment.command_ref = Uuid::new_v4();
+    comment.knowledge_cutoff = retry["knowledgeCutoff"].as_str().unwrap().into();
+    comment.expected_plan_hash = retry["planHash"].as_str().unwrap().into();
+    assert!(matches!(
+        comments::start(&db, &comment).await,
+        Err(ai::store::FoundationError::AdmissionDenied(ref reasons))
+            if reasons == &["no_researchable_comment"]
+    ));
     single.command_ref = Uuid::new_v4();
     account.command_ref = Uuid::new_v4();
-    comment.command_ref = Uuid::new_v4();
     topic.command_ref = Uuid::new_v4();
     for error in [
         ai::creator_research::start(&db, &single).await.unwrap_err(),
         ai::creator_account_research::start(&db, &account)
-            .await
-            .unwrap_err(),
-        ai::comment_research::start(&db, &comment)
             .await
             .unwrap_err(),
         ai::topic_research::start(&db, &topic).await.unwrap_err(),

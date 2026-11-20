@@ -136,7 +136,7 @@ async fn overview(State(state): State<LocalWebState>, Query(q): Query<Domain>) -
         return ai_settings::unavailable();
     };
     ai_settings::respond(
-        linggan_intelligence::ai_foundation::comment_research_overview::read_v2(db, q.domain_ref)
+        linggan_intelligence::ai_foundation::comment_research_overview::read(db, q.domain_ref)
             .await,
     )
 }

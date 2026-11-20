@@ -1,12 +1,12 @@
 # 评论理解合同（Comment Understanding V2）
 
 > 状态: 代码事实优先
-> 最后核对: 2026-11-19（G1–G3 与 G5）
-> 适用范围: `comment-understanding.v1`、`comment-problem-consolidation.v1`、研究单元、需求身份与派生状态（迁移 `0230`、`0231`）
+> 最后核对: 2026-11-19（G1–G3、G5 与切换候选）
+> 适用范围: `comment-understanding.v1`、`comment-problem-consolidation.v1`、研究单元、需求身份与派生状态（迁移 `0230`、`0231`、`0232`）
 > 事实来源: `database/migrations/0230_comment_understanding.sql`、`crates/intelligence/src/ai_foundation/comment_understanding/`、[实施计划](../plans/active/comment-understanding-v2-001.md)
 > 冲突时以谁为准: 当前 migration/代码/隔离 PostgreSQL 测试；语义标准以计划第 3 节为准，提示词是它的实现
 
-本合同描述 G1–G3 与 G5 的结构和流程。旧的评论三阶段（`comment-research-semantic.v1`、`comment-problem-stage.v1`）仍登记在当前运行版本，按计划在切换阶段退役；届时[研究自动化执行合同](research-automation.md)中评论部分同步改写。
+迁移 `0232` 在候选代码中退役旧评论三阶段，清除空阶段表。研究、目录历史、主题研究和机会卡使用 V2 结果或有效支持。HTTP 和任务行为见[研究自动化执行合同](research-automation.md)。
 
 ## 1. 一次调用与一个研究单元
 

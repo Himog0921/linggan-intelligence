@@ -1,8 +1,8 @@
-# COMMENT-UNDERSTANDING-V2-001 · 交接：从切换继续
+# COMMENT-UNDERSTANDING-V2-001 · 交接：旧流程退役后续
 
 > 状态: 活跃计划
-> 最后核对: 2026-11-19（已接续至 G5；PR #621 的最新提交以 `git log` 为准）
-> 适用范围: 接手评论研究 V2 在同一 PR、同一分支上的剩余代码工作（P0、切换、G4/G6）
+> 最后核对: 2026-11-19（已接续至切换；PR #621 的最新提交以 `git log` 为准）
+> 适用范围: 接手评论研究 V2 在同一 PR、同一分支上的剩余工作（P0、独立审阅及满足进入条件后的 G4/G6）
 > 事实来源: [实施计划](comment-understanding-v2-001.md)（附录 A 改动清单、附录 B 的 G1 记录、附录 C 的 G2 记录）、[评论理解合同](../../data-contracts/comment-understanding.md)、分支 `claude/comment-understanding-v2` 的代码与测试、PR #621 的 CI
 > 冲突时以谁为准: Mog 最新明确授权、AGENTS.md、真实运行/数据库副作用、当前代码/migration/测试；本文只是入口，不复制计划
 
@@ -10,11 +10,11 @@
 
 ## 0. 摘要与启动指令
 
-**一句话：** 评论研究 V2 把"一条评论三次模型调用"改成"一个作品的若干评论一次调用"，需求（Problem）是稳定身份，候选/正式由有效作者数实时推导，合并只追加重定向。G0–G3 与 G5 已实现。G3 接通候选整理、撤销和 Opportunity。G5 接通现有评论研究工作台的 HTTP 与前端。下一阶段为旧流程退役，P0 仍需 Mog 授权。
+**一句话：** 评论研究 V2 把"一条评论三次模型调用"改成"一个作品的若干评论一次调用"，需求（Problem）是稳定身份，候选/正式由有效作者数实时推导，合并只追加重定向。G0–G3 与 G5 已实现。G3 接通候选整理、撤销和 Opportunity。G5 接通现有评论研究工作台的 HTTP 与前端。切换候选通过迁移 0232 退役旧流程。P0 与独立审阅仍需 Mog 授权。
 
 **可直接粘贴给接手 agent 的启动指令：**
 
-> 接手 COMMENT-UNDERSTANDING-V2-001。仓库 `Himog0921/linggan-intelligence`，分支 `claude/comment-understanding-v2`，PR #621（Draft）。先读 `AGENTS.md`，再读 `docs/plans/active/comment-understanding-v2-001-handoff.md`（从第 0 节开始），按它的读取顺序往下读。工作在 `.worktrees/` 下的独立 worktree 里做，不要在 `main` 的共享 checkout 里改任何东西。确认 PR 当前提交和 CI 后，按第 6 节继续切换。第 9 节列出的事项必须停下来问 Mog，不要自行决定；尤其不要调用真实模型、不要对运行库写入、不要合并或部署。每个阶段完成后更新 PR 正文和相关文档，已实现/已测试/已合并/已部署分开写。
+> 接手 COMMENT-UNDERSTANDING-V2-001。仓库 `Himog0921/linggan-intelligence`，分支 `claude/comment-understanding-v2`，PR #621（Draft）。先读 `AGENTS.md`，再读 `docs/plans/active/comment-understanding-v2-001-handoff.md`（从第 0 节开始），按它的读取顺序往下读。工作在 `.worktrees/` 下的独立 worktree 里做，不要在 `main` 的共享 checkout 里改任何东西。确认 PR 当前提交和 CI 后，按第 6 节核对切换证据与授权边界。第 9 节列出的事项必须停下来问 Mog，不要自行决定；尤其不要调用真实模型、不要对运行库写入、不要合并或部署。每个阶段完成后更新 PR 正文和相关文档，已实现/已测试/已合并/已部署分开写。
 
 ## 1. 取得代码
 
@@ -42,6 +42,7 @@ cd .worktrees/comment-understanding-v2
 | 新任务 `comment_understanding`、`comment_problem_consolidation` | 已注册，停用，未配置模型和预算；**从未调用过真实模型** |
 | 旧三阶段评论研究 | 仍是运行中的流程，代码和测试都在 |
 | G5 HTTP 接口、前端 | V2 已接到现有四视图和 AI 设置，尚未部署 |
+| 切换 | 候选迁移 0232 及代码清理已实现，运行库待授权 |
 | 独立审阅 | 尚未进行 |
 | PR #621 | Draft；CI 见第 3 节 |
 
@@ -112,12 +113,13 @@ L1 是评论研究必需上下文，不降级；同一领域串行；候选整�
 - 作品作者未知的评论可以研究，确认是创作者本人的评论继续排除。Opportunity 继续按自身的证据资格处理作品作者未知。
 - 已用桌面浏览器验证隔离库、Axum、React 与回环提供方的操作链路。覆盖选择、补 L1、启动、取消在途单元、正式需求与原声，以及从主题挂靠回到评论。本地机会卡快照 4/4、分组 1/1、指标 48/48、API 1/1。Web 核查 1,797 项通过。提交 CI 以 PR #621 的回执为准。尚未做真实运行与 Mog 业务验收。
 
-### 切换
+### 切换（候选已实现）
 
-- 一个迁移：把 `comment_study`、`comment_problem_resolution`、`comment_problem_pair_review` 设为 `retired`（照 `0229` 的做法：关开关、取消排队项），删空的旧 stage 表（`linggan_comment_research_stage`、`linggan_comment_problem_dispatch`、`linggan_comment_problem_stage_result`）；同一提交删旧代码（`comment_research.rs` 的 V1 部分、`comment_problem.rs` 及其子模块、`executor/service/comment_research.rs`、`executor/service/comment_problem.rs`、旧路由与前端入口、旧测试）。**生产库的旧评论研究表为 0 行**（2026-11-19 只读核对），不写兼容层。
-- 改写 `docs/data-contracts/research-automation.md` 的评论部分，把旧文档标为历史；更新 `docs/README.md`、`docs/progress/2026-11.md`。
-- `current_source_in` 的 V1 分支、`frozen_in` 随旧代码删除。
-- **完成标准：** 没有代码引用旧三个任务和旧表；全套测试通过；`scripts/ci-preflight.sh` 通过。
+- 新迁移 `0232` 退役旧三个评论任务。旧开关通过命令和控制事件关闭，排队项结算为已取消；调用、配置与控制历史保留。三张旧阶段表必须为空，迁移才会删除。2026-11-19 的历史只读核对结果为 0 行，实际应用时还会由迁移检查。
+- 删除旧任务处理器、HTTP 和前端配置入口。评论目录历史查询只连接 V2 研究单元，主题研究只选择 V2 结果，机会卡直接读取 `linggan_comment_problem_support`。历史调用仍可查询。
+- 隔离迁移证明覆盖全量建库、重复迁移、三个旧任务各一条排队项、非空阶段表拒绝及此前 L1 升级记录保留。前端类型、Lint、1,796 项测试和构建通过。评论研究与主题挂靠桌面证明 3/3，AI 设置和机会卡桌面证明各 1/1，运营鉴权 11/11。主题执行及 V2 未决调用证明 8/8。
+- 评论目录与执行证明 44/44，其中 V2 端到端 9/9。机会卡快照 4/4、分组 1/1、周期索引 1/1、指标 48/48、API 1/1，提及投影 6/6。主题挂靠源读取 1/1，已保存主题读取 5/5。预检通过。
+- 未合并、未部署、未做生产验证。下一步须先取得独立审阅或 P0 对应授权。详见[研究自动化执行合同](../../data-contracts/research-automation.md)。
 
 ### P0：提示词冒烟（需要 Mog 授权）
 
@@ -133,7 +135,7 @@ G0–G3、G5 完成并合并已部署；在一个真实领域上端到端跑通�
 
 ## 7. 容易踩的坑
 
-- **新增读取评论研究结果的代码**不要用 `frozen_in`（V1 的冻结输入复核，会静默拒绝 V2 请求），也不要按"同批次条目是否成功"判断成功；用 `comment_research::current_source_in` 和"该请求有成功结果行"。G2 已改过 4 处这样的读取。
+- **新增读取评论研究结果的代码**不要用 `frozen_in`（V1 的冻结输入复核，会静默拒绝 V2 请求），也不要按"同批次条目是否成功"判断成功；用 `comment_understanding::current_source_in` 和"该请求有成功结果行"。G2 已改过 4 处这样的读取。
 - **机会卡的表名单**（第 3 节）。任何新增的、会被机会卡计算读到的表都要登记。
 - **信号序号**是信号在已存储 `signals[]` 里的下标（0–11），与 `membership.signal_ordinal` 一致。
 - **迁移不可改**：`0230` 一旦在任何共享环境应用就不能再改（校验和账本在 `scripts/local-runtime.sh` 和 `apps/api/src/local_web/full_schema_fixture.rs`）；在那之前改 `0230` 要同步夹具里的校验和。新增迁移要同步这两处。提示词是草案，改提示词用新的提示词版本。

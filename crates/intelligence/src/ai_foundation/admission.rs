@@ -25,18 +25,15 @@ pub(crate) async fn check_queue_input_scope(
         )
         .await;
     }
-    if task.comment_stage().is_none()
-        && task.topic_stage().is_none()
+    if task.topic_stage().is_none()
         && task != TaskKey::WorkComparison
         && task != TaskKey::CreatorResearch
         && task != TaskKey::CreatorAccountResearch
-        && task != TaskKey::CommentStudy
         && task != TaskKey::CommentUnderstanding
     {
         return base::check_queue_input_scope(tx, task, config, input).await;
     }
     if !matches!(input, InputRef::TopicResearch { stage_number, .. } if task.topic_stage()==Some(*stage_number))
-        && !matches!(input, InputRef::CommentProblemStage {stage_number,..} if task.comment_stage()==Some(*stage_number) && *stage_number>0)
         && !matches!(
             (task, input),
             (TaskKey::WorkComparison, InputRef::WorkComparison { .. })
@@ -44,7 +41,6 @@ pub(crate) async fn check_queue_input_scope(
                     TaskKey::CreatorResearch,
                     InputRef::CreatorWorkResearch { .. }
                 )
-                | (TaskKey::CommentStudy, InputRef::CommentResearch { .. })
                 | (
                     TaskKey::CommentUnderstanding,
                     InputRef::CommentResearchUnit { .. }
@@ -77,10 +73,7 @@ pub(crate) async fn check_queue_input_scope(
     } else {
         false
     };
-    if task.comment_stage().is_some()
-        || task == TaskKey::CommentUnderstanding
-        || topic_uses_comments
-    {
+    if task == TaskKey::CommentUnderstanding || topic_uses_comments {
         require_egress(
             tx,
             task,

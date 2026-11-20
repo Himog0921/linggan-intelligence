@@ -111,8 +111,8 @@ async fn public_team_access_requires_live_session_and_preserves_inner_origin_gua
         );
     }
     let operator_unsafe = public_request(
-        "GET",
-        "/api/local/comment-research/preview",
+        "POST",
+        "/api/local/comment-research/v2/preview",
         Some(&operator_cookie),
         "",
     );
@@ -136,26 +136,28 @@ async fn public_team_access_requires_live_session_and_preserves_inner_origin_gua
         StatusCode::NO_CONTENT
     );
     let command = public_request(
-        "GET",
-        "/api/local/comment-research/preview",
+        "POST",
+        "/api/local/comment-research/v2/preview",
         Some(&admin_cookie),
-        "{}",
+        r#"{"domainRef":"00000000-0000-0000-0000-000000000000","selections":[]}"#,
     );
     assert_eq!(
         app.clone().oneshot(command).await.unwrap().status(),
         StatusCode::BAD_REQUEST
     );
-    // The retired endpoint remains absent; the permission test above exercises a live route.
-    let retired = public_request(
-        "POST",
-        "/api/local/comment-study/selection-preview",
-        Some(&admin_cookie),
-        "{}",
-    );
-    assert_eq!(
-        app.clone().oneshot(retired).await.unwrap().status(),
-        StatusCode::NOT_FOUND
-    );
+    for (method, path) in [
+        ("POST", "/api/local/comment-study/selection-preview"),
+        ("POST", "/api/local/comment-research"),
+        ("GET", "/api/local/comment-research/preview"),
+        ("POST", "/api/local/comment-research/cancel"),
+    ] {
+        let retired = public_request(method, path, Some(&admin_cookie), "{}");
+        assert_eq!(
+            app.clone().oneshot(retired).await.unwrap().status(),
+            StatusCode::NOT_FOUND,
+            "{method} {path}",
+        );
+    }
     let media = public_request(
         "GET",
         "/api/local/media/invalid/invalid",
@@ -177,8 +179,9 @@ async fn public_team_access_requires_live_session_and_preserves_inner_origin_gua
         StatusCode::FORBIDDEN
     );
     let cross_site = Request::builder()
-        .method("GET")
-        .uri("/api/local/comment-research/preview")
+        .method("POST")
+        .uri("/api/local/comment-research/v2/preview")
+        .header(header::CONTENT_TYPE, "application/json")
         .header(header::HOST, "intelligence.example.com")
         .header("x-forwarded-proto", "https")
         .header(header::ORIGIN, "https://other.example.com")

@@ -676,7 +676,7 @@ async fn downstream_readers_see_v2_research_and_stop_at_a_restricted_comment() {
     };
     let (r1, r2) = (request_of(c1).await, request_of(c2).await);
     let mut tx = env.db.pool().begin().await.unwrap();
-    let source = crate::ai_foundation::comment_research::current_source_in(&mut tx, r1)
+    let source = crate::ai_foundation::comment_understanding::current_source_in(&mut tx, r1)
         .await
         .unwrap();
     assert_eq!(
@@ -727,7 +727,7 @@ async fn downstream_readers_see_v2_research_and_stop_at_a_restricted_comment() {
     );
     let mut tx = env.db.pool().begin().await.unwrap();
     assert!(
-        crate::ai_foundation::comment_research::current_source_in(&mut tx, r2)
+        crate::ai_foundation::comment_understanding::current_source_in(&mut tx, r2)
             .await
             .is_err()
     );
