@@ -11,7 +11,7 @@ describe('restored comment overview on the current research contract',()=>{
   expect(screen.getByRole('img',{name:'评论柱状与研究信号渐变曲线，共同横轴及采集覆盖'})).toBeVisible();
   await screen.findAllByText('作业拖拉',{exact:true});
   expect(screen.getByRole('heading',{name:'已有依据的用户问题'})).toBeVisible();
-  expect(screen.getByText(/已有原始评论仍可在/)).toBeVisible();
+  expect(screen.getByText(/已有原声可在/)).toBeVisible();
   expect(screen.queryByText('尚无新流程的研究记录。')).not.toBeInTheDocument();
   expect(screen.queryByRole('button',{name:'选择评论开始研究'})).not.toBeInTheDocument();
   expect(calls.every(call=>call.method==='GET')).toBe(true);
@@ -30,13 +30,13 @@ describe('restored comment overview on the current research contract',()=>{
  });
  it('shows unindexed material as pending instead of implying there are zero researchable comments',async()=>{
   const value=overview();value.indexCoverage.pendingCount=30;value.corpusSummary.eligibleCommentCount=0;
-  installFetch(url=>url.pathname.endsWith('/comment-research/overview')?json(value):undefined);renderPage(`domain=${DOMAIN}&view=overview`);
+  installFetch(url=>url.pathname.endsWith('/comment-research/v2/overview')?json(value):undefined);renderPage(`domain=${DOMAIN}&view=overview`);
   const metrics=await screen.findByLabelText('研究累计读数与昨日活动');
   expect(metrics).toHaveTextContent('已有 200 条原始评论 · 30 条待索引');
   const headline=metrics.querySelector('strong');expect(headline).toHaveTextContent('—');
  });
  it('keeps word-frequency reads available when overview fails and rejects a different domain',async()=>{
-  installFetch(url=>url.pathname.endsWith('/comment-research/overview')?json({...overview(),domainRef:'wrong-domain'}):undefined);renderPage(`domain=${DOMAIN}&view=overview`);
+  installFetch(url=>url.pathname.endsWith('/comment-research/v2/overview')?json({...overview(),domainRef:'wrong-domain'}):undefined);renderPage(`domain=${DOMAIN}&view=overview`);
   await screen.findByRole('alert');await screen.findAllByText('作业拖拉',{exact:true});
   expect(screen.queryByLabelText('研究累计读数与昨日活动')).not.toBeInTheDocument();
   expect(screen.getByRole('link',{name:'用户评论'})).toBeVisible();
@@ -44,7 +44,7 @@ describe('restored comment overview on the current research contract',()=>{
  it('hides previously displayed source text when qualification refresh fails',async()=>{
   const base=overview();const value={...base,knowledgeSummary:{...base.knowledgeSummary,solutionSignalCount:1,solutionWorkCount:1,solutionPreview:[{requestRef:'request-a',commentKey:{workRef:'work-a',commentExternalId:'comment-a'},quote:'撤回之前的合成原声',proposition:'合成概括',workTitle:'合成作品'}]}};
   let failed=false;
-  installFetch(url=>url.pathname.endsWith('/comment-research/overview')?(failed?json({error:'unavailable'},503):json(value)):undefined);
+  installFetch(url=>url.pathname.endsWith('/comment-research/v2/overview')?(failed?json({error:'unavailable'},503):json(value)):undefined);
   const {queryClient}=renderPage(`domain=${DOMAIN}&view=overview`);
   await screen.findByText('“撤回之前的合成原声”');failed=true;
   await act(async()=>{await queryClient.invalidateQueries({queryKey:['comment-research',DOMAIN,'overview']});});

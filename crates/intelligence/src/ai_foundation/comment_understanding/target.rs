@@ -154,7 +154,7 @@ pub async fn read_in(
         row.try_get::<String, _>("body_state")? != "KNOWN" || raw.is_none(),
         false,
         !matches!(cleaned.state.as_str(), "direct" | "context"),
-        work_author.is_none(),
+        false, // A missing work author does not establish creator voice.
         false,
         author.is_some() && author == work_author,
     ]);

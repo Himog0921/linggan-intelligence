@@ -7,15 +7,15 @@ use crate::ai_foundation::{
     task_config,
 };
 use linggan_storage_postgres::Database;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
 const TASK: TaskKey = TaskKey::CommentProblemConsolidation;
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartConsolidation {
     pub command_ref: Uuid,
     pub domain_ref: Uuid,

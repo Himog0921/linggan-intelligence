@@ -1,5 +1,5 @@
 //! Current source catalog and independently qualified research, never retired read tables.
-use super::{comment_problem, comment_research, store::FoundationError};
+use super::{comment_problem, comment_research, comment_understanding, store::FoundationError};
 use crate::{comment_cleaning::CLEANER_VERSION, comment_study_catalog};
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
@@ -8,10 +8,22 @@ use std::collections::HashSet;
 use uuid::Uuid;
 
 pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
+    read_for(db, domain, false).await
+}
+
+pub async fn read_v2(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
+    read_for(db, domain, true).await
+}
+
+async fn read_for(db: &Database, domain: Uuid, v2: bool) -> Result<Value, FoundationError> {
     if domain.is_nil() {
         return Err(FoundationError::Invalid);
     }
-    let problems = comment_problem::read_problems(db, domain).await?;
+    let legacy_problems = if v2 {
+        None
+    } else {
+        Some(comment_problem::read_problems(db, domain).await?)
+    };
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
@@ -57,6 +69,7 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
         .bind(CLEANER_VERSION)
         .bind(Option::<Uuid>::None)
         .bind(Option::<String>::None)
+        .bind(v2)
         .fetch_all(&mut *tx)
         .await?;
     let mut succeeded = 0;
@@ -127,21 +140,50 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
     .bind(&as_of)
     .fetch_one(&mut *tx)
     .await?;
-    let problem_rows = problems["problems"]
-        .as_array()
-        .ok_or(FoundationError::Invalid)?;
-    let candidates = problems["candidates"]
-        .as_array()
-        .ok_or(FoundationError::Invalid)?;
-    let refs: Vec<Uuid> = problem_rows
-        .iter()
-        .map(|v| {
-            serde_json::from_value(v["definitionRef"].clone()).map_err(|_| FoundationError::Invalid)
-        })
-        .collect::<Result<_, _>>()?;
-    let yesterday:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_comment_problem_definition WHERE definition_ref=ANY($1) AND (created_at AT TIME ZONE 'Asia/Shanghai')::date=($2::timestamptz AT TIME ZONE 'Asia/Shanghai')::date-1").bind(&refs).bind(&as_of).fetch_one(&mut *tx).await?;
+    let (problem_count, candidate_count, problem_preview, yesterday) = if v2 {
+        let (formal, candidates, yesterday): (i64, i64, i64) = sqlx::query_as(
+            "SELECT count(*) FILTER(WHERE p.state='formal'),count(*) FILTER(WHERE p.state='candidate'),
+                    count(*) FILTER(WHERE p.state='formal' AND (d.created_at AT TIME ZONE 'Asia/Shanghai')::date
+                      =($2::timestamptz AT TIME ZONE 'Asia/Shanghai')::date-1)
+             FROM linggan_comment_problem_current p JOIN linggan_comment_problem_definition d USING(problem_ref)
+             WHERE p.domain_ref=$1 AND d.origin_invocation_ref IS NOT NULL",
+        ).bind(domain).bind(&as_of).fetch_one(&mut *tx).await?;
+        let top: Vec<Uuid> = sqlx::query_scalar(
+            "SELECT p.problem_ref FROM linggan_comment_problem_current p
+             JOIN linggan_comment_problem_definition d USING(problem_ref)
+             WHERE p.domain_ref=$1 AND p.state='formal' AND d.origin_invocation_ref IS NOT NULL
+             ORDER BY p.author_count DESC,p.last_researched_at DESC NULLS LAST,p.problem_ref LIMIT 3",
+        ).bind(domain).fetch_all(&mut *tx).await?;
+        let mut preview = Vec::new();
+        for problem in top {
+            preview.push(comment_understanding::read::problem_in(&mut tx, domain, problem).await?);
+        }
+        (formal as usize, candidates as usize, preview, yesterday)
+    } else {
+        let problems = legacy_problems.ok_or(FoundationError::Invalid)?;
+        let problem_rows = problems["problems"]
+            .as_array()
+            .ok_or(FoundationError::Invalid)?;
+        let candidates = problems["candidates"]
+            .as_array()
+            .ok_or(FoundationError::Invalid)?;
+        let refs: Vec<Uuid> = problem_rows
+            .iter()
+            .map(|v| {
+                serde_json::from_value(v["definitionRef"].clone())
+                    .map_err(|_| FoundationError::Invalid)
+            })
+            .collect::<Result<_, _>>()?;
+        let yesterday:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_comment_problem_definition WHERE definition_ref=ANY($1) AND (created_at AT TIME ZONE 'Asia/Shanghai')::date=($2::timestamptz AT TIME ZONE 'Asia/Shanghai')::date-1").bind(&refs).bind(&as_of).fetch_one(&mut *tx).await?;
+        (
+            problem_rows.len(),
+            candidates.len(),
+            problem_rows.iter().take(3).cloned().collect(),
+            yesterday,
+        )
+    };
     tx.commit().await?;
     Ok(
-        json!({"contract":"comment-research.overview.v1","domainRef":domain,"asOf":as_of,"corpusSummary":counts,"indexCoverage":{"indexedCount":counts["indexedCount"],"pendingCount":counts["pendingCount"]},"researchSummary":{"studiedCommentCount":counts["studiedCommentCount"],"succeededCommentCount":succeeded,"noSignalCommentCount":no_signal,"currentSignalCount":signal_count},"knowledgeSummary":{"problemCount":problem_rows.len(),"pendingCandidateCount":candidates.len(),"solutionSignalCount":solution_count,"experienceSignalCount":experience_count,"solutionWorkCount":solution_works.len(),"experienceWorkCount":experience_works.len(),"solutionPreview":solutions,"experiencePreview":experiences,"problemPreview":problem_rows.iter().take(3).collect::<Vec<_>>()},"yesterdayNewProblemCount":yesterday,"observationSeries":series}),
+        json!({"contract":"comment-research.overview.v1","domainRef":domain,"asOf":as_of,"corpusSummary":counts,"indexCoverage":{"indexedCount":counts["indexedCount"],"pendingCount":counts["pendingCount"]},"researchSummary":{"studiedCommentCount":counts["studiedCommentCount"],"succeededCommentCount":succeeded,"noSignalCommentCount":no_signal,"currentSignalCount":signal_count},"knowledgeSummary":{"problemCount":problem_count,"pendingCandidateCount":candidate_count,"solutionSignalCount":solution_count,"experienceSignalCount":experience_count,"solutionWorkCount":solution_works.len(),"experienceWorkCount":experience_works.len(),"solutionPreview":solutions,"experiencePreview":experiences,"problemPreview":problem_preview},"yesterdayNewProblemCount":yesterday,"observationSeries":series}),
     )
 }

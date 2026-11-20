@@ -229,7 +229,9 @@ fn planned(
     }
 }
 
-async fn read_only_tx(db: &Database) -> Result<Transaction<'static, Postgres>, FoundationError> {
+pub(super) async fn read_only_tx(
+    db: &Database,
+) -> Result<Transaction<'static, Postgres>, FoundationError> {
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)

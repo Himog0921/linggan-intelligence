@@ -13,6 +13,7 @@ mod contract;
 mod execution_tests;
 mod plan;
 pub mod publish;
+pub(super) mod read;
 pub(crate) mod redirect;
 mod run;
 mod start;
@@ -36,7 +37,8 @@ pub use plan::{
     OUTPUT_TOKENS_PER_TARGET, PlannedTarget, PlannedUnit, UNIT_MAX_OUTPUT_ESTIMATE,
     UNIT_MAX_TARGETS, WorkGroup, capacity, plan_hash, split,
 };
-pub use run::{Cancel, cancel, read_run};
+pub use read::{read_latest, read_problem, read_problems};
+pub use run::{Cancel, cancel, read_run, read_runs};
 pub use start::{MAX_SELECTIONS, Receipt, Selection, Start, preview, start};
 pub use target::{
     CurrentSource, ParentContext, Target, current_source_in, read_in as read_target_in,

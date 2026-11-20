@@ -15,11 +15,11 @@ use std::{
 use uuid::Uuid;
 #[path = "../../../../crates/intelligence/tests/support/content_understanding_fixture.rs"]
 mod core_setup;
-#[path = "../../../../crates/evidence/tests/support/research_dossier_fixture.rs"]
-mod dossier;
 #[allow(dead_code)]
 #[path = "../../../../crates/evidence/tests/support/domain_fixture.rs"]
 mod domain_fixture;
+#[path = "../../../../crates/evidence/tests/support/research_dossier_fixture.rs"]
+mod dossier;
 #[path = "../../../../crates/intelligence/tests/support/ai_writing_endpoint.rs"]
 mod endpoint;
 #[path = "../../../../crates/intelligence/tests/support/ai_writing_fixture.rs"]
@@ -79,11 +79,24 @@ async fn unified_research_real_chain_browser_proof() {
         Ok("SYNTHETIC-NOT-EVIDENCE")
     );
     let db = dossier::fixture::proof_database("unified_research_browser").await;
-    domain_fixture::submit_package_for_domain(&db, &dossier::DOMAIN.to_string(), "synthetic-ops", "deep_archive",
-        json!({"query":"synthetic-ops"}), 1, "discovery_search",
+    domain_fixture::submit_package_for_domain(
+        &db,
+        &dossier::DOMAIN.to_string(),
+        "synthetic-ops",
+        "deep_archive",
+        json!({"query":"synthetic-ops"}),
+        1,
+        "discovery_search",
         domain_fixture::search_coverage("synthetic-ops", 1),
         json!({"surfaceReceipt":{"stopReason":"bottom_confirmed"}}),
-        vec![domain_fixture::discovery_card("dossier-note", "合成底稿验收", "0", "https://www.xiaohongshu.com/explore/dossier-note")]).await;
+        vec![domain_fixture::discovery_card(
+            "dossier-note",
+            "合成底稿验收",
+            "0",
+            "https://www.xiaohongshu.com/explore/dossier-note",
+        )],
+    )
+    .await;
     let work = dossier::work(&db).await;
     // A complete one-page inventory and admitted original bytes satisfy Core's real
     // material readiness contract; the old text-only fixture left media unknown.
@@ -100,7 +113,7 @@ async fn unified_research_real_chain_browser_proof() {
     linggan_intelligence::comment_study_catalog::refresh_clean_cache(&db, dossier::DOMAIN, 200)
         .await
         .unwrap();
-    let endpoint = endpoint::Endpoint::start(false).await;
+    let mut endpoint = endpoint::Endpoint::start(true).await;
     let (core_url, core_server) = core_endpoint().await;
     let node = std::env::var("WEB_APP_PROOF_NODE").unwrap();
     let adapter = linggan_intelligence::pi_adapter::PiAdapter::configured_with_test_command(
@@ -117,9 +130,7 @@ async fn unified_research_real_chain_browser_proof() {
     owner.complete_drain().await.unwrap();
     drop(owner);
     for task in [
-        TaskKey::CommentStudy,
-        TaskKey::CommentProblemResolution,
-        TaskKey::CommentProblemPairReview,
+        TaskKey::CommentUnderstanding,
         TaskKey::TopicResearch,
         TaskKey::TopicResearchExtractReview,
         TaskKey::TopicResearchResolve,
@@ -184,32 +195,32 @@ async fn unified_research_real_chain_browser_proof() {
         adapter,
         drain.clone(),
     ));
-    let preview = ai::content_understanding::preview(&db, dossier::DOMAIN, work)
+    // Keep the first loopback comment call in flight until the browser requests cancellation.
+    let seen = endpoint.seen.take().unwrap();
+    let release = endpoint.release.take().unwrap();
+    let cancel_db = db.clone();
+    let cancellation_gate = tokio::spawn(async move {
+        tokio::time::timeout(Duration::from_secs(60), async {
+            seen.await.unwrap();
+            loop {
+                let requested: bool = sqlx::query_scalar(
+                    "SELECT EXISTS(SELECT 1 FROM linggan_ai_batch batch
+                     JOIN linggan_ai_batch_control control USING(batch_ref)
+                     WHERE batch.task_key='comment_understanding' AND control.cancel_requested)",
+                )
+                .fetch_one(cancel_db.pool())
+                .await
+                .unwrap();
+                if requested {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            release.send(()).unwrap();
+        })
         .await
-        .unwrap();
-    assert_eq!(preview["canStart"], true, "{preview}");
-    let core = ai::content_understanding::start(
-        &db,
-        &ai::content_understanding::Start {
-            command_ref: Uuid::new_v4(),
-            domain_ref: dossier::DOMAIN,
-            work_ref: work,
-            knowledge_cutoff: preview["knowledgeCutoff"].as_str().unwrap().into(),
-            input_hash: preview["inputHash"].as_str().unwrap().into(),
-            task_config_ref: serde_json::from_value(preview["taskConfigRef"].clone()).unwrap(),
-            task_revision: preview["taskRevision"].as_i64().unwrap(),
-        },
-    )
-    .await
-    .unwrap();
-    tokio::time::timeout(Duration::from_secs(25), async {
-        loop {
-            let ready: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_content_understanding_result WHERE request_ref=$1 AND result IS NOT NULL)")
-                .bind(core.request_ref).fetch_one(db.pool()).await.unwrap();
-            if ready { break; }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-    }).await.expect("synthetic Core must be accepted before opening topic research");
+        .expect("the browser confirms cancellation");
+    });
     // Synthetic Operations publication mapped through the real acquired detail receipt.
     let member = Uuid::new_v4();
     let publication = Uuid::new_v4();
@@ -233,7 +244,7 @@ async fn unified_research_real_chain_browser_proof() {
     std::fs::create_dir_all(&directory).unwrap();
     std::fs::write(
         directory.join("fixture.json"),
-        json!({"origin":origin,"domain":dossier::DOMAIN,"work":work,"coreRef":core.request_ref}).to_string(),
+        json!({"origin":origin,"domain":dossier::DOMAIN,"work":work}).to_string(),
     )
     .unwrap();
     let status = tokio::task::spawn_blocking(move || {
@@ -253,7 +264,7 @@ async fn unified_research_real_chain_browser_proof() {
         eprintln!("topic validation diagnostics: {:?}", reasons);
         eprintln!(
             "research diagnostics: {}",
-            ai::comment_research::runs(&db, dossier::DOMAIN)
+            ai::comment_understanding::read_runs(&db, dossier::DOMAIN)
                 .await
                 .unwrap()
         );
@@ -267,13 +278,14 @@ async fn unified_research_real_chain_browser_proof() {
     let _ = core_server.await;
     assert!(drained.unwrap().unwrap().is_ok());
     assert!(status.success(), "inspect unified research browser report");
-    let overview = ai::comment_research_overview::read(&db, dossier::DOMAIN)
+    cancellation_gate.await.unwrap();
+    let overview = ai::comment_research_overview::read_v2(&db, dossier::DOMAIN)
         .await
         .unwrap();
     assert_eq!(overview["researchSummary"]["currentSignalCount"], 2);
     assert_eq!(overview["knowledgeSummary"]["problemCount"], 1);
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'reader-a','synthetic source withdrawal')").bind(work).execute(db.pool()).await.unwrap();
-    let withdrawn = ai::comment_research_overview::read(&db, dossier::DOMAIN)
+    let withdrawn = ai::comment_research_overview::read_v2(&db, dossier::DOMAIN)
         .await
         .unwrap();
     assert_eq!(withdrawn["researchSummary"]["currentSignalCount"], 1);
@@ -283,7 +295,7 @@ async fn unified_research_real_chain_browser_proof() {
     linggan_intelligence::comment_study_catalog::refresh_clean_cache(&db, dossier::DOMAIN, 200)
         .await
         .unwrap();
-    let current = ai::comment_research_overview::read(&db, dossier::DOMAIN)
+    let current = ai::comment_research_overview::read_v2(&db, dossier::DOMAIN)
         .await
         .unwrap();
     assert_eq!(current["corpusSummary"]["eligibleCommentCount"], 1);

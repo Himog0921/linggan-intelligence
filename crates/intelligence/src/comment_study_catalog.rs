@@ -38,9 +38,17 @@ pub use word_cloud::{WordCloudQuery, read_word_cloud};
 pub use works::{WorkCatalogQuery, read_work_catalog};
 
 pub(super) fn facts_sql() -> String {
+    facts_sql_for(true)
+}
+
+pub(super) fn opportunity_facts_sql() -> String {
+    facts_sql_for(false)
+}
+
+fn facts_sql_for(allow_unknown_authors: bool) -> String {
     include_str!("comment_study_catalog/facts.sql").replace(
         "/*SOURCE_ELIGIBILITY_CASE*/",
-        &crate::comment_study_source::gate::sql_case(),
+        &crate::comment_study_source::gate::sql_case(allow_unknown_authors),
     )
 }
 

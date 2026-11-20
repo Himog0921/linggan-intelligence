@@ -38,7 +38,7 @@ fn candidate_sql() -> String {
            AND likes.comment_external_id=q.comment_external_id \
          ORDER BY likes.like_count DESC NULLS LAST,eligible.first_observed_at,\
                   q.content_public_ref,q.comment_external_id",
-        comment_study_catalog::facts_sql(),
+        comment_study_catalog::opportunity_facts_sql(),
         comment_study_catalog::like_heads_sql()
     )
 }

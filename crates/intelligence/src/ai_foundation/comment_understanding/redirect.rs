@@ -2,7 +2,7 @@
 use super::{ConsolidationDecision, Verdict, publish};
 use crate::ai_foundation::store::{Command, FoundationError};
 use linggan_storage_postgres::Database;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use std::collections::BTreeMap;
@@ -67,8 +67,8 @@ pub(crate) async fn apply_in(
     Ok(merged)
 }
 
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RevokeRedirect {
     pub command_ref: Uuid,
     pub domain_ref: Uuid,

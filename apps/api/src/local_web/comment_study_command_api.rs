@@ -15,8 +15,15 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
+#[path = "comment_understanding_api.rs"]
+mod comment_understanding_api;
+
 pub(super) fn additional_routes() -> Router<LocalWebState> {
     Router::new()
+        .nest(
+            "/api/local/comment-research/v2",
+            comment_understanding_api::routes(),
+        )
         .route(
             "/api/local/comment-research/overview",
             get(research_overview),

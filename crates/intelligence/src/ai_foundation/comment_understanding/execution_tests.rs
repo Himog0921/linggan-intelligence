@@ -1078,3 +1078,57 @@ async fn consolidates_duplicate_candidates_once_and_restores_opportunity_on_revo
     assert_eq!(restored_card["problem"]["id"], json!(loser));
     assert!(restored_card["problem"]["redirectedFrom"].is_null());
 }
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL only"]
+async fn preview_allows_unknown_work_author_and_excludes_confirmed_creator_voice() {
+    let env = environment("cu_v2_author_gate", "normal").await;
+    let (known, unknown) = ("known-author-work", "unknown-author-work");
+    let work_known = support::work(&env.db, known, "合成正文：家长记录写作业。").await;
+    let no_author_package = support::fixture::submit_package_at(
+        &env.db,
+        "content_detail",
+        json!({"contentExternalId":unknown}),
+        json!({
+            "kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":unknown},
+            "payload":{"title":"合成作品","bodyText":"合成正文：家长记录写作业。"},
+        }),
+        "2026-10-13T00:00:00Z",
+    )
+    .await;
+    let work_unknown: Uuid = sqlx::query_scalar(
+        "INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)
+         SELECT gen_random_uuid(),content_public_ref,$2,'primary','legacy_domain_migration',$1
+         FROM linggan_material_content_detail WHERE package_ref=$1 RETURNING content_public_ref",
+    )
+    .bind(no_author_package)
+    .bind(support::D)
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    let creator = env
+        .comment(known, "creator", "需要提醒才能动笔", "synthetic-creator")
+        .await;
+    let unknown_creator = env
+        .comment(
+            unknown,
+            "unknown",
+            "孩子需要提醒才能动笔",
+            "distinct-reader",
+        )
+        .await;
+    let result = preview(
+        &env.db,
+        support::D,
+        &[
+            selection(work_known, creator),
+            selection(work_unknown, unknown_creator),
+        ],
+        false,
+    )
+    .await
+    .unwrap();
+    assert_eq!(result["excludedCounts"]["creatorVoice"], 1);
+    assert_eq!(result["waitingL1"]["workRefs"], json!([work_unknown]));
+    assert_eq!(result["waitingL1"]["targetCount"], 1);
+}

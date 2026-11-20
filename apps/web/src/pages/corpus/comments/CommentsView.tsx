@@ -154,7 +154,7 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
             <td className={c('study-comment-like-cell')}><LikeCount item={item} compact /></td>
             <td><span className={c('study-work-title')} title={item.workTitle ? (item.workTitleSource === 'platform_title' ? item.workTitle : item.workTitle + ' · ' + (workTitleSourceLabel[item.workTitleSource || ''] || '标题来源未记录')) : '未命名作品'}>{item.workTitle || '未命名作品'}</span></td>
             <td><span className={c('study-row-status')} title={statusText}>{statusText}</span></td>
-            <td><div className={c('study-comment-kinds')} title={fullKinds || '无当前有效标签'}>{kinds.length ? kinds.map(kind => <span className={c('study-badge')} key={kind}>{signalKindLabel[kind]}</span>) : <span className={c('study-detail-muted')} aria-label="无当前有效标签">—</span>}</div></td>
+            <td><div className={c('study-comment-kinds')} title={fullKinds || '无当前有效标签'}>{kinds.length ? <>{kinds.slice(0, 3).map(kind => <span className={c('study-badge')} key={kind}>{signalKindLabel[kind]}</span>)}{kinds.length > 3 ? <span className={c('study-badge')}>+{kinds.length - 3}</span> : null}</> : <span className={c('study-detail-muted')} aria-label="无当前有效标签">—</span>}</div></td>
             <td><span className={c('study-row-author')} title={item.authorDisplayName || '作者未记录'}>{item.authorDisplayName || '作者未记录'}</span></td>
             <td><time className={c('study-row-time')} title={item.likeCountAsOf ? '点赞采集时间：' + studyTime(item.likeCountAsOf) : '点赞采集时间未记录'}>{shortBeijingDate(item.likeCountAsOf) || '—'}</time></td>
             <td><time className={c('study-row-time')} title={item.observedAt ? '评论观测时间' : '评论观测时间未记录'}>{item.observedAt ? studyTime(item.observedAt) : '—'}</time></td>

@@ -53,6 +53,8 @@ function Workspace({ domain, domainName, domainStatus, crumb, loading, shellErro
   }
   const nav: StudyNavigation = {
     view: (next, filters) => { const to = destination(next, filters ? {signalKind: filters.signalKind ?? null} : {}); void navigate(to.url, { state: to.state }); },
+    run: batch => { const to = destination('runs', { runRef: batch }); void navigate(to.url, { state: to.state }); },
+    problem: problem => { const to = destination('problems', { problemRef: problem }); void navigate(to.url, { state: to.state }); },
     research: (requestRef, key) => { const to=destination('comments',{commentWorkRef:key.workRef,commentExternalId:key.commentExternalId,detail:'comment',researchRequestRef:requestRef},{commentDetail:true,commentDomain:domain});void navigate(to.url,{state:to.state}); },
     comment: key => {
       const to = destination('comments', { commentWorkRef: key.workRef, commentExternalId: key.commentExternalId, detail: 'comment', researchRequestRef: null }, { commentDetail: true, commentDomain: domain });
@@ -75,13 +77,13 @@ function Workspace({ domain, domainName, domainStatus, crumb, loading, shellErro
     </div>
   </details> : `${domainName} · 状态 ${domainStatus}`;
   return <AppShell active="corpus" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: crumb, meta: contextMeta }}>
-    <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} view={view} onViewSelect={next => nav.view(next)} foot={<>原声提取 · 问题归并 · 独立核验</>} />
+    <title>评论研究</title><div className="v7-shell"><CorpusSideNav active="comments" domain={domain} view={view} onViewSelect={next => nav.view(next)} foot={<>评论理解 · 候选整理</>} />
     {fatalShellError ? <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1><p className={c('study-empty')} role="status">评论研究准备信息读取失败：{shellError} <button type="button" onClick={retryShell}>重试读取</button></p></main> :
     <main className={c('study-main')} aria-labelledby="comment-study-title"><h1 id="comment-study-title" className="v7-sr-only">评论研究</h1>
     {shellError ? <p className={c('study-table-status')} role="status">领域信息刷新失败；当前显示上次读取结果。{shellError} <button type="button" onClick={retryShell}>重新读取领域信息</button></p> : null}
 
     <section id="study-tab-result" className={view === 'comments' ? c('study-tab-comments') : undefined} aria-live="polite" data-comment-study-content aria-busy={loading}>
-      {loading ? <p className={c('study-empty')}>正在读取评论研究…</p> : !domain ? <p className={c('study-empty')}>请先在页头选择观察领域，再查看评论研究。</p> : view === 'comments' ? <CommentsView domain={domain} nav={nav} selected={selectedComments} onSelected={setSelectedComments} onCounts={setCommentCounts} requestRefs={usageRefs} closeDetail={closeComment} /> : view === 'overview' ? <Overview domain={domain} nav={nav} preferences={overviewPreferences} onPreferences={setOverviewPreferences}/> : <ResearchDashboard domain={domain} view={view} nav={nav} />}
+      {loading ? <p className={c('study-empty')}>正在读取评论研究…</p> : !domain ? <p className={c('study-empty')}>请先在页头选择观察领域，再查看评论研究。</p> : view === 'comments' ? <CommentsView domain={domain} nav={nav} selected={selectedComments} onSelected={setSelectedComments} onCounts={setCommentCounts} requestRefs={usageRefs} closeDetail={closeComment} /> : view === 'overview' ? <Overview domain={domain} nav={nav} preferences={overviewPreferences} onPreferences={setOverviewPreferences}/> : <ResearchDashboard domain={domain} view={view} nav={nav} runRef={params.get("runRef")} problemRef={params.get("problemRef")} />}
     </section>
     </main>}</div></AppShell>;
 }

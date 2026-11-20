@@ -1,12 +1,12 @@
 # 评论理解合同（Comment Understanding V2）
 
 > 状态: 代码事实优先
-> 最后核对: 2026-11-19（G1–G3）
+> 最后核对: 2026-11-19（G1–G3 与 G5）
 > 适用范围: `comment-understanding.v1`、`comment-problem-consolidation.v1`、研究单元、需求身份与派生状态（迁移 `0230`、`0231`）
 > 事实来源: `database/migrations/0230_comment_understanding.sql`、`crates/intelligence/src/ai_foundation/comment_understanding/`、[实施计划](../plans/active/comment-understanding-v2-001.md)
 > 冲突时以谁为准: 当前 migration/代码/隔离 PostgreSQL 测试；语义标准以计划第 3 节为准，提示词是它的实现
 
-本合同描述 G1–G3 已落地的结构和流程。旧的评论三阶段（`comment-research-semantic.v1`、`comment-problem-stage.v1`）仍是运行中的流程，直到计划的切换步骤才退役；届时[研究自动化执行合同](research-automation.md)中评论部分同步改写。
+本合同描述 G1–G3 与 G5 的结构和流程。旧的评论三阶段（`comment-research-semantic.v1`、`comment-problem-stage.v1`）仍登记在当前运行版本，按计划在切换阶段退役；届时[研究自动化执行合同](research-automation.md)中评论部分同步改写。
 
 ## 1. 一次调用与一个研究单元
 
@@ -81,7 +81,7 @@
 
 `preview(domain, selections, rerun)` 与 `start(Start)` 共用一个规划函数。选择项是 `(workRef, sourceRef, observationRole)`，一次最多 1000 条。
 
-- 资格：V1 来源门，差别是不读研究底稿、允许评论者作者未知；创作者本人的评论、作品作者未知的评论仍排除。作品必须有可用的 L1 Core（`core_cards_in` 的第一张，其 `analysisRef` 即 L1 请求 ID），否则计入预览的 `waitingL1`。
+- 资格：V1 来源门，差别是不读研究底稿、允许评论者作者未知；能确认来自创作者本人的评论排除，作品作者或评论者身份未知仍可研究。作品必须有可用的 L1 Core（`core_cards_in` 的第一张，其 `analysisRef` 即 L1 请求 ID），否则计入预览的 `waitingL1`。
 - 不进计划：已有成功结果（除非 `rerun`）、已在排队或运行、上一次调用结果未知（`ai_dispatch_unknown`）。
 - 切分：按作品分组，每单元最多 `UNIT_MAX_TARGETS`（20）条且不超过输出估算上限；之前因输出被截断失败的评论，每次失败容量减半，最小为 1；作品评论多的先执行。
 - `planHash` 不含随机单元 ID；启动重算并比较，不一致为冲突。启动在同一事务里写一个批次、每单元一个条目和 `unit` 行、每条评论一行 `request` 与 `unit_target`，按领域加咨询锁避免两个启动规划同一批评论。命令幂等。
@@ -105,3 +105,18 @@
 `comment_research::current_source_in(request)` 是 Topic Map、Topic 评论来源和评论概览读取"某条研究对应的评论"的唯一入口：V1 研究按冻结输入复核；V2 研究只要求评论仍可读，L1 与清洗版本不作为有效性条件。三处 SQL 以"该请求有成功结果行"判断成功，不看同批次其他条目的状态。评论目录的"最近一次研究"状态对 V2 请求从单元条目与结果行推导。
 
 Opportunity 从有效支持视图读取 V2 归属并保留原始支持键。当前指标和原声排除已失效或已移到另一需求的提及。研究单元和整理成功后请求刷新，撤销由现有周期刷新发现。机会卡仍按自身的分期、来源和作者资格计算指标。
+
+
+## 11. 本机 V2 HTTP 入口（G5）
+
+以下路径以 `/api/local/comment-research/v2` 为前缀，沿用本机同源访问与禁止缓存约束。所有写命令使用命令编号，回执表示提交或取消请求已受理。
+
+| 方法与路径 | 事实和动作 |
+|---|---|
+| `POST /preview`、`POST /runs` | 批量选择预览与原计划启动。运营可从预览为缺 L1 的作品调用现有内容理解预览和提交。 |
+| `GET /runs`、`GET /runs/{batch}`、`POST /cancel` | 领域内最近运行、单元和评论回执、失败重选项、用量和取消。 |
+| `GET /latest`、`GET /overview` | 评论最近执行和当前可展示结果分开读取。概览展示当前 V2 信号、正式需求与候选数量。 |
+| `GET /problems`、`GET /problems/{problem}` | 当前需求列表、作者与作品计数、最多三段代表原声、重定向和撤销历史。 |
+| `POST /consolidation`、`POST /redirects/revoke` | 手动提交候选整理，在当前领域撤销已发生的合并。 |
+
+列表和详情中的需求状态均由有效支持实时推导。展示代表原声前重检来源资格，再按已保存信号的字符范围取原文。V1 HTTP 保留到后续退役阶段。
