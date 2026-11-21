@@ -84,12 +84,19 @@ pub struct AcceptedSignal {
     pub eligibility_reason: Option<&'static str>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReasonCode {
+    Missing,
+    Unclassified,
+    Promotion,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AcceptedTarget {
     pub alias: String,
     pub outcome: Outcome,
     pub reason: Option<String>,
-    pub reason_code: Option<&'static str>,
+    reason_code: ReasonCode,
     pub signals: Vec<AcceptedSignal>,
     pub dropped_signals: usize,
 }
@@ -118,14 +125,19 @@ impl AcceptedTarget {
                 })
             })
             .collect();
-        json!({
+        let mut result = json!({
             "contract": RESULT_CONTRACT,
             "outcome": self.outcome.as_str(),
             "reason": self.reason,
-            "reasonCode": self.reason_code,
             "signals": signals,
             "droppedSignals": self.dropped_signals,
-        })
+        });
+        match self.reason_code {
+            ReasonCode::Missing => {}
+            ReasonCode::Unclassified => result["reasonCode"] = Value::Null,
+            ReasonCode::Promotion => result["reasonCode"] = json!("promotion"),
+        }
+        result
     }
 }
 
@@ -314,6 +326,7 @@ fn accept_target(
     catalog: &HashSet<String>,
     proposals: &HashMap<String, ProposalStatus>,
 ) -> Result<AcceptedTarget, &'static str> {
+    let has_reason_code = entry.get("reasonCode").is_some();
     let raw: RawTarget = serde_json::from_value(entry).map_err(|_| "target_invalid")?;
     let outcome = match raw.outcome.as_str() {
         "signals" => Outcome::Signals,
@@ -324,6 +337,15 @@ fn accept_target(
     if (outcome == Outcome::Signals) == raw.signals.is_empty() {
         return Err("target_invalid");
     }
+    let reason_code = match (
+        has_reason_code,
+        outcome,
+        raw.reason_code.as_ref().and_then(Value::as_str),
+    ) {
+        (false, _, _) => ReasonCode::Missing,
+        (true, Outcome::NoSignal, Some("promotion")) => ReasonCode::Promotion,
+        (true, _, _) => ReasonCode::Unclassified,
+    };
     if outcome != Outcome::Signals {
         let reason = raw
             .reason
@@ -335,9 +357,7 @@ fn accept_target(
             alias: frame.alias.clone(),
             outcome,
             reason,
-            reason_code: (outcome == Outcome::NoSignal
-                && raw.reason_code.as_ref().and_then(Value::as_str) == Some("promotion"))
-            .then_some("promotion"),
+            reason_code,
             signals: Vec::new(),
             dropped_signals: 0,
         });
@@ -358,7 +378,7 @@ fn accept_target(
         alias: frame.alias.clone(),
         outcome,
         reason: None,
-        reason_code: None,
+        reason_code,
         signals,
         dropped_signals,
     })
@@ -524,25 +544,28 @@ mod tests {
     }
 
     #[test]
-    fn promotion_requires_no_signal_and_an_explicit_code() {
+    fn promotion_preserves_legacy_omission_and_honors_explicit_codes() {
         for (outcome, code, expected) in [
-            ("no_signal", json!("promotion"), json!("promotion")),
-            ("no_signal", json!(null), Value::Null),
-            ("needs_context", json!("promotion"), Value::Null),
-            ("no_signal", json!("unknown"), Value::Null),
+            ("no_signal", None, None),
+            (
+                "no_signal",
+                Some(json!("promotion")),
+                Some(json!("promotion")),
+            ),
+            ("no_signal", Some(Value::Null), Some(Value::Null)),
+            ("needs_context", Some(json!("promotion")), Some(Value::Null)),
+            ("no_signal", Some(json!("unknown")), Some(Value::Null)),
         ] {
-            let text = unit(
-                json!([]),
-                json!([{
-                    "targetKey":"t1", "outcome":outcome, "reason":"联系入口",
-                    "reasonCode":code, "signals":[]
-                }]),
-            );
+            let mut reply = json!({
+                "targetKey":"t1", "outcome":outcome, "reason":"引流话术", "signals":[]
+            });
+            if let Some(code) = code {
+                reply["reasonCode"] = code;
+            }
+            let text = unit(json!([]), json!([reply]));
             let result = accept_unit(&text, &[frame("t1", "联系入口")], &catalog(&[])).unwrap();
-            assert_eq!(
-                accepted(&result.targets[0]).result_json(Uuid::nil(), &|_| None)["reasonCode"],
-                expected
-            );
+            let stored = accepted(&result.targets[0]).result_json(Uuid::nil(), &|_| None);
+            assert_eq!(stored.get("reasonCode"), expected.as_ref());
         }
     }
 

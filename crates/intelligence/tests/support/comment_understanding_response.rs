@@ -42,13 +42,20 @@ pub fn response(request: &Value) -> Value {
                 (true, false) => json!("没有可提取的内容"),
                 (false, _) => Value::Null,
             };
-            json!({
+            let mut reply = json!({
                 "targetKey": target["targetKey"],
                 "outcome": if signals.is_empty() { "no_signal" } else { "signals" },
                 "reason": reason,
                 "reasonCode": if signals.is_empty() && text.contains("合成咨询入口") { json!("promotion") } else { Value::Null },
                 "signals": signals,
-            })
+            });
+            if text.contains("旧式引流夹具") || text.contains("显式空值夹具") {
+                reply["reason"] = json!("引流话术");
+            }
+            if text.contains("旧式引流夹具") {
+                reply.as_object_mut().unwrap().remove("reasonCode");
+            }
+            reply
         })
         .collect();
     json!({

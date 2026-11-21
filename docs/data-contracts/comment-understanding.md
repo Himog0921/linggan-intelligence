@@ -47,7 +47,7 @@
 
 `outcome`、`reason`、`reasonCode`、`signals[]`（`kind`、`proposition`、`sourceRef`、`evidenceSpan{start,end}`、`problemFrame`（恒为 null）、`eligibilityState`、`eligibilityReason`、新增 `problemRef`）、`droppedSignals`。
 
-只有 `no_signal` 才能保存 `reasonCode = promotion`。其余结果使用 null。评论目录优先读取该字段。缺少该字段的旧结果使用有限的正向理由匹配。
+只有 `no_signal` 才能保存 `reasonCode = promotion`。其余新格式结果使用 null。兼容仍省略该字段的旧格式响应，结果也保留缺省。评论目录优先读取该字段，只有缺少该字段时才使用有限的正向理由匹配。
 
 信号序号是它在 `signals[]` 中的下标，对应 `linggan_comment_problem_membership.signal_ordinal`（0–11）。
 

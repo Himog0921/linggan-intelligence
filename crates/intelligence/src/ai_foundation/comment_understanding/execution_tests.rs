@@ -1079,12 +1079,36 @@ async fn resource_requests_share_one_need_and_bare_keywords_do_not_support_it() 
             .await;
         selections.push(selection(work, comment));
     }
+    for (id, text) in [
+        ("legacy", "旧式引流夹具"),
+        ("explicit-null", "显式空值夹具"),
+    ] {
+        let comment = env.comment("resources", id, text, id).await;
+        selections.push(selection(work, comment));
+    }
     let (_, batch) = env.run(&selections, false).await;
     env.settle(batch).await;
     assert_eq!(
         env.problems().await,
         vec![("获取学习记录表".into(), "formal".into(), 4, 4, 4, 1)]
     );
+    crate::comment_study_catalog::refresh_clean_cache(&env.db, support::D, 200)
+        .await
+        .unwrap();
+    let promotions = crate::comment_study_catalog::read_comment_catalog(
+        &env.db,
+        &serde_json::from_value(json!({
+            "domain": support::D,
+            "workRef": work,
+            "signalKind": "promotion",
+        }))
+        .unwrap(),
+    )
+    .await
+    .unwrap();
+    let promotions = promotions["items"].as_array().unwrap();
+    assert_eq!(promotions.len(), 1);
+    assert_eq!(promotions[0]["commentKey"]["commentExternalId"], "legacy");
     assert!(
         env.unit_requests()[0]["responseRequirements"]
             .as_str()
