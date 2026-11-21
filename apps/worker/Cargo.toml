@@ -65,3 +65,7 @@ path = "src/bin/creation_recovery.rs"
 [[bin]]
 name = "linggan-opportunity"
 path = "src/bin/opportunity.rs"
+
+[[bin]]
+name = "linggan-ops-content-lens"
+path = "src/bin/ops_content_lens.rs"

@@ -26,6 +26,7 @@ pub use topic_workspace::{
 
 pub const INTELLIGENCE_IMPLEMENTED: bool = true;
 
+pub mod ops_content_lens;
 pub mod ops_ledger;
 
 pub mod content_workbench;
