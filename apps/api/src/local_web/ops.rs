@@ -9,6 +9,9 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/ops", get(entry))
         .merge(super::ops_api::routes())
         .merge(super::ops_overview_api::routes())
+        .merge(super::ops_content_lens_api::routes(
+            linggan_intelligence::ops_content_lens::enabled_from_env(),
+        ))
         .merge(super::ops_native_api::routes())
         .merge(super::ops_sync_api::routes())
         .layer(axum::middleware::from_fn(

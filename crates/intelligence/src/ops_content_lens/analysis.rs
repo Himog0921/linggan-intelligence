@@ -19,7 +19,7 @@ pub struct LabelMethod {
     pub prompt_version_ref: Uuid,
 }
 
-#[derive(Debug, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum LabelDimension {
     Moment,
@@ -28,7 +28,7 @@ pub enum LabelDimension {
     Audience,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectiveLabel {
     pub value: String,
@@ -64,7 +64,7 @@ pub struct SourcedCount {
 pub struct PublicationInput {
     pub title_key: String,
     pub account_ref: Option<Uuid>,
-    pub business_date: String,
+    pub business_date: Option<String>,
     pub labels: BTreeMap<LabelDimension, EffectiveLabel>,
     pub views: SourcedCount,
     pub comments: SourcedCount,
@@ -82,6 +82,9 @@ pub struct AnalysisInput {
     pub total_publications: u64,
     pub with_title: u64,
     pub pending_titles: u64,
+    /// Completed audit contributing the quality gate for each source primary run.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub agreement_sources: BTreeMap<Uuid, Uuid>,
     pub publications: BTreeMap<Uuid, PublicationInput>,
 }
 

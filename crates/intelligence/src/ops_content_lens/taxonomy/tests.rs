@@ -142,3 +142,6 @@ async fn definitions_and_shared_publication_example() {
         .is_err()
     );
 }
+
+#[path = "../snapshot_test.rs"]
+mod snapshot_test;
