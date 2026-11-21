@@ -234,14 +234,25 @@ async fn synthetic_executor_runs_primary_audit_and_withholds_invalid_shard() {
     .fetch_one(db.pool())
     .await
     .unwrap();
+    assert_eq!(
+        frozen["agreementSources"],
+        json!({primary.to_string():audit})
+    );
+    let quality: Value = sqlx::query_scalar(
+        "SELECT body->'quality'->'agreement' FROM linggan_ops_lens_snapshot WHERE snapshot_ref=$1",
+    )
+    .bind(snapshot.snapshot_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(quality.as_array().unwrap().len(), 4);
     assert!(
-        frozen["agreements"]
+        quality
             .as_array()
             .unwrap()
             .iter()
             .all(|a| a["runRef"] == json!(primary) && a["auditRunRef"] == json!(audit))
     );
-    assert_eq!(frozen["agreements"].as_array().unwrap().len(), 4);
     let plan = super::plan(&db).await.unwrap();
     assert_eq!((plan.reused_titles, plan.pending_titles), (3, 0));
     let mut more = initial.to_vec();
