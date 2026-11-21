@@ -7,14 +7,23 @@ use linggan_intelligence::ops_content_lens::{LensDefinitionError, SnapshotScope,
 
 pub(super) fn routes(enabled: bool) -> Router<LocalWebState> {
     if !enabled {
-        return Router::new().route(
-            "/api/local/ops/content-lens/snapshots",
-            post(|| async {
-                local_read_json_error(StatusCode::NOT_FOUND, "ops_content_lens_disabled")
-            }),
-        );
+        return Router::new()
+            .route(
+                "/api/local/ops/content-lens/runs",
+                post(|| async {
+                    local_read_json_error(StatusCode::NOT_FOUND, "ops_content_lens_disabled")
+                }),
+            )
+            .route(
+                "/api/local/ops/content-lens/snapshots",
+                post(|| async {
+                    local_read_json_error(StatusCode::NOT_FOUND, "ops_content_lens_disabled")
+                }),
+            );
     }
-    Router::new().route("/api/local/ops/content-lens/snapshots", post(generate))
+    Router::new()
+        .route("/api/local/ops/content-lens/runs", post(start))
+        .route("/api/local/ops/content-lens/snapshots", post(generate))
 }
 
 async fn generate(
@@ -89,4 +98,29 @@ mod tests {
             );
         }
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StartRun {
+    command_ref: uuid::Uuid,
+}
+
+async fn start(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    body: Result<Json<StartRun>, JsonRejection>,
+) -> Response {
+    if let Err(response) = super::ops_overview_api::require_admin(&state, &headers).await {
+        return response;
+    }
+    let Some(db) = state.database.database() else {
+        return super::ops_api::not_connected();
+    };
+    let Ok(Json(request)) = body else {
+        return local_read_json_error(StatusCode::BAD_REQUEST, "ops_lens_invalid_run");
+    };
+    super::ai_settings::respond(
+        linggan_intelligence::ops_content_lens::label::start(db, request.command_ref).await,
+    )
 }

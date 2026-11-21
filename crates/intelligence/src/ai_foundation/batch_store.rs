@@ -68,6 +68,7 @@ pub enum InputRef {
     CreatorWorkResearch {
         request_ref: Uuid,
     },
+    OpsTitleLabel { run_ref: Uuid, shard_index: u32 },
     CommentResearchUnit {
         unit_ref: Uuid,
     },
@@ -125,6 +126,7 @@ impl InputRef {
                 task == TaskKey::CreatorAccountResearch && !trial
             }
             Self::CreatorWorkResearch { .. } => task == TaskKey::CreatorResearch && !trial,
+            Self::OpsTitleLabel { .. } => task == TaskKey::OpsTitleLabel && !trial,
             Self::CommentResearchUnit { .. } => task == TaskKey::CommentUnderstanding && !trial,
             Self::CommentProblemConsolidation { .. } => {
                 task == TaskKey::CommentProblemConsolidation && !trial
@@ -188,7 +190,7 @@ impl BatchKind {
             | TaskKey::WorkComparison
             | TaskKey::CreatorResearch
             | TaskKey::CreatorAccountResearch
-            | TaskKey::CommentUnderstanding => self == Self::Interactive,
+            | TaskKey::OpsTitleLabel | TaskKey::CommentUnderstanding => self == Self::Interactive,
             TaskKey::WritingLegacy
             | TaskKey::CreationTitle
             | TaskKey::WritingAssistant
@@ -328,6 +330,7 @@ pub async fn create_batch(
                 | TaskKey::CreatorResearch
                 | TaskKey::CreatorAccountResearch
                 | TaskKey::CommentUnderstanding
+                | TaskKey::OpsTitleLabel
                 | TaskKey::CommentProblemConsolidation
         )
     {

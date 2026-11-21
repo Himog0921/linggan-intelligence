@@ -84,6 +84,10 @@ pub async fn claim_next(
     db: &Database,
     owner: ExecutorFence,
 ) -> Result<Option<ClaimedItem>, ExecutorError> {
+    claim_with_lens(db,owner,crate::ops_content_lens::enabled_from_env()).await
+}
+
+pub(super) async fn claim_with_lens(db:&Database,owner:ExecutorFence,lens_enabled:bool)->Result<Option<ClaimedItem>,ExecutorError>{
     let mut tx = owner.begin(db, true).await?;
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,4540139))")
         .bind(owner.instance_ref().to_string())
@@ -94,7 +98,7 @@ pub async fn claim_next(
         return Ok(None);
     }
     let claim_sql = concat!(
-        "SELECT item.item_ref,item.batch_ref,item.position,item.input_ref,b.task_key,b.task_config_ref,b.kind,c.lease_generation FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item item USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_control bc USING(batch_ref) JOIN linggan_ai_task t ON t.task_key=b.task_key JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=b.task_config_ref WHERE c.state='pending' AND c.next_attempt_at<=clock_timestamp() AND bc.state='open' AND NOT bc.cancel_requested AND t.lifecycle='active' AND t.task_key IN ('content_understanding','content_understanding_deep','model_probe','writing_legacy','creation_title','ocr_recognition','work_comparison','creator_research','comment_understanding','comment_problem_consolidation','creator_account_research','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review') AND cfg.execution_contract=t.handler_contract AND c.attempt_count<$1 AND item.position<(bc.last_round_no+1)*$2 AND NOT EXISTS(SELECT 1 FROM linggan_ai_control switch WHERE switch.scope_key IN ('global','executor','task:'||b.task_key) AND NOT switch.enabled) AND (b.task_key<>'ocr_recognition' OR NOT EXISTS(SELECT 1 FROM linggan_ai_batch_item previous JOIN linggan_ai_batch_item_control previous_control USING(item_ref) WHERE previous.batch_ref=b.batch_ref AND previous.position<item.position AND (previous_control.state NOT IN('succeeded','failed','skipped','cancelled') OR previous_control.failure_code='ai_dispatch_unknown'))) AND NOT EXISTS(SELECT 1 FROM linggan_topic_research_stage current_stage JOIN linggan_topic_research_stage prior ON prior.window_ref=current_stage.window_ref AND prior.stage_number<current_stage.stage_number JOIN linggan_ai_batch_item_control pc ON pc.item_ref=prior.item_ref WHERE current_stage.item_ref=item.item_ref AND pc.state NOT IN('succeeded','failed','skipped','cancelled'))",
+        "SELECT item.item_ref,item.batch_ref,item.position,item.input_ref,b.task_key,b.task_config_ref,b.kind,c.lease_generation FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item item USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_control bc USING(batch_ref) JOIN linggan_ai_task t ON t.task_key=b.task_key JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=b.task_config_ref WHERE c.state='pending' AND c.next_attempt_at<=clock_timestamp() AND bc.state='open' AND NOT bc.cancel_requested AND t.lifecycle='active' AND t.task_key IN ('content_understanding','content_understanding_deep','model_probe','writing_legacy','creation_title','ocr_recognition','work_comparison','creator_research','comment_understanding','comment_problem_consolidation','ops_title_label','creator_account_research','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review') AND (b.task_key<>'ops_title_label' OR $3) AND cfg.execution_contract=t.handler_contract AND c.attempt_count<$1 AND item.position<(bc.last_round_no+1)*$2 AND NOT EXISTS(SELECT 1 FROM linggan_ai_control switch WHERE switch.scope_key IN ('global','executor','task:'||b.task_key) AND NOT switch.enabled) AND (b.task_key<>'ocr_recognition' OR NOT EXISTS(SELECT 1 FROM linggan_ai_batch_item previous JOIN linggan_ai_batch_item_control previous_control USING(item_ref) WHERE previous.batch_ref=b.batch_ref AND previous.position<item.position AND (previous_control.state NOT IN('succeeded','failed','skipped','cancelled') OR previous_control.failure_code='ai_dispatch_unknown'))) AND NOT EXISTS(SELECT 1 FROM linggan_topic_research_stage current_stage JOIN linggan_topic_research_stage prior ON prior.window_ref=current_stage.window_ref AND prior.stage_number<current_stage.stage_number JOIN linggan_ai_batch_item_control pc ON pc.item_ref=prior.item_ref WHERE current_stage.item_ref=item.item_ref AND pc.state NOT IN('succeeded','failed','skipped','cancelled'))",
         " AND NOT EXISTS(SELECT 1 FROM linggan_model_config mc
           JOIN linggan_model_entry me ON me.model_ref=mc.model_ref
           JOIN linggan_model_connection_version mv ON mv.version_ref=me.connection_version_ref
@@ -106,6 +110,7 @@ pub async fn claim_next(
     let row = sqlx::query(claim_sql)
         .bind(AI_LIMITS.max_attempts as i32)
         .bind(AI_LIMITS.round_size as i32)
+        .bind(lens_enabled)
         .fetch_optional(&mut *tx)
         .await?;
     let Some(row) = row else { return Ok(None) };

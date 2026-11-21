@@ -12,6 +12,12 @@ pub(crate) async fn check_queue_input_scope(
     config: Uuid,
     input: &InputRef,
 ) -> Result<(), FoundationError> {
+    if task == TaskKey::OpsTitleLabel {
+        if !matches!(input, InputRef::OpsTitleLabel {..}) {
+            return Err(FoundationError::Invalid);
+        }
+        return require_egress(tx,task,config,"own_published_title","egress_not_approved").await;
+    }
     if task == TaskKey::CommentProblemConsolidation {
         if !matches!(input, InputRef::CommentProblemConsolidation { .. }) {
             return Err(FoundationError::Invalid);

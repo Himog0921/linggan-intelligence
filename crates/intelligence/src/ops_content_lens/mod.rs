@@ -3,6 +3,9 @@ mod agreement;
 mod analysis;
 pub use agreement::{Agreement, agreement};
 mod taxonomy;
+pub mod label;
+mod example_titles;
+pub use example_titles::load_taxonomy_file;
 
 pub use analysis::*;
 use linggan_storage_postgres::Database;
