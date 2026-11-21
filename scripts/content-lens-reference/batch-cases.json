@@ -1,0 +1,26 @@
+{
+  "method": {"taxonomyVersion":1,"promptVersion":1,"taskConfigVersion":1},
+  "titleKeys": ["745f903306451d46932ba27e101cc246", "0b6bafce1f42170aa284974c0c6a1a84"],
+  "shards": [
+    {"ref":"first","inputIndices":[0]},
+    {"ref":"second","inputIndices":[1]}
+  ],
+  "validLabel": {"moment":"parent_family_state","offer":"mechanism_explainer","situation":"parent_depleted","audience":"parent_adhd_child","confidence":"high"},
+  "secondShardOutputs": [
+    {"case":"valid","rows":[{"keyIndex":1}],"accepted":true},
+    {"case":"missing","rows":[],"accepted":false},
+    {"case":"extra","rows":[{"keyIndex":1},{"keyIndex":0}],"accepted":false},
+    {"case":"duplicate","rows":[{"keyIndex":1},{"keyIndex":1}],"accepted":false},
+    {"case":"unknownValue","rows":[{"keyIndex":1,"offer":"not_in_taxonomy"}],"accepted":false}
+  ],
+  "submissions": [
+    {"type":"primary","titles":[0,1],"parent":null,"expectedBatch":"batch-A"},
+    {"type":"primary","titles":[0,1],"parent":null,"expectedBatch":"batch-A"},
+    {"type":"audit","titles":[0,1],"parent":"batch-A","expectedBatch":"batch-B"}
+  ],
+  "progress": [
+    {"shards":["pending","pending"],"completed":0,"failed":0,"total":2},
+    {"shards":["completed","failed"],"completed":1,"failed":1,"total":2},
+    {"shards":["completed","completed"],"completed":2,"failed":0,"total":2}
+  ]
+}

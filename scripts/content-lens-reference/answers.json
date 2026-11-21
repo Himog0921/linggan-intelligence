@@ -1,0 +1,965 @@
+{
+  "sharedSnapshots": {
+    "initial": {
+      "titleKeys": [
+        "745f903306451d46932ba27e101cc246"
+      ],
+      "structureMembers": [
+        "p01",
+        "p02"
+      ],
+      "offers": {
+        "mechanism_explainer": 2
+      },
+      "readingDenominator": [
+        "p01"
+      ],
+      "overThousand": [
+        "p01"
+      ],
+      "creationLinks": {
+        "p01": "work-1",
+        "p02": "work-2"
+      },
+      "readings": {
+        "p01": [
+          2,
+          1200
+        ],
+        "p02": [
+          null,
+          null
+        ]
+      },
+      "midRate": {
+        "numerator": 1,
+        "denominator": 1,
+        "value": null,
+        "low": null,
+        "high": null,
+        "reason": "below_min_n"
+      }
+    },
+    "filled": {
+      "titleKeys": [
+        "745f903306451d46932ba27e101cc246"
+      ],
+      "structureMembers": [
+        "p01",
+        "p02"
+      ],
+      "offers": {
+        "mechanism_explainer": 2
+      },
+      "readingDenominator": [
+        "p01",
+        "p02"
+      ],
+      "overThousand": [
+        "p01",
+        "p02"
+      ],
+      "creationLinks": {
+        "p01": "work-1",
+        "p02": "work-2"
+      },
+      "readings": {
+        "p01": [
+          2,
+          1200
+        ],
+        "p02": [
+          1,
+          5000
+        ]
+      },
+      "midRate": {
+        "numerator": 2,
+        "denominator": 2,
+        "value": null,
+        "low": null,
+        "high": null,
+        "reason": "below_min_n"
+      }
+    },
+    "cleared": {
+      "titleKeys": [
+        "745f903306451d46932ba27e101cc246"
+      ],
+      "structureMembers": [
+        "p01",
+        "p02"
+      ],
+      "offers": {
+        "mechanism_explainer": 2
+      },
+      "readingDenominator": [
+        "p01"
+      ],
+      "overThousand": [
+        "p01"
+      ],
+      "creationLinks": {
+        "p01": "work-1",
+        "p02": "work-2"
+      },
+      "readings": {
+        "p01": [
+          2,
+          1200
+        ],
+        "p02": [
+          2,
+          null
+        ]
+      },
+      "midRate": {
+        "numerator": 1,
+        "denominator": 1,
+        "value": null,
+        "low": null,
+        "high": null,
+        "reason": "below_min_n"
+      }
+    },
+    "adjudicated": {
+      "titleKeys": [
+        "745f903306451d46932ba27e101cc246"
+      ],
+      "structureMembers": [
+        "p01",
+        "p02"
+      ],
+      "offers": {
+        "actionable_method": 2
+      },
+      "readingDenominator": [
+        "p01"
+      ],
+      "overThousand": [
+        "p01"
+      ],
+      "creationLinks": {
+        "p01": "work-1",
+        "p02": "work-2"
+      },
+      "readings": {
+        "p01": [
+          2,
+          1200
+        ],
+        "p02": [
+          2,
+          null
+        ]
+      },
+      "midRate": {
+        "numerator": 1,
+        "denominator": 1,
+        "value": null,
+        "low": null,
+        "high": null,
+        "reason": "below_min_n"
+      }
+    }
+  },
+  "boundaryEffects": {
+    "19": {
+      "publications": 20,
+      "withViews": 19,
+      "medianViews": 888,
+      "midRate": {
+        "numerator": 8,
+        "denominator": 19,
+        "value": null,
+        "low": null,
+        "high": null,
+        "reason": "below_min_n"
+      },
+      "highCount": 3,
+      "activeCommentRate": {
+        "numerator": 10,
+        "denominator": 15,
+        "value": null,
+        "low": null,
+        "high": null,
+        "reason": "below_min_n"
+      },
+      "commentsPerThousandViews": {
+        "publications": 14,
+        "reason": null,
+        "value": 3.9371628804283634
+      }
+    },
+    "20": {
+      "publications": 21,
+      "withViews": 20,
+      "medianViews": 844.0,
+      "midRate": {
+        "numerator": 8,
+        "denominator": 20,
+        "value": 0.4,
+        "low": 0.21880396741419272,
+        "high": 0.613422057684794,
+        "reason": null
+      },
+      "highCount": 3,
+      "activeCommentRate": {
+        "numerator": 10,
+        "denominator": 15,
+        "value": null,
+        "low": null,
+        "high": null,
+        "reason": "below_min_n"
+      },
+      "commentsPerThousandViews": {
+        "publications": 14,
+        "reason": null,
+        "value": 3.9371628804283634
+      }
+    },
+    "21": {
+      "publications": 22,
+      "withViews": 21,
+      "medianViews": 800,
+      "midRate": {
+        "numerator": 8,
+        "denominator": 21,
+        "value": 0.38095238095238093,
+        "low": 0.20750767797982506,
+        "high": 0.5912170418449848,
+        "reason": null
+      },
+      "highCount": 3,
+      "activeCommentRate": {
+        "numerator": 11,
+        "denominator": 16,
+        "value": null,
+        "low": null,
+        "high": null,
+        "reason": "below_min_n"
+      },
+      "commentsPerThousandViews": {
+        "publications": 15,
+        "reason": null,
+        "value": 4.324579336373644
+      }
+    }
+  },
+  "structure": {
+    "moment": {
+      "parent_family_state": {
+        "publications": 6,
+        "share": 0.2727272727272727
+      },
+      "whole_parenting_approach": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "adhd_nature_prognosis": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "peer_social": {
+        "publications": 3,
+        "share": 0.13636363636363635
+      },
+      "discipline_communication": {
+        "publications": 3,
+        "share": 0.13636363636363635
+      },
+      "schooling_teacher": {
+        "publications": 4,
+        "share": 0.18181818181818182
+      },
+      "emotion_meltdown": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "attention_execution": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "self_esteem_identity": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "homework_study": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "holiday_break": {
+        "publications": 3,
+        "share": 0.13636363636363635
+      },
+      "motivation_drive": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "identification_treatment": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "defiance_conduct": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "screens_gaming": {
+        "publications": 2,
+        "share": 0.09090909090909091
+      },
+      "other": {
+        "publications": 1,
+        "share": 0.045454545454545456
+      },
+      "unclear": {
+        "publications": 0,
+        "share": 0.0
+      }
+    },
+    "offer": {
+      "stance_advocacy": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "mechanism_explainer": {
+        "publications": 5,
+        "share": 0.22727272727272727
+      },
+      "vent_resonance": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "experience_lesson": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "actionable_method": {
+        "publications": 5,
+        "share": 0.22727272727272727
+      },
+      "help_seeking_question": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "dilemma_discussion": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "urgency_warning": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "serial_diary_log": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "expert_digest": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "model_family_practice": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "checklist_tool_resource": {
+        "publications": 5,
+        "share": 0.22727272727272727
+      },
+      "other": {
+        "publications": 5,
+        "share": 0.22727272727272727
+      },
+      "unclear": {
+        "publications": 2,
+        "share": 0.09090909090909091
+      }
+    },
+    "situation": {
+      "puzzled_or_misreading_child": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "daily_management_struggle": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "parent_depleted": {
+        "publications": 22,
+        "share": 1.0
+      },
+      "choosing_parenting_route": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "proactive_skill_building": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "long_break_at_home": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "retrospective_turnaround": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "accompany_home_intervention": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "trajectory_anxiety": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "post_diagnosis_orienting": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "child_peer_struggle": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "school_friction": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "facing_stigma": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "family_misaligned": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "suspecting_identifying": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "other": {
+        "publications": 0,
+        "share": 0.0
+      },
+      "unclear": {
+        "publications": 0,
+        "share": 0.0
+      }
+    }
+  },
+  "coverage": {
+    "emptyCells": 167,
+    "sparseCells": 12,
+    "top10Share": 0.5454545454545454,
+    "top10Publications": 12,
+    "labeledPublications": 22
+  },
+  "effects": {
+    "moment": {
+      "discipline_communication": {
+        "publications": 3,
+        "withViews": 3,
+        "medianViews": 888,
+        "midRate": {
+          "numerator": 1,
+          "denominator": 3,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 0,
+        "activeCommentRate": {
+          "numerator": 0,
+          "denominator": 1,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 1,
+          "reason": null,
+          "value": 0.0
+        },
+        "withinAccountResidual": {
+          "publications": 3,
+          "value": 0.6392120829730888
+        }
+      },
+      "holiday_break": {
+        "publications": 3,
+        "withViews": 3,
+        "medianViews": 800,
+        "midRate": {
+          "numerator": 1,
+          "denominator": 3,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 1,
+        "activeCommentRate": {
+          "numerator": 3,
+          "denominator": 3,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 3,
+          "reason": null,
+          "value": 5.306799336650083
+        },
+        "withinAccountResidual": {
+          "publications": 3,
+          "value": 0.7279330233019472
+        }
+      },
+      "other": {
+        "publications": 1,
+        "withViews": 1,
+        "medianViews": 650,
+        "midRate": {
+          "numerator": 0,
+          "denominator": 1,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 0,
+        "activeCommentRate": {
+          "numerator": 1,
+          "denominator": 1,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 1,
+          "reason": null,
+          "value": 18.46153846153846
+        },
+        "withinAccountResidual": {
+          "publications": 0,
+          "value": null
+        }
+      },
+      "parent_family_state": {
+        "publications": 6,
+        "withViews": 5,
+        "medianViews": 320,
+        "midRate": {
+          "numerator": 2,
+          "denominator": 5,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 0,
+        "activeCommentRate": {
+          "numerator": 1,
+          "denominator": 4,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 3,
+          "reason": null,
+          "value": 0.0
+        },
+        "withinAccountResidual": {
+          "publications": 4,
+          "value": -1.650062850694157
+        }
+      },
+      "peer_social": {
+        "publications": 3,
+        "withViews": 3,
+        "medianViews": 50,
+        "midRate": {
+          "numerator": 1,
+          "denominator": 3,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 0,
+        "activeCommentRate": {
+          "numerator": 0,
+          "denominator": 1,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 1,
+          "reason": null,
+          "value": 0.0
+        },
+        "withinAccountResidual": {
+          "publications": 2,
+          "value": -1.7683690886257284
+        }
+      },
+      "schooling_teacher": {
+        "publications": 4,
+        "withViews": 4,
+        "medianViews": 1549.5,
+        "midRate": {
+          "numerator": 2,
+          "denominator": 4,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 1,
+        "activeCommentRate": {
+          "numerator": 4,
+          "denominator": 4,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 4,
+          "reason": null,
+          "value": 4.473363155754372
+        },
+        "withinAccountResidual": {
+          "publications": 3,
+          "value": 2.11148227794794
+        }
+      },
+      "screens_gaming": {
+        "publications": 2,
+        "withViews": 2,
+        "medianViews": 3008.0,
+        "midRate": {
+          "numerator": 1,
+          "denominator": 2,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 1,
+        "activeCommentRate": {
+          "numerator": 2,
+          "denominator": 2,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 2,
+          "reason": null,
+          "value": 3.6569148936170213
+        },
+        "withinAccountResidual": {
+          "publications": 2,
+          "value": -0.14944628632041912
+        }
+      }
+    },
+    "offer": {
+      "actionable_method": {
+        "publications": 5,
+        "withViews": 5,
+        "medianViews": 16,
+        "midRate": {
+          "numerator": 2,
+          "denominator": 5,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 2,
+        "activeCommentRate": {
+          "numerator": 3,
+          "denominator": 4,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 4,
+          "reason": null,
+          "value": 2.7278151905208423
+        },
+        "withinAccountResidual": {
+          "publications": 5,
+          "value": -0.3378015469083279
+        }
+      },
+      "checklist_tool_resource": {
+        "publications": 5,
+        "withViews": 5,
+        "medianViews": 888,
+        "midRate": {
+          "numerator": 2,
+          "denominator": 5,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 1,
+        "activeCommentRate": {
+          "numerator": 2,
+          "denominator": 4,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 4,
+          "reason": null,
+          "value": 2.710027100271003
+        },
+        "withinAccountResidual": {
+          "publications": 5,
+          "value": 0.37806972150678747
+        }
+      },
+      "mechanism_explainer": {
+        "publications": 5,
+        "withViews": 4,
+        "medianViews": 999.5,
+        "midRate": {
+          "numerator": 2,
+          "denominator": 4,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 0,
+        "activeCommentRate": {
+          "numerator": 2,
+          "denominator": 3,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 2,
+          "reason": null,
+          "value": 12.012012012012011
+        },
+        "withinAccountResidual": {
+          "publications": 4,
+          "value": 0.025153093824414663
+        }
+      },
+      "other": {
+        "publications": 5,
+        "withViews": 5,
+        "medianViews": 800,
+        "midRate": {
+          "numerator": 2,
+          "denominator": 5,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 0,
+        "activeCommentRate": {
+          "numerator": 3,
+          "denominator": 4,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 4,
+          "reason": null,
+          "value": 7.470885519666007
+        },
+        "withinAccountResidual": {
+          "publications": 3,
+          "value": -0.10065108276331743
+        }
+      },
+      "unclear": {
+        "publications": 2,
+        "withViews": 2,
+        "medianViews": 43.5,
+        "midRate": {
+          "numerator": 0,
+          "denominator": 2,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "highCount": 0,
+        "activeCommentRate": {
+          "numerator": 1,
+          "denominator": 1,
+          "value": null,
+          "low": null,
+          "high": null,
+          "reason": "below_min_n"
+        },
+        "commentsPerThousandViews": {
+          "publications": 1,
+          "reason": null,
+          "value": 270.27027027027026
+        },
+        "withinAccountResidual": {
+          "publications": 0,
+          "value": null
+        }
+      }
+    }
+  },
+  "quality": {
+    "publications": 22,
+    "titleKeys": 21,
+    "withViews": 21,
+    "latestPublishedDate": "2026-01-22"
+  },
+  "mixedRunAgreement": {
+    "dimension": "offer",
+    "structurePublications": 22,
+    "effect": null,
+    "reason": "agreement_below_threshold"
+  },
+  "variance": {
+    "account": {
+      "observations": 21,
+      "observed": 0.08054131656624582,
+      "nullMean": 0.0990184529164312,
+      "excess": -0.018477136350185386,
+      "pValue": 0.4672663668165917,
+      "reason": null
+    },
+    "offer": {
+      "observations": 21,
+      "observed": 0.17991268633579993,
+      "nullMean": 0.20404455985876008,
+      "excess": -0.024131873522960146,
+      "pValue": 0.511744127936032,
+      "reason": null
+    },
+    "moment": {
+      "observations": 21,
+      "observed": 0.21781751956338555,
+      "nullMean": 0.2981558785388526,
+      "excess": -0.08033835897546707,
+      "pValue": 0.6746626686656672,
+      "reason": null
+    }
+  },
+  "withinAccountVariance": {
+    "offer": {
+      "observations": 17,
+      "observed": 0.013381395899612717,
+      "nullMean": 0.14288298772829222,
+      "excess": -0.1295015918286795,
+      "pValue": 0.9760119940029985,
+      "reason": null
+    },
+    "moment": {
+      "observations": 17,
+      "observed": 0.33886327480187173,
+      "nullMean": 0.3162737561149925,
+      "excess": 0.02258951868687925,
+      "pValue": 0.42278860569715143,
+      "reason": null
+    }
+  },
+  "agreement": {
+    "belowThreshold": {
+      "sampleCount": 4,
+      "agreement": 0.75,
+      "kappa": 0.5,
+      "reason": null,
+      "meetsThreshold": false
+    },
+    "meetsThreshold": {
+      "sampleCount": 2,
+      "agreement": 1.0,
+      "kappa": 1.0,
+      "reason": null,
+      "meetsThreshold": true
+    },
+    "chanceIsOne": {
+      "sampleCount": 2,
+      "agreement": 1.0,
+      "kappa": null,
+      "reason": "kappa_undefined",
+      "meetsThreshold": false
+    },
+    "onlyExamples": {
+      "sampleCount": 0,
+      "agreement": null,
+      "kappa": null,
+      "reason": "no_data",
+      "meetsThreshold": false
+    }
+  },
+  "auditSample3": [
+    "456dbdc808dfaa98f5ed4f82c209612e",
+    "0b6bafce1f42170aa284974c0c6a1a84",
+    "2cad8457a93ea2996722d46cbe964c0e"
+  ],
+  "zeroVariance": {
+    "observations": 1,
+    "observed": null,
+    "nullMean": null,
+    "excess": null,
+    "pValue": null,
+    "reason": "zero_variance"
+  },
+  "zeroTotalViews": {
+    "publications": 1,
+    "reason": "zero_total_views",
+    "value": null
+  },
+  "emptyGroupEffect": {
+    "publications": 0,
+    "withViews": 0,
+    "medianViews": null,
+    "midRate": {
+      "numerator": 0,
+      "denominator": 0,
+      "value": null,
+      "low": null,
+      "high": null,
+      "reason": "no_data"
+    },
+    "highCount": 0,
+    "activeCommentRate": {
+      "numerator": 0,
+      "denominator": 0,
+      "value": null,
+      "low": null,
+      "high": null,
+      "reason": "no_data"
+    },
+    "commentsPerThousandViews": {
+      "publications": 0,
+      "reason": "no_data",
+      "value": null
+    }
+  }
+}

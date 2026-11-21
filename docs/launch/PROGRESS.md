@@ -8,7 +8,7 @@
 
 工作包的定义见[任务编排](ORCHESTRATION.md)。追加条目时写清：做了什么、验证命令的实际输出摘要、未验证的边界、需要 Mog 决定的事。
 
-## 工作包状态
+## 工作包状态（2026-11-20 基线，后续以分包回执为准）
 
 | 包 | 状态 | 负责人 | PR |
 |---|---|---|---|
@@ -25,6 +25,13 @@
 | D1 DEC-0009 修订段 | 未开始 | — | — |
 | D2 L0 定义统一 | 未开始 | — | — |
 | D3 文档减重 | 未开始 | — | — |
+
+## 2026-11-20 · L0 合成测试数据
+
+- [合成输入](../../scripts/content-lens-reference/synthetic.json)含 22 条发布、21 个标题键。第一波共用样例产生 1 个标题键、2 条结构样本，取最新阅读量 1,200，过千 1/1，比例与区间为空。
+- [统计答案](../../scripts/content-lens-reference/answers.json)覆盖分母 19/20/21、Wilson 区间、覆盖、账号残差、置换与复标一致性。低一致率案例保留结构并返回效果不可用。[分片与运行样例](../../scripts/content-lens-reference/batch-cases.json)记录非法输出、重复提交、独立复标与分片进度，供 L1c 对照。
+- 从仓库根目录执行 `python3 -B scripts/content-lens-reference/test_reference.py`，8 项通过。[参考脚本](../../scripts/content-lens-reference/reference.py)读取同目录合成输入，向标准输出打印答案。置换按发布引用排序，每项分析从种子 42 开始，账号内按账号键顺序打乱；[抽样算法](../../scripts/content-lens-reference/lens_stats.py)为 Park–Miller 16807 加拒绝采样的 Fisher–Yates，复标抽样按标题键排序，种子为 43。
+- 本包验收的是合成数值与契约样例。生产统计实现与私有回溯参照的核对归 L1d，运行与分片的持久化验收归 L1c。
 
 ## 2026-11-13 手册集初稿与回溯归类
 
