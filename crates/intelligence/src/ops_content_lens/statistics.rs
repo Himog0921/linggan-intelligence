@@ -205,7 +205,7 @@ pub(super) fn summarize(
         json!({"schemaVersion":"ops-content-lens.snapshot.v1","scope":{"domainRef":input.domain_ref,"publishedFrom":input.from,"publishedTo":input.to},
         "quality":{"publications":input.total_publications,"titled":input.with_title,"titleKeys":title_keys.len(),"pendingTitles":input.pending_titles,
             "withViews":with_views,"withViewsShare":(input.with_title>0).then(||with_views as f64/input.with_title as f64),
-            "latestPublishedDate":input.publications.values().map(|r|&r.business_date).max(),"agreement":agreements,"adjudicatedTitles":adjudicated.len()},
+            "latestPublishedDate":input.publications.values().filter_map(|r|r.business_date.as_deref()).max(),"agreement":agreements,"adjudicatedTitles":adjudicated.len()},
         "structure":structure,"coverage":coverage(&rows,vocab),"effect":{"grade":"hypothesis","byDimension":effects,"varianceShare":variances},"hypotheses":[]}),
     )
 }

@@ -132,7 +132,7 @@ pub(super) async fn build_for_task(
     };
     let input = read_input(&mut tx, &scope, method).await?;
     let series = agreements(&mut tx, &input, &m).await?;
-    let latest = input.publications.values().map(|r| &r.business_date).max();
+    let latest = input.publications.values().filter_map(|r| r.business_date.as_deref()).max();
     let stale_days: Option<i32> = sqlx::query_scalar(
         "SELECT (transaction_timestamp() AT TIME ZONE 'Asia/Shanghai')::date - $1::text::date",
     )
@@ -144,12 +144,8 @@ pub(super) async fn build_for_task(
     let mut frozen =
         serde_json::to_value(&input).map_err(|_| LensDefinitionError::InvalidDefinition)?;
     frozen["agreements"] = json!(series);
-    let hash = format!(
-        "{:x}",
-        Sha256::digest(
-            serde_json::to_vec(&frozen).map_err(|_| LensDefinitionError::InvalidDefinition)?
-        )
-    );
+    let hash:String = Sha256::digest(serde_json::to_vec(&frozen).map_err(|_|LensDefinitionError::InvalidDefinition)?)
+        .iter().map(|byte|format!("{byte:02x}")).collect();
     let find =
         "SELECT snapshot_ref FROM linggan_ops_lens_snapshot WHERE input_hash=$1 AND metric_ref=$2";
     if let Some(snapshot_ref) = sqlx::query_scalar(find)

@@ -42,7 +42,7 @@ pub(super) async fn read_input(
           AND ($3::text IS NULL OR coalesce(p.published_business_date,p.native_published_on)<=$3::text::date)
         ORDER BY p.publication_ref"#
     );
-    let raw = sqlx::query(&sql)
+    let raw = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(scope.domain_ref)
         .bind(&scope.from)
         .bind(&scope.to)

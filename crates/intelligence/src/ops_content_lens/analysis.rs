@@ -64,7 +64,7 @@ pub struct SourcedCount {
 pub struct PublicationInput {
     pub title_key: String,
     pub account_ref: Option<Uuid>,
-    pub business_date: String,
+    pub business_date: Option<String>,
     pub labels: BTreeMap<LabelDimension, EffectiveLabel>,
     pub views: SourcedCount,
     pub comments: SourcedCount,
