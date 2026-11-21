@@ -16,7 +16,7 @@ import { BATCH_STATE, MATERIAL, TASK_STATE, taskPresentationStage, budgetText, c
 import type { AiAction } from './useAiAction';
 import styles from './AiSettingsExperience.module.css';
 
-const ORDER = ['ocr_recognition', 'writing_legacy', 'creation_title', 'work_comparison', 'creator_research', 'creator_account_research', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_understanding', 'comment_problem_consolidation', 'topic_research', 'topic_research_extract_review', 'topic_research_resolve', 'topic_research_resolve_review', 'legacy_creator_discovery', 'legacy_topic_map'];
+const ORDER = ['ocr_recognition', 'writing_legacy', 'creation_title', 'work_comparison', 'creator_research', 'creator_account_research', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_understanding', 'comment_problem_consolidation', 'ops_title_label', 'topic_research', 'topic_research_extract_review', 'topic_research_resolve', 'topic_research_resolve_review', 'legacy_creator_discovery', 'legacy_topic_map'];
 const COPY: Record<string, { group: string; description: string }> = {
   ocr_recognition: { group: '图片文字', description: '手动识别当前作品的已有本地原图；保存模型配置不会发图，默认关闭。' },
   writing_legacy: { group: '内容工作台', description: '基于选中的作品材料，提供可审阅的写作建议与修改方案。' },
@@ -33,6 +33,7 @@ const COPY: Record<string, { group: string; description: string }> = {
   direction_proposal: { group: '市场洞察', description: '辅助提出值得验证的新切入点，而非自动立项。' },
   writing_assistant: { group: '内容工作台', description: '为内容工作台提供辅助写作支持。' },
   comment_understanding: { group: '评论研究', description: '按作品分单元理解评论，使用 L1 语境并保留原声依据。' },
+  ops_title_label: { group: '我方内容回溯', description: '按分类体系标注已发布笔记的标题。' },
   comment_problem_consolidation: { group: '评论研究', description: '判断候选是否重复，合并可撤销。' },
   comment_embedding: { group: '评论研究', description: '为评论语义召回提供本机向量支持。' },
   legacy_creator_discovery: { group: '历史工作', description: '旧版自动分析已退役；历史数据按现有规则保留。' },
@@ -46,7 +47,7 @@ const STATES: Record<string, { name: string; tone: string; note: string }> = {
   legacy: { name: '保留历史', tone: 'history', note: '仅保留历史' },
 };
 const MATERIAL_BY_TASK: Record<string, string[]> = {
-  ocr_recognition: ['manual_ocr_image'],
+  ops_title_label: ['own_published_title'], ocr_recognition: ['manual_ocr_image'],
   work_comparison: ['note_material'], creator_research: ['note_material'], creator_account_research: ['note_material', 'public_author_bio'], comment_understanding: ['note_material', 'comment_material'], comment_problem_consolidation: ['comment_material'], topic_research: ['note_material', 'comment_material'], topic_research_extract_review: ['note_material', 'comment_material'], topic_research_resolve: ['note_material', 'comment_material'], topic_research_resolve_review: ['note_material', 'comment_material'], direction_list_draft: ['note_material'], direction_proposal: ['note_material'],
   author_org_identity: ['public_author_bio'], writing_assistant: ['selected_writing_material'],
   writing_legacy: ['selected_writing_material'], creation_title: ['selected_writing_material'], model_probe: ['synthetic_probe'],
