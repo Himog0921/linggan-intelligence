@@ -1324,3 +1324,19 @@ async fn stored_session(
 
 #[path = "ops_auth_concurrency_tests.rs"]
 mod concurrency;
+
+#[tokio::test]
+#[ignore="isolated PostgreSQL sessions"]
+async fn title_run_route_respects_flag_and_admin_session(){
+    let url=std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let db=linggan_storage_postgres::testing::isolated_proof_schema(&url,"ops_lens_runs_http",full_schema_fixture::FULL_MIGRATIONS).await.unwrap();
+    let operator=active_member(db.pool(),"lens-operator@example.test","operator").await;
+    let cookie=fresh_session(db.pool(),operator).await;
+    let state=LocalWebState{database:LocalDatabaseState::Ready(Arc::new(db)),active_media_sessions:Arc::new(tokio::sync::Mutex::new(BTreeSet::new())),account_digest_key:None};
+    let path="/api/local/ops/content-lens/runs";
+    for (flag,status) in [(false,StatusCode::NOT_FOUND),(true,StatusCode::FORBIDDEN)]{
+        let router=super::ops_content_lens_api::routes(flag).with_state(state.clone());
+        let response=router.oneshot(authenticated_json_request(path,json!({"commandRef":Uuid::new_v4()}).to_string(),&cookie)).await.unwrap();
+        assert_eq!(response.status(),status);
+    }
+}

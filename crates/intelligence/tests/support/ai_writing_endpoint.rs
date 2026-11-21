@@ -52,7 +52,14 @@ impl Endpoint {
                             let comment_input=serde_json::from_str::<Value>(&prompt).ok();
                             let understanding=comment_input.as_ref().filter(|v|v["contract"]=="comment-understanding.v1");
                             let consolidation=comment_input.as_ref().filter(|v|v["contract"]=="comment-problem-consolidation.v1");
-                            let mut output=if probe {json!({"lingganProbe":"ok"})} else if let Some(request)=understanding {comment_understanding_response::response(request)} else if let Some(request)=consolidation {comment_understanding_response::consolidation(request)} else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["documents"].is_array()) {
+                            let lens=comment_input.as_ref().and_then(|v|v["titles"].as_array());
+                            let mut output=if let Some(titles)=lens {
+                                let labels:Vec<_>=titles.iter().filter(|r|r["title"]!="缺失行").map(|r|{
+                                    let key=if r["title"]=="合成乙" {"other"} else {"unclear"};
+                                    json!({"titleKey":r["titleKey"],"moment":key,"situation":key,"offer":key,"audience":key,"confidence":"high"})
+                                }).collect();
+                                json!({"labels":labels})
+                            } else if probe {json!({"lingganProbe":"ok"})} else if let Some(request)=understanding {comment_understanding_response::response(request)} else if let Some(request)=consolidation {comment_understanding_response::consolidation(request)} else if serde_json::from_str::<Value>(&prompt).ok().is_some_and(|v|v["documents"].is_array()) {
                                 let packet:Value=serde_json::from_str(&prompt).unwrap();
                                 let citation=|index:usize| {let entries=packet["documents"][index]["fragments"].as_array().unwrap();entries.iter().find(|f|f["content"]["kind"]=="table").unwrap_or(&entries[0])["id"].clone()};
                                 json!({"relation":"mostly_repeated","claims":[{"kind":"shared_point","statement":"两侧合成材料均有步骤说明。","targetCitations":[citation(0)],"referenceCitations":[citation(1)]}],"limitations":["synthetic loopback fixture only"]})

@@ -39,4 +39,3 @@ ALTER TABLE linggan_model_egress_event ADD CONSTRAINT ai_egress_material_task_va
  OR (task_key='ocr_quality_audit' AND material_class IN('synthetic_image_probe','ocr_quality_image'))
  OR (task_key='ocr_recognition' AND material_class='manual_ocr_image')
  OR (task_key='note_interpretation' AND material_class='comment_material'));
-

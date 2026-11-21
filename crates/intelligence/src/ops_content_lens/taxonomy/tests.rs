@@ -6,7 +6,7 @@ use serde_json::json;
 #[path = "../../../../../apps/api/src/local_web/full_schema_fixture.rs"]
 mod fixture;
 
-fn synthetic_taxonomy() -> Value {
+pub(crate) fn synthetic_taxonomy() -> Value {
     fn entries(keys: &[&str]) -> Vec<Value> {
         keys.iter().map(|key| json!({"key":key,"name":"样例","definition":"合成定义","include":"纳入条件","confusable_with":"区分说明","example_ids":[]})).collect()
     }
