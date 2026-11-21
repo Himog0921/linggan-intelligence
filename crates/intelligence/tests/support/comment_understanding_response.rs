@@ -26,6 +26,8 @@ pub fn response(request: &Value) -> Value {
             let text = target["researchText"].as_str().unwrap_or("");
             let signals = if text.contains("BADEVIDENCE") {
                 vec![json!({"kind":"belief","proposition":"评论者发表了看法","evidence":"原文里并没有这句话","problem":null})]
+            } else if text.contains("想领学习记录表") {
+                vec![json!({"kind":"need","proposition":"评论者想领取学习记录表","evidence":"想领学习记录表","problem":assignment(&catalog,"学习记录表","n4")})]
             } else if text.contains("催促") {
                 vec![json!({"kind":"need","proposition":"评论者的孩子需要催促才开始","evidence":"催促","problem":assignment(&catalog,"催促","n3")})]
             } else if text.contains("提醒") {
@@ -36,7 +38,7 @@ pub fn response(request: &Value) -> Value {
                 vec![]
             };
             let reason = match (signals.is_empty(), text.contains("合成咨询入口")) {
-                (true, true) => json!("广告/引流内容，非评论表达"),
+                (true, true) => json!("在邀请其他读者联系助理"),
                 (true, false) => json!("没有可提取的内容"),
                 (false, _) => Value::Null,
             };
@@ -44,6 +46,7 @@ pub fn response(request: &Value) -> Value {
                 "targetKey": target["targetKey"],
                 "outcome": if signals.is_empty() { "no_signal" } else { "signals" },
                 "reason": reason,
+                "reasonCode": if signals.is_empty() && text.contains("合成咨询入口") { json!("promotion") } else { Value::Null },
                 "signals": signals,
             })
         })
@@ -54,6 +57,7 @@ pub fn response(request: &Value) -> Value {
             {"newKey":"n1","label":"孩子需要每天有人提醒","actor":"家长","goal":"孩子能自己开始做事","barrier":"需要每天有人提醒才会开始","context":null},
             {"newKey":"n2","label":"孩子写作业磨蹭","actor":"家长","goal":"孩子能按时写完作业","barrier":"写作业时拖拖拉拉","context":null},
             {"newKey":"n3","label":"孩子需要家长催促","actor":"家长","goal":"孩子能自己开始做事","barrier":"需要家长催促才会开始","context":null},
+            {"newKey":"n4","label":"获取学习记录表","actor":"资料使用者","goal":"获取学习记录表","barrier":"尚未拿到学习记录表","context":null},
         ],
         "targets": targets,
     })
@@ -73,6 +77,8 @@ pub fn consolidation(request: &Value) -> Value {
             let matches = |term| labels.iter().any(|label| label.contains(term));
             let verdict = if matches("提醒") && matches("催促") {
                 "same"
+            } else if matches("提醒") {
+                "different"
             } else {
                 "narrower"
             };

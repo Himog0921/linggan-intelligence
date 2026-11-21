@@ -1052,6 +1052,48 @@ async fn published_work_with_l1(env: &Env, external_id: &str, l1_config: Uuid) -
 }
 
 #[tokio::test]
+#[ignore = "owned isolated PostgreSQL and loopback provider only"]
+async fn resource_requests_share_one_need_and_bare_keywords_do_not_support_it() {
+    let env = environment("cu_resource_requests", "normal").await;
+    let l1_config = sqlx::query_scalar(
+        "SELECT config_ref FROM linggan_model_config ORDER BY created_at LIMIT 1",
+    )
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    let work = env.work_with_l1("resources", l1_config).await;
+    let mut selections = Vec::new();
+    for index in 0..6 {
+        let text = if index < 4 {
+            "我也想领学习记录表"
+        } else {
+            "记录表"
+        };
+        let comment = env
+            .comment(
+                "resources",
+                &format!("res-{index}"),
+                text,
+                &format!("reader-{index}"),
+            )
+            .await;
+        selections.push(selection(work, comment));
+    }
+    let (_, batch) = env.run(&selections, false).await;
+    env.settle(batch).await;
+    assert_eq!(
+        env.problems().await,
+        vec![("获取学习记录表".into(), "formal".into(), 4, 4, 4, 1)]
+    );
+    assert!(
+        env.unit_requests()[0]["responseRequirements"]
+            .as_str()
+            .unwrap()
+            .contains("学习记录表")
+    );
+}
+
+#[tokio::test]
 #[ignore = "requires disposable PostgreSQL and local loopback adapter"]
 async fn consolidates_duplicate_candidates_once_and_restores_opportunity_on_revoke() {
     use super::{RevokeRedirect, consolidation_queue, revoke_redirect};
@@ -1164,6 +1206,31 @@ async fn consolidates_duplicate_candidates_once_and_restores_opportunity_on_revo
     .await
     .unwrap();
     assert_eq!(mapped_pairs, 3);
+    let decisions: Value = sqlx::query_scalar(
+        "SELECT invocation.result->'pairDecisions'
+         FROM linggan_comment_problem_active_redirect redirect
+         JOIN linggan_model_invocation invocation ON invocation.invocation_ref=redirect.decision_invocation_ref
+         WHERE redirect.redirect_ref=$1",
+    )
+    .bind(redirect)
+    .fetch_one(env.db.pool())
+    .await
+    .unwrap();
+    let decisions = decisions.as_array().unwrap();
+    assert_eq!(decisions.len(), 3);
+    for (verdict, application) in [
+        ("same", "redirect_applied"),
+        ("narrower", "kept_separate"),
+        ("different", "kept_separate"),
+    ] {
+        let decision = decisions
+            .iter()
+            .find(|pair| pair["verdict"] == verdict)
+            .unwrap();
+        assert_eq!(decision["application"], application);
+        assert!(decision["pairKey"].as_str().unwrap().starts_with('q'));
+        assert!(decision.get("reason").is_none());
+    }
     let after = env.problems().await;
     assert_eq!(after.len(), 2, "narrower is not merged");
     assert!(

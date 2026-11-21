@@ -12,7 +12,8 @@ use crate::{
         admission,
         batch_store::InputRef,
         comment_understanding::{
-            CONSOLIDATION_CONTRACT, accept_consolidation, catalog, consolidation_schema, redirect,
+            CONSOLIDATION_CONTRACT, CONSOLIDATION_RESPONSE_REQUIREMENTS, Verdict,
+            accept_consolidation, catalog, consolidation_schema, redirect,
         },
         store::FoundationError,
         transport::ResponseSchema,
@@ -120,7 +121,8 @@ async fn prepare(
             contract: CONSOLIDATION_CONTRACT,
             reference: item.batch_ref,
             fingerprint: &fingerprint,
-            payload: json!({"contract":CONSOLIDATION_CONTRACT,"catalog":entries}),
+            payload: json!({"contract":CONSOLIDATION_CONTRACT,"catalog":entries,
+                "responseRequirements":CONSOLIDATION_RESPONSE_REQUIREMENTS}),
             response_schema: ResponseSchema {
                 name: "comment_problem_consolidation".into(),
                 schema: consolidation_schema(),
@@ -214,10 +216,11 @@ async fn settle(
         .filter(|response| allowed && response.ok)
         .and_then(|response| response.text.as_deref())
         .and_then(|text| accept_consolidation(text, &pairs.keys().cloned().collect()).ok());
-    let redirects = if let Some(decisions) = &decisions {
-        redirect::apply_in(&mut tx, prepared.domain, invocation, &pairs, decisions).await?
+    let decided = decisions.as_deref().unwrap_or_default();
+    let redirects = if decisions.is_some() {
+        redirect::apply_in(&mut tx, prepared.domain, invocation, &pairs, decided).await?
     } else {
-        0
+        Default::default()
     };
     let success = decisions.is_some();
     let failure = research_call::failure(response, allowed, success, "ai_source_unavailable");
@@ -226,12 +229,26 @@ async fn settle(
         .unwrap_or_else(|| json!({"ok":false}));
     result["executorReceipt"] = json!(item.lease_token);
     result["promptVersion"] = json!(prepared.call.prompt_version_ref);
+    if success {
+        // The frozen dispatch already maps pair keys to definitions. Store only the verdict
+        // and apply outcome here, without retaining model-generated reason text.
+        result["pairDecisions"] = json!(decided.iter().map(|decision| {
+            let application = if redirects.contains(&decision.pair_key) {
+                "redirect_applied"
+            } else if decision.verdict == Verdict::Same {
+                "pair_no_longer_current"
+            } else {
+                "kept_separate"
+            };
+            json!({"pairKey":decision.pair_key,"verdict":decision.verdict,"application":application})
+        }).collect::<Vec<_>>());
+    }
     receipt::observe_in(&mut tx, invocation, response).await?;
     finish_invocation_in(&mut tx, invocation, response, success, failure, &result).await?;
     let output: Value = json!({
         "methodVersion":CONSOLIDATION_CONTRACT,
-        "decidedPairs":decisions.as_ref().map_or(0, Vec::len),
-        "redirects":redirects,
+        "decidedPairs":decided.len(),
+        "redirects":redirects.len(),
     });
     receipt::write_item_in(
         &mut tx,

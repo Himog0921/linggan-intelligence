@@ -89,6 +89,7 @@ pub struct AcceptedTarget {
     pub alias: String,
     pub outcome: Outcome,
     pub reason: Option<String>,
+    pub reason_code: Option<&'static str>,
     pub signals: Vec<AcceptedSignal>,
     pub dropped_signals: usize,
 }
@@ -121,6 +122,7 @@ impl AcceptedTarget {
             "contract": RESULT_CONTRACT,
             "outcome": self.outcome.as_str(),
             "reason": self.reason,
+            "reasonCode": self.reason_code,
             "signals": signals,
             "droppedSignals": self.dropped_signals,
         })
@@ -167,6 +169,7 @@ struct RawNewProblem {
 struct RawTarget {
     outcome: String,
     reason: Option<String>,
+    reason_code: Option<Value>,
     signals: Vec<Value>,
     #[serde(rename = "targetKey")]
     _target_key: String,
@@ -178,7 +181,7 @@ struct RawSignal {
     kind: SignalKind,
     proposition: String,
     evidence: String,
-    problem: Option<RawAssignment>,
+    problem: Option<Value>,
 }
 
 #[derive(Deserialize)]
@@ -198,8 +201,7 @@ pub fn accept_unit(
     if unit.contract != CONTRACT {
         return Err(UnitRejection::OutputInvalid);
     }
-    let declared = valid_new_problems(unit.new_problems);
-    let new_keys: HashSet<&str> = declared.iter().map(|p| p.key.as_str()).collect();
+    let (declared, proposals) = new_problem_declarations(unit.new_problems);
     let known: HashSet<&str> = targets.iter().map(|t| t.alias.as_str()).collect();
     let mut entries: HashMap<String, Vec<Value>> = HashMap::new();
     let mut ignored_entries = 0;
@@ -223,7 +225,7 @@ pub fn accept_unit(
             match entries.remove(&frame.alias) {
                 None => rejected("target_missing"),
                 Some(mut list) if list.len() == 1 => {
-                    match accept_target(list.remove(0), frame, sent_comments, catalog, &new_keys) {
+                    match accept_target(list.remove(0), frame, sent_comments, catalog, &proposals) {
                         Ok(target) => TargetOutcome::Accepted(target),
                         Err(code) => rejected(code),
                     }
@@ -256,24 +258,41 @@ pub fn accept_unit(
     })
 }
 
-/// Definitions that satisfy the contract. A key declared twice is ambiguous and is dropped, so
-/// the signals naming it lose their assignment instead of silently picking one meaning.
-fn valid_new_problems(values: Vec<Value>) -> Vec<NewProblem> {
-    let mut keys = HashMap::<String, usize>::new();
-    for value in &values {
-        if let Some(key) = value["newKey"].as_str() {
-            *keys.entry(key.trim().to_owned()).or_default() += 1;
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ProposalStatus {
+    Valid,
+    Invalid,
+    Duplicate,
+}
+
+/// Keep the first-seen order of valid definitions, while retaining the reason a key failed.
+fn new_problem_declarations(
+    values: Vec<Value>,
+) -> (Vec<NewProblem>, HashMap<String, ProposalStatus>) {
+    use std::collections::hash_map::Entry;
+
+    let mut definitions = Vec::new();
+    let mut statuses = HashMap::new();
+    for value in values {
+        let Some(key) = value["newKey"].as_str().map(str::trim) else {
+            continue;
+        };
+        match statuses.entry(key.to_owned()) {
+            Entry::Occupied(mut entry) => {
+                entry.insert(ProposalStatus::Duplicate);
+            }
+            Entry::Vacant(entry) => {
+                if let Some(definition) = new_problem(value) {
+                    entry.insert(ProposalStatus::Valid);
+                    definitions.push(definition);
+                } else {
+                    entry.insert(ProposalStatus::Invalid);
+                }
+            }
         }
     }
-    values
-        .into_iter()
-        .filter(|value| {
-            value["newKey"]
-                .as_str()
-                .is_some_and(|key| keys.get(key.trim()) == Some(&1))
-        })
-        .filter_map(new_problem)
-        .collect()
+    definitions.retain(|definition| statuses[&definition.key] == ProposalStatus::Valid);
+    (definitions, statuses)
 }
 
 fn new_problem(value: Value) -> Option<NewProblem> {
@@ -293,7 +312,7 @@ fn accept_target(
     frame: &TargetFrame,
     sent_comments: &[&str],
     catalog: &HashSet<String>,
-    new_keys: &HashSet<&str>,
+    proposals: &HashMap<String, ProposalStatus>,
 ) -> Result<AcceptedTarget, &'static str> {
     let raw: RawTarget = serde_json::from_value(entry).map_err(|_| "target_invalid")?;
     let outcome = match raw.outcome.as_str() {
@@ -316,6 +335,9 @@ fn accept_target(
             alias: frame.alias.clone(),
             outcome,
             reason,
+            reason_code: (outcome == Outcome::NoSignal
+                && raw.reason_code.as_ref().and_then(Value::as_str) == Some("promotion"))
+            .then_some("promotion"),
             signals: Vec::new(),
             dropped_signals: 0,
         });
@@ -324,7 +346,7 @@ fn accept_target(
     let mut seen = BTreeSet::new();
     let mut signals = Vec::new();
     for value in raw.signals.into_iter().take(MAX_SIGNALS_PER_TARGET) {
-        match accept_signal(value, frame, sent_comments, catalog, new_keys, &mut seen) {
+        match accept_signal(value, frame, sent_comments, catalog, proposals, &mut seen) {
             Some(signal) => signals.push(signal),
             None => dropped_signals += 1,
         }
@@ -336,6 +358,7 @@ fn accept_target(
         alias: frame.alias.clone(),
         outcome,
         reason: None,
+        reason_code: None,
         signals,
         dropped_signals,
     })
@@ -346,7 +369,7 @@ fn accept_signal(
     frame: &TargetFrame,
     sent_comments: &[&str],
     catalog: &HashSet<String>,
-    new_keys: &HashSet<&str>,
+    proposals: &HashMap<String, ProposalStatus>,
     seen: &mut BTreeSet<(&'static str, i32, i32)>,
 ) -> Option<AcceptedSignal> {
     let raw: RawSignal = serde_json::from_value(value).ok()?;
@@ -366,7 +389,7 @@ fn accept_signal(
         return None;
     }
     let (assignment, eligibility_state, eligibility_reason) = if raw.kind.has_problem_frame() {
-        classify(raw.problem, catalog, new_keys)
+        classify(raw.problem, catalog, proposals)
     } else {
         (None, "not_applicable", None)
     };
@@ -386,12 +409,16 @@ fn accept_signal(
 /// the signal and loses the assignment, so no signal is ever attached to a Problem that was not
 /// in the frozen catalog or declared by this unit.
 fn classify(
-    problem: Option<RawAssignment>,
+    problem: Option<Value>,
     catalog: &HashSet<String>,
-    new_keys: &HashSet<&str>,
+    proposals: &HashMap<String, ProposalStatus>,
 ) -> (Option<Assignment>, &'static str, Option<&'static str>) {
+    let deferred = |code| (None, "deferred_context", Some(code));
     let Some(problem) = problem else {
-        return (None, "deferred_context", Some("no_problem_assignment"));
+        return deferred("no_problem_assignment");
+    };
+    let Ok(problem) = serde_json::from_value::<RawAssignment>(problem) else {
+        return deferred("problem_assignment_shape_invalid");
     };
     match (
         problem.r#ref.as_deref().map(str::trim),
@@ -402,10 +429,16 @@ fn classify(
             "eligible",
             None,
         ),
-        (None, Some(key)) if new_keys.contains(key) => {
-            (Some(Assignment::New(key.to_owned())), "eligible", None)
-        }
-        _ => (None, "deferred_context", Some("problem_assignment_invalid")),
+        (Some(_), None) => deferred("problem_catalog_alias_unknown"),
+        (None, Some(key)) => match proposals.get(key) {
+            Some(ProposalStatus::Valid) => {
+                (Some(Assignment::New(key.to_owned())), "eligible", None)
+            }
+            Some(ProposalStatus::Invalid) => deferred("problem_new_definition_invalid"),
+            Some(ProposalStatus::Duplicate) => deferred("problem_new_key_duplicate"),
+            None => deferred("problem_new_key_missing"),
+        },
+        _ => deferred("problem_assignment_shape_invalid"),
     }
 }
 
@@ -491,12 +524,75 @@ mod tests {
     }
 
     #[test]
+    fn promotion_requires_no_signal_and_an_explicit_code() {
+        for (outcome, code, expected) in [
+            ("no_signal", json!("promotion"), json!("promotion")),
+            ("no_signal", json!(null), Value::Null),
+            ("needs_context", json!("promotion"), Value::Null),
+            ("no_signal", json!("unknown"), Value::Null),
+        ] {
+            let text = unit(
+                json!([]),
+                json!([{
+                    "targetKey":"t1", "outcome":outcome, "reason":"联系入口",
+                    "reasonCode":code, "signals":[]
+                }]),
+            );
+            let result = accept_unit(&text, &[frame("t1", "联系入口")], &catalog(&[])).unwrap();
+            assert_eq!(
+                accepted(&result.targets[0]).result_json(Uuid::nil(), &|_| None)["reasonCode"],
+                expected
+            );
+        }
+    }
+
+    #[test]
+    fn assignment_faults_preserve_the_original_signal_and_its_evidence() {
+        let evidence = "我需要一份学习记录表";
+        for (problem, expected) in [
+            (json!(null), "no_problem_assignment"),
+            (json!("n1"), "problem_assignment_shape_invalid"),
+            (
+                json!({"ref":"p1","newKey":"n1"}),
+                "problem_assignment_shape_invalid",
+            ),
+            (
+                json!({"ref":"p9","newKey":null}),
+                "problem_catalog_alias_unknown",
+            ),
+            (json!({"ref":null,"newKey":"n9"}), "problem_new_key_missing"),
+            (
+                json!({"ref":null,"newKey":"n7"}),
+                "problem_new_definition_invalid",
+            ),
+            (
+                json!({"ref":null,"newKey":"n8"}),
+                "problem_new_key_duplicate",
+            ),
+        ] {
+            let mut need = signal("need", evidence, problem);
+            need["proposition"] = json!(evidence);
+            let text = unit(
+                json!([{"newKey":"n7"}, new_problem_json("n8"), {"newKey":"n8"}]),
+                json!([target("t1", vec![need])]),
+            );
+            let result = accept_unit(&text, &[frame("t1", evidence)], &catalog(&["p1"])).unwrap();
+            let accepted = accepted(&result.targets[0]);
+            assert_eq!(accepted.dropped_signals, 0);
+            assert_eq!(accepted.signals[0].eligibility_state, "deferred_context");
+            assert_eq!(accepted.signals[0].eligibility_reason, Some(expected));
+            assert!(accepted.signals[0].assignment.is_none());
+            assert!(result.new_problems.is_empty());
+        }
+    }
+
+    #[test]
     fn malformed_duplicate_also_disqualifies_a_new_key() {
         let definitions = vec![
             json!({"newKey":"n1","label":"任务启动","goal":"开始写作业","barrier":"需要提醒"}),
             json!({"newKey":"n1"}),
         ];
-        assert!(valid_new_problems(definitions).is_empty());
+        assert!(new_problem_declarations(definitions).0.is_empty());
     }
 
     #[test]
@@ -683,7 +779,7 @@ mod tests {
         assert_eq!(target.signals[0].assignment, None);
         assert_eq!(
             target.signals[0].eligibility_reason,
-            Some("problem_assignment_invalid")
+            Some("problem_catalog_alias_unknown")
         );
         assert_eq!(target.signals[1].assignment, None);
         assert!(unit.new_problems.is_empty());

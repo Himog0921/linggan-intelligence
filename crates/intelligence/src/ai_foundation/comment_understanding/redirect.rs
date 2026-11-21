@@ -5,7 +5,7 @@ use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use uuid::Uuid;
 
 pub(crate) async fn lock_in(
@@ -26,9 +26,9 @@ pub(crate) async fn apply_in(
     invocation: Uuid,
     pairs: &BTreeMap<String, [Uuid; 2]>,
     decisions: &[ConsolidationDecision],
-) -> Result<u64, FoundationError> {
+) -> Result<HashSet<String>, FoundationError> {
     lock_in(tx, domain).await?;
-    let mut merged = 0;
+    let mut applied = HashSet::new();
     let mut same: Vec<_> = decisions
         .iter()
         .filter(|d| d.verdict == Verdict::Same)
@@ -53,7 +53,7 @@ pub(crate) async fn apply_in(
         .fetch_all(&mut **tx)
         .await?;
         if let [winner, loser] = ranked.as_slice() {
-            merged += sqlx::query(
+            sqlx::query(
                 "INSERT INTO linggan_comment_problem_redirect(redirect_ref,from_problem_ref,to_problem_ref,decision_invocation_ref)
                  VALUES(gen_random_uuid(),$1,$2,$3)",
             )
@@ -61,11 +61,11 @@ pub(crate) async fn apply_in(
             .bind(winner)
             .bind(invocation)
             .execute(&mut **tx)
-            .await?
-            .rows_affected();
+            .await?;
+            applied.insert(decision.pair_key.clone());
         }
     }
-    Ok(merged)
+    Ok(applied)
 }
 
 #[derive(Debug, Deserialize, Serialize)]
