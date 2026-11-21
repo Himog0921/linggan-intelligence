@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub enum SampleMetric {
     Publications,
     Views,
+    WithinAccountViews,
     OverThousand,
     Hit,
     ActiveComments,
@@ -50,13 +51,10 @@ impl SampleMetric {
         subset: Subset,
         m: &MetricDefinition,
     ) -> bool {
-        if matches!(subset, Subset::All) {
-            return true;
-        }
         let numerator = matches!(subset, Subset::Numerator);
         match self {
             Self::Publications => true,
-            Self::Views => row.views.value.is_some(),
+            Self::Views | Self::WithinAccountViews => row.views.value.is_some(),
             Self::OverThousand => row
                 .views
                 .value
@@ -84,12 +82,22 @@ pub fn select_publications(
     subset: Subset,
     m: &MetricDefinition,
 ) -> Vec<Uuid> {
-    input
+    let rows = input
         .publications
         .iter()
-        .filter(|(_, row)| {
-            !row.labels.is_empty() && filter.matches(row) && metric.contains(row, subset, m)
+        .filter(|(_, row)| !row.labels.is_empty())
+        .map(|(id, row)| (*id, row))
+        .collect::<Vec<_>>();
+    let within = matches!(metric, SampleMetric::WithinAccountViews)
+        .then(|| super::variance::residuals(&rows, m.min_account_posts));
+    rows.into_iter()
+        .filter(|(id, row)| {
+            within
+                .as_ref()
+                .is_none_or(|retained| retained.contains_key(id))
+                && filter.matches(row)
+                && metric.contains(row, subset, m)
         })
-        .map(|(id, _)| *id)
+        .map(|(id, _)| id)
         .collect()
 }

@@ -82,6 +82,9 @@ pub struct AnalysisInput {
     pub total_publications: u64,
     pub with_title: u64,
     pub pending_titles: u64,
+    /// Completed audit contributing the quality gate for each source primary run.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub agreement_sources: BTreeMap<Uuid, Uuid>,
     pub publications: BTreeMap<Uuid, PublicationInput>,
 }
 

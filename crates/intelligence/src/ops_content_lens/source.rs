@@ -16,8 +16,8 @@ pub const TITLED_PUBLICATIONS_CTE: &str = r#"titled_publications AS (
          WHERE f.publication_ref=p.publication_ref AND f.field_name='title'
            AND f.publication_version IS NOT DISTINCT FROM p.native_version
          ORDER BY f.observed_at::timestamptz DESC,f.created_at DESC,f.adoption_ref DESC LIMIT 1) AS title
-    FROM linggan_ops_publication p LEFT JOIN linggan_ops_account a USING(account_ref)
-    WHERE p.platform='xhs' AND linggan_ops_publication_visible(p,a,NULL,NULL)
+    FROM linggan_ops_publication p
+    WHERE p.platform='xhs' AND linggan_ops_publication_visible(p,NULL::linggan_ops_account,NULL,NULL)
 )"#;
 
 pub(super) async fn read_input(
@@ -148,6 +148,7 @@ pub(super) async fn read_input(
         total_publications,
         with_title: publications.len() as u64,
         pending_titles: pending.len() as u64,
+        agreement_sources: BTreeMap::new(),
         publications,
     })
 }

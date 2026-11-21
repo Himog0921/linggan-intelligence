@@ -18,6 +18,8 @@ pub enum LensDefinitionError {
     InvalidDefinition,
     #[error("ops_lens_missing_agreement")]
     MissingAgreement,
+    #[error("ops_lens_calculation_unavailable")]
+    CalculationUnavailable,
     #[error("ops_lens_scope_invalid")]
     InvalidScope,
     #[error("ops_lens_no_current_method")]
@@ -70,3 +72,6 @@ mod source;
 pub use snapshot::{SnapshotReceipt, SnapshotScope, build_snapshot};
 pub use source::TITLED_PUBLICATIONS_CTE;
 pub use variance::shuffle_with_seed;
+
+#[cfg(test)]
+mod golden_tests;

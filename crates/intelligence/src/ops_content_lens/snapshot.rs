@@ -5,7 +5,6 @@ use crate::ops_ledger::is_business_date;
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use sqlx::{PgConnection, Row, types::Json};
 use std::collections::BTreeSet;
 use uuid::Uuid;
@@ -130,9 +129,13 @@ pub(super) async fn build_for_task(
         task_config_ref: current.try_get("task_config_ref")?,
         prompt_version_ref: current.try_get("prompt_version_ref")?,
     };
-    let input = read_input(&mut tx, &scope, method).await?;
+    let mut input = read_input(&mut tx, &scope, method).await?;
     let series = agreements(&mut tx, &input, &m).await?;
-    let latest = input.publications.values().filter_map(|r| r.business_date.as_deref()).max();
+    let latest = input
+        .publications
+        .values()
+        .filter_map(|r| r.business_date.as_deref())
+        .max();
     let stale_days: Option<i32> = sqlx::query_scalar(
         "SELECT (transaction_timestamp() AT TIME ZONE 'Asia/Shanghai')::date - $1::text::date",
     )
@@ -141,11 +144,13 @@ pub(super) async fn build_for_task(
     .await?;
     tx.commit().await?;
     // A new audit may change the gate without changing the primary or its effective labels.
-    let mut frozen =
-        serde_json::to_value(&input).map_err(|_| LensDefinitionError::InvalidDefinition)?;
-    frozen["agreements"] = json!(series);
-    let hash:String = Sha256::digest(serde_json::to_vec(&frozen).map_err(|_|LensDefinitionError::InvalidDefinition)?)
-        .iter().map(|byte|format!("{byte:02x}")).collect();
+    input.agreement_sources = series
+        .iter()
+        .map(|a| (a.run_ref, a.audit_run_ref))
+        .collect();
+    let hash = input
+        .input_hash()
+        .map_err(|_| LensDefinitionError::InvalidDefinition)?;
     let find =
         "SELECT snapshot_ref FROM linggan_ops_lens_snapshot WHERE input_hash=$1 AND metric_ref=$2";
     if let Some(snapshot_ref) = sqlx::query_scalar(find)
@@ -161,14 +166,19 @@ pub(super) async fn build_for_task(
     }
     let as_of: String = current.try_get("as_of")?;
     let id = Uuid::new_v4();
-    let mut body = summarize(&input, &vocab, &m, &series)?;
+    let frozen =
+        serde_json::to_value(&input).map_err(|_| LensDefinitionError::InvalidDefinition)?;
+    let stale_after_days = m.stale_after_days;
+    let mut body = tokio::task::spawn_blocking(move || summarize(&input, &vocab, &m, &series))
+        .await
+        .map_err(|_| LensDefinitionError::CalculationUnavailable)??;
     body["snapshotRef"] = json!(id);
     body["asOf"] = json!(as_of);
     let q = &mut body["quality"];
     q["taxonomyVersion"] = json!(current.try_get::<i32, _>("taxonomy_version")?);
     q["metricVersion"] = json!(current.try_get::<i32, _>("metric_version")?);
     q["staleDays"] = json!(stale_days);
-    q["isStale"] = json!(stale_days.map(|v| i64::from(v) > i64::from(m.stale_after_days)));
+    q["isStale"] = json!(stale_days.map(|v| i64::from(v) > i64::from(stale_after_days)));
     let inserted:Option<Uuid>=sqlx::query_scalar("INSERT INTO linggan_ops_lens_snapshot(snapshot_ref,as_of,taxonomy_ref,metric_ref,input_hash,analysis_input,body)
       VALUES ($1,$2::text::timestamptz,$3,$4,$5,$6,$7) ON CONFLICT (input_hash,metric_ref) DO NOTHING RETURNING snapshot_ref")
         .bind(id).bind(&as_of).bind(taxonomy).bind(metric).bind(&hash).bind(frozen).bind(body).fetch_optional(database.pool()).await?;
