@@ -82,4 +82,5 @@ export LOCAL_001_PROOF_DATABASE_URL="postgresql://${proof_user}:${proof_password
 cargo test -p linggan-intelligence --test ops_ledger_import_postgres --locked -- --ignored --nocapture --test-threads=1
 cargo test -p linggan-intelligence --test ops_ledger_read_postgres --locked -- --ignored --nocapture --test-threads=1
 cargo test -p linggan-intelligence --test ops_overview_postgres --locked -- --ignored --nocapture --test-threads=1
+cargo test -p linggan-intelligence --lib --locked ops_content_lens::taxonomy::tests::definitions_and_shared_publication_example -- --ignored --exact
 echo "OPS-MIGRATION-001 PostgreSQL proof passed"
