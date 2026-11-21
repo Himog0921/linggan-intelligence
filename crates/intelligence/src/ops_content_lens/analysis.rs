@@ -19,7 +19,7 @@ pub struct LabelMethod {
     pub prompt_version_ref: Uuid,
 }
 
-#[derive(Debug, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Ord, PartialOrd, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum LabelDimension {
     Moment,
@@ -28,7 +28,7 @@ pub enum LabelDimension {
     Audience,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EffectiveLabel {
     pub value: String,

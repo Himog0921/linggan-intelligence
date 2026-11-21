@@ -94,6 +94,7 @@ mod ops_native_api_tests;
 #[cfg(test)]
 mod ops_native_model_tests;
 mod ops_overview_api;
+mod ops_content_lens_api;
 mod ops_sync_api;
 mod public_access;
 #[cfg(test)]
