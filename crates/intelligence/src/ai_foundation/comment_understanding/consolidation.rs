@@ -2,13 +2,15 @@
 //! proposed; it never chooses which Problem survives and never merges anything itself. Only a
 //! `same` verdict can become a redirect.
 use super::contract::{REASON_MAX_CHARS, trimmed};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{HashMap, HashSet};
 
 pub const CONSOLIDATION_CONTRACT: &str = "comment-problem-consolidation.v1";
+pub(crate) const RESPONSE_REQUIREMENTS: &str = r#"输出 JSON，例如 {"contract":"comment-problem-consolidation.v1","pairs":[]}。有决定时在 pairs 中放入 {"pairKey":"q1-2","verdict":"same","reason":"主体、目标和障碍相同"}。示例不代表真实判定。
+逐项比较主体、目标与障碍机制。相同卡点的具体场景可以是同一需求；一方范围更窄时用 narrower。话题相近但障碍不同用 different，例如写作业迟迟不开始与开始后做得太慢。只有主体、目标、障碍全部一致才用 same。拿不准可以省略。只用既有配对别名，每对只写一次。"#;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Verdict {
     /// Same subject, goal and barrier mechanism: the two are one Problem.

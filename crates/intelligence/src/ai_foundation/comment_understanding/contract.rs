@@ -45,10 +45,17 @@ pub struct TargetInput {
     pub parent_context: Value,
 }
 
-/// The request payload. The task's instruction text is added by the executor.
+const RESPONSE_REQUIREMENTS: &str = r#"严格输出 JSON。每个目标填写 reasonCode。仅当评论主动宣传并引导他人联系、咨询或购买，且 outcome 为 no_signal 时填写 "promotion"。其余情况填写 null。提到推广、询问链接、索取资料或按提示只回复一个口令，本身都不构成引流。
+每条 signal 只写一个能由 evidence 完整支撑的命题。evidence 须逐字来自本条 researchText 的唯一连续片段。证据只支撑前半句时，删除后半句，或把有自己证据的内容拆成另一条。父评论和作品只解释指代。自述的诊断、疗效或因果写成评论者的说法。
+询问查看位置等事实是 question。明确请求资源、帮助或协作是 need。目标和障碍都清楚才用 problem。只回复口令时，依据该评论能确定的意图判断；不能从作品的邀请自行推断具体个人需求。
+problem 和 need 的 problem 归属只能选择其一：已有目录用 {"ref":"p1","newKey":null}；新需求用 {"ref":null,"newKey":"n1"} 并在 newProblems 中为 n1 写且只写一份完整定义；信息不足时用 null，保留信号。不得省略所引用的新定义，不得同时填写两个引用。定稿前核对所有引用。其他信号的 problem 写 null。
+比如不同评论明确请求同一份学习记录表，且资源缺口相同，应共用一个定义；障碍可以写“未拿到这份学习记录表”。不要替评论者编造额外障碍。定义只写可复用的主体、目标和障碍，具体年级或场景只有会改变障碍时才进入定义。"#;
+
+/// The request payload. The task's editable instruction text is added by the executor.
 pub fn payload(work_context: &Value, catalog: &[CatalogEntry], targets: &[TargetInput]) -> Value {
     json!({
         "contract": CONTRACT,
+        "responseRequirements": RESPONSE_REQUIREMENTS,
         "workContext": work_context,
         "catalog": catalog.iter().map(|e| json!({
             "ref": e.alias, "label": e.label, "actor": e.actor,
@@ -111,6 +118,7 @@ pub fn response_schema() -> Value {
         "targetKey": {"type":"string"},
         "outcome": {"type":"string","enum":["signals","no_signal","needs_context"]},
         "reason": nullable_text(),
+        "reasonCode": {"type":["string","null"],"enum":["promotion",null]},
         "signals": {"type":"array","maxItems":MAX_SIGNALS_PER_TARGET,"items":signal},
     }));
     let new_problem = object(json!({

@@ -16,7 +16,12 @@
         -- A positive promotion judgment is a directory label even when no research signal was emitted.
         SELECT 'promotion'
         WHERE result.result->>'outcome' = 'no_signal'
-          AND result.result->>'reason' ~ '^[[:space:]]*(纯[[:space:]]*)?(广告[[:space:]]*[/／、][[:space:]]*)?(引流|导流)(话术|内容)?([[:space:]，。；：、,.;:]|$)'
+          AND CASE
+              WHEN result.result ? 'reasonCode' THEN result.result->>'reasonCode' = 'promotion'
+              -- Legacy rows have only free-text reasons. Match explicit positive judgments.
+              ELSE result.result->>'reason' ~ '^[[:space:]]*(纯[[:space:]]*)?(广告[[:space:]]*[/／、][[:space:]]*)?(引流|导流)(话术|内容)?([[:space:]，。；：、,.;:]|$)'
+                OR result.result->>'reason' ~ '[，,][[:space:]]*属于引流[[:space:]]*[/／][[:space:]]*招揽[。.]?[[:space:]]*$'
+          END
     ) label
     WHERE NOT EXISTS(SELECT 1 FROM linggan_material_comment_restriction restriction
         WHERE restriction.content_public_ref=original.content_public_ref

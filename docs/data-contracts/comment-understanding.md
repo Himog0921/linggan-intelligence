@@ -22,9 +22,9 @@
 
 ## 2. `comment-understanding.v1`
 
-模型端载荷（`payload()`）：`contract`、`workContext`、`catalog`（`ref` 为 `p1…`，含 `label/actor/goal/barrier/context`）、`targets`（`targetKey` 为 `t1…`，含 `researchText` 与 `parentContext`），任务指令放在 `instruction`。模型看不到任何 UUID。
+模型端载荷（`payload()`）：`contract`、`workContext`、`catalog`（`ref` 为 `p1…`，含 `label/actor/goal/barrier/context`）、`targets`（`targetKey` 为 `t1…`，含 `researchText` 与 `parentContext`），任务指令放在 `instruction`，固定的输出与证据要求放在 `responseRequirements`。模型看不到任何 UUID。
 
-响应（Schema 由 `response_schema()` 生成）：`newProblems[]`（`newKey/label/actor/goal/barrier/context`）与 `targets[]`（`targetKey/outcome/reason/signals[]`）；信号为 `kind/proposition/evidence/problem`，`problem` 为 null 或 `{ref,newKey}` 恰好一个非 null。
+响应（Schema 由 `response_schema()` 生成）：`newProblems[]`（`newKey/label/actor/goal/barrier/context`）与 `targets[]`（`targetKey/outcome/reason/reasonCode/signals[]`）；信号为 `kind/proposition/evidence/problem`，`problem` 为 null 或 `{ref,newKey}` 恰好一个非 null。
 
 接纳（`accept_unit()`）按最小单位降级：
 
@@ -34,16 +34,20 @@
 | 目标缺失 / 重复 / 字段不合法 / outcome 与 signals 不一致 | 该目标失败：`target_missing` / `target_invalid` |
 | 所有信号都被丢弃 | 该目标失败：`target_all_signals_invalid` |
 | 证据在**本条评论清洗后文本**里不是唯一连续片段；kind 非法；同 kind 同位置重复 | 丢弃该信号，计入 `droppedSignals` |
-| 归属引用目录外的 `pN`、未定义或被定义两次的 `newKey` | 信号保留，去掉归属，`eligibilityState = deferred_context` |
+| 归属格式无效、目录别名不存在、新定义未声明、定义无效或重复声明、主动暂缓 | 信号保留，去掉归属，`eligibilityState = deferred_context` |
 | 单条目标超过 12 条信号 | 只检查前 12 条，其余计入 `droppedSignals` |
 
-没有被信号引用的 `newKey` 不建需求。输出被截断（`unit_truncated`）由调用方依据 finish_reason 判定，不在接纳器内。
+归属暂缓原因分别记录为 `problem_assignment_shape_invalid`、`problem_catalog_alias_unknown`、`problem_new_key_missing`、`problem_new_definition_invalid`、`problem_new_key_duplicate`、`no_problem_assignment`。多条评论明确请求同一资源、目标和障碍相同时，共用一个定义。单独回复口令时，按评论本身可确定的意图判断。
+
+每个信号的命题只表达本条证据能够完整支持的意思。接纳器验证证据片段的位置与来源。命题语义需要通过样本评估。没有被信号引用的 `newKey` 不建需求。输出被截断（`unit_truncated`）由调用方依据 finish_reason 判定，不在接纳器内。
 
 ## 3. 存储的单条结果
 
-写入 `linggan_comment_research_result.result`，合同名 `comment-study.semantic.v2`，沿用 v1 全部字段，Topic Map、评论目录等下游读取不变：
+写入 `linggan_comment_research_result.result`，合同名 `comment-study.semantic.v2`，沿用 v1 全部字段，并增加结构化原因：
 
-`outcome`、`reason`、`signals[]`（`kind`、`proposition`、`sourceRef`、`evidenceSpan{start,end}`、`problemFrame`（恒为 null）、`eligibilityState`、`eligibilityReason`、新增 `problemRef`）、`droppedSignals`。
+`outcome`、`reason`、`reasonCode`、`signals[]`（`kind`、`proposition`、`sourceRef`、`evidenceSpan{start,end}`、`problemFrame`（恒为 null）、`eligibilityState`、`eligibilityReason`、新增 `problemRef`）、`droppedSignals`。
+
+只有 `no_signal` 才能保存 `reasonCode = promotion`。其余新格式结果使用 null。兼容仍省略该字段的旧格式响应，结果也保留缺省。评论目录优先读取该字段，只有缺少该字段时才使用有限的正向理由匹配。
 
 信号序号是它在 `signals[]` 中的下标，对应 `linggan_comment_problem_membership.signal_ordinal`（0–11）。
 
@@ -69,7 +73,7 @@
 
 自动整理以研究批次为单位。全部单元终止且本次新建过候选时，最多创建一个自动整理批次。派发时读取完整 V2 目录，上限 150 个候选、200 个需求。至少一方为候选的需求配对使用 `q<a>-<b>`（`a<b`），派发记录冻结每个别名对应的两个需求。没有可比较的需求或超过上限时跳过，且无模型调用。请求载荷为需求定义、状态和短别名。响应允许省略无结论的配对。
 
-写重定向时重新检查两方仍是当前需求。`revoke_redirect` 校验领域，在同一事务追加撤销和命令回执。同一命令重放返回原回执，重复撤销不新增记录。
+写重定向时重新检查两方仍是当前需求。成功的整理调用回执保存 `pairDecisions[]`，通过 `pairKey` 关联派发记录，并记录 `verdict` 和 `application`。后者包括 `redirect_applied`、`pair_no_longer_current`、`kept_separate`。回执省略模型自由文本理由。`revoke_redirect` 校验领域，在同一事务追加撤销和命令回执。同一命令重放返回原回执，重复撤销不新增记录。
 
 ## 6. 任务与失败码
 

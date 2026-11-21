@@ -24,6 +24,7 @@ pub use accept::{
     AcceptedSignal, AcceptedTarget, AcceptedUnit, Assignment, NewProblem, Outcome, TargetFrame,
     TargetOutcome, UnitRejection, accept_unit,
 };
+pub(crate) use consolidation::RESPONSE_REQUIREMENTS as CONSOLIDATION_RESPONSE_REQUIREMENTS;
 pub use consolidation::{
     CONSOLIDATION_CONTRACT, ConsolidationDecision, ConsolidationRejected, Verdict,
     accept_consolidation, consolidation_schema,
