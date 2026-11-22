@@ -653,6 +653,19 @@ async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
     let schema = &packet["resultSchema"];
     let baseline = linggan_intelligence::content_understanding::response_schema();
     assert_eq!(schema["properties"]["core"], baseline["properties"]["core"]);
+    let core = &schema["properties"]["core"]["properties"];
+    assert!(
+        core["contentType"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("question")
+    );
+    assert!(
+        core["candidateLabels"]["items"]["properties"]["unitIds"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("同一项资源")
+    );
     assert_eq!(
         schema["properties"]["evidenceCandidates"],
         baseline["properties"]["evidenceCandidates"]
@@ -673,6 +686,17 @@ async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
     .await
     .unwrap();
     assert_eq!(repair, "removed_one_trailing_brace");
+    let guidance_version: String = sqlx::query_scalar(
+        "SELECT result->>'draftGuidance' FROM linggan_model_invocation WHERE invocation_ref=$1",
+    )
+    .bind(invocation)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(
+        guidance_version,
+        linggan_intelligence::content_understanding::model_draft::GUIDANCE_VERSION
+    );
     let raw_draft: Value = serde_json::from_str(raw.strip_suffix('}').unwrap()).unwrap();
     assert_eq!(
         raw_draft,

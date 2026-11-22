@@ -199,6 +199,7 @@ async fn settle(
     metadata["requestRef"] = json!(prepared.request_ref);
     metadata["promptVersion"] = json!(prepared.prompt_version_ref);
     metadata["draftProtocol"] = json!(contract::model_draft::PROTOCOL);
+    metadata["draftGuidance"] = json!(contract::model_draft::GUIDANCE_VERSION);
     sqlx::query("INSERT INTO linggan_content_understanding_result(request_ref,work_ref,material_snapshot_identity,method_version,invocation_ref,result,raw_output,failure_code) SELECT request_ref,work_ref,material_snapshot_identity,method_version,$2,$3,$4,$5 FROM linggan_content_understanding_request WHERE request_ref=$1")
         .bind(prepared.request_ref).bind(prepared.invocation).bind(parsed.as_ref().filter(|_| success).map(|(card, _)| card))
         .bind(if allowed { response.and_then(|r| r.text.as_deref()) } else { None }).bind(failure).execute(&mut *tx).await?;
