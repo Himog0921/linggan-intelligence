@@ -45,7 +45,7 @@ type Display = (Option<String>, Option<String>);
 
 // Read the same visible title as the ledger. A frozen member whose live record is no longer
 // visible still contributes its frozen numbers; title and account are then unavailable.
-pub(super) async fn display(
+async fn display(
     db: &Database,
     ids: &[Uuid],
 ) -> Result<BTreeMap<Uuid, Display>, LensDefinitionError> {
