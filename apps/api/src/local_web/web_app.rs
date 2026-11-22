@@ -227,7 +227,10 @@ async fn authenticated_entry(
         Err(response) => return response,
     };
     if member.role != "admin"
-        && matches!(uri.path(), "/ops/overview" | "/ops/content" | "/ops/io" | "/settings/team")
+        && matches!(
+            uri.path(),
+            "/ops/overview" | "/ops/content" | "/ops/io" | "/settings/team"
+        )
     {
         return StatusCode::FORBIDDEN.into_response();
     }
