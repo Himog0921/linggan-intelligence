@@ -18,7 +18,7 @@ pub struct SnapshotScope {
 }
 
 impl SnapshotScope {
-    fn validate(&self) -> Result<(), LensDefinitionError> {
+    pub(super) fn validate(&self) -> Result<(), LensDefinitionError> {
         if self
             .from
             .iter()

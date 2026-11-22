@@ -27,6 +27,10 @@ pub enum LensDefinitionError {
     InvalidScope,
     #[error("ops_lens_no_current_method")]
     NoMethod,
+    #[error("ops_lens_snapshot_not_found")]
+    SnapshotNotFound,
+    #[error("ops_lens_run_unavailable")]
+    RunUnavailable,
     #[error("ops_lens_database_error")]
     Database(#[from] sqlx::Error),
 }
@@ -62,6 +66,8 @@ pub async fn metric_definition(
     Ok((reference, metric))
 }
 
+mod read;
+pub use read::{BoardStatus, PageRequest, SnapshotLookup, board_status, publications, read_snapshot, spot_check};
 mod sample;
 mod statistics;
 mod variance;
