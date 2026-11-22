@@ -148,7 +148,10 @@ async fn save_target(
     }
 }
 
-async fn require_admin(state: &LocalWebState, headers: &HeaderMap) -> Result<(), Response> {
+pub(super) async fn require_admin(
+    state: &LocalWebState,
+    headers: &HeaderMap,
+) -> Result<(), Response> {
     let member = super::ops_auth::current_member(state, headers).await?;
     if member.role == "admin" {
         Ok(())

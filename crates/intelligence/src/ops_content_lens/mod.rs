@@ -1,5 +1,7 @@
 //! Definitions shared by title labelling, retrospective analysis and snapshot readers.
+mod agreement;
 mod analysis;
+pub use agreement::{Agreement, agreement};
 mod taxonomy;
 
 pub use analysis::*;
@@ -12,6 +14,16 @@ use uuid::Uuid;
 pub enum LensDefinitionError {
     #[error("ops_lens_taxonomy_invalid: {0}")]
     InvalidTaxonomy(&'static str),
+    #[error("ops_lens_definition_invalid")]
+    InvalidDefinition,
+    #[error("ops_lens_missing_agreement")]
+    MissingAgreement,
+    #[error("ops_lens_calculation_unavailable")]
+    CalculationUnavailable,
+    #[error("ops_lens_scope_invalid")]
+    InvalidScope,
+    #[error("ops_lens_no_current_method")]
+    NoMethod,
     #[error("ops_lens_database_error")]
     Database(#[from] sqlx::Error),
 }
@@ -46,3 +58,20 @@ pub async fn metric_definition(
     .await?;
     Ok((reference, metric))
 }
+
+mod sample;
+mod statistics;
+mod variance;
+pub use sample::{LabelFilter, SampleMetric, Subset, select_publications};
+
+pub fn enabled_from_env() -> bool {
+    std::env::var("LINGGAN_OPS_CONTENT_LENS").as_deref() == Ok("enabled")
+}
+mod snapshot;
+mod source;
+pub use snapshot::{SnapshotReceipt, SnapshotScope, build_snapshot};
+pub use source::TITLED_PUBLICATIONS_CTE;
+pub use variance::shuffle_with_seed;
+
+#[cfg(test)]
+mod golden_tests;
