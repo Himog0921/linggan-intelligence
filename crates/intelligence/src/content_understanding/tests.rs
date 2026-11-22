@@ -846,6 +846,44 @@ fn response_schema_explains_projection_limits_without_changing_field_bounds() {
 }
 
 #[test]
+fn response_schema_guides_each_classification_on_text_and_image_requests() {
+    let storage: Value = serde_json::from_str(include_str!(
+        "../../../../docs/data-contracts/content-card.v0.2.schema.json"
+    ))
+    .unwrap();
+    for schema in [response_schema(), response_schema_for_images(4, 4_096)] {
+        let core = &schema["properties"]["core"]["properties"];
+        let storage_type = &storage["properties"]["core"]["properties"]["contentType"];
+        assert_eq!(core["contentType"]["enum"], storage_type["enum"]);
+        let content_type = core["contentType"]["description"].as_str().unwrap();
+        for kind in [
+            "question",
+            "practical_guide",
+            "personal_story",
+            "checklist",
+            "product_intro",
+            "mixed",
+        ] {
+            assert!(content_type.contains(kind), "missing guidance for {kind}");
+        }
+        let statement = core["knowledgeUnits"]["items"]["properties"]["statement"]["description"]
+            .as_str()
+            .unwrap();
+        assert!(statement.contains("单独阅读"));
+        assert!(statement.contains("归属"));
+        let labels = &core["candidateLabels"];
+        assert!(labels["description"].as_str().unwrap().contains("分别保留"));
+        let properties = &labels["items"]["properties"];
+        let retrieval_use = properties["retrievalUse"]["description"].as_str().unwrap();
+        assert!(retrieval_use.contains("获取"));
+        assert!(retrieval_use.contains("示例"));
+        let unit_ids = properties["unitIds"]["description"].as_str().unwrap();
+        assert!(unit_ids.contains("同一项资源"));
+        assert!(unit_ids.contains("不同片段"));
+    }
+}
+
+#[test]
 fn response_schema_examples_keep_label_links_and_literal_truncated_quotes() {
     let schema = response_schema();
     let core = &schema["properties"]["core"]["properties"];
@@ -857,10 +895,12 @@ fn response_schema_examples_keep_label_links_and_literal_truncated_quotes() {
         .as_object_mut()
         .unwrap()
         .remove("examples");
-    definition["items"]["properties"]["unitIds"]
-        .as_object_mut()
-        .unwrap()
-        .remove("description");
+    for field in ["unitIds", "retrievalUse"] {
+        definition["items"]["properties"][field]
+            .as_object_mut()
+            .unwrap()
+            .remove("description");
+    }
     let storage: Value = serde_json::from_str(include_str!(
         "../../../../docs/data-contracts/content-card.v0.2.schema.json"
     ))

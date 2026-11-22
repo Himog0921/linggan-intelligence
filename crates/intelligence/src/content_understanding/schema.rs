@@ -44,6 +44,9 @@ pub fn response_schema() -> Value {
     core_fields["summary"]["properties"]["text"]["description"] = json!(
         "用中立语言概括整篇用途，并引用支持摘要的知识单元。书名、歌名等确切作品名只有在所列单元引用的证据逐字包含时才写作《…》。主题、活动和转述用普通陈述，不标为作品名或原话。缺少证据时概括已支持的用途。只由发布者声称的产品范围、效果、期限、售后条款等保留归因。画面样例只能支持其中能看到的内容。"
     );
+    core_fields["contentType"]["description"] = json!(
+        "按整篇的主要发布目的选择已有类型。作者在等读者给答案或推荐时选 question。标题是问句但作者已回答时，按回答的内容归类。帖内教读者完成一件事，可跟做的操作、话术或示范为主时选 practical_guide。并列项目供查用、没有必须遵循的操作顺序时选 checklist。讲真人亲历和事件经过为主选 personal_story，其中提到的做法可以进标签。分析具体案例用 case_analysis，解释现象用 explanation，表达取舍或倡议用 opinion。主要在推介产品、服务或报名时用 product_intro，参与挑战本身为主用 interactive_challenge。只有两种目的都独立且难分主次才用 mixed。"
+    );
     core_fields["mainTopicUnitId"]["description"] = json!(
         "必填。先为整篇的主要话题或发布目的写一条有依据的知识单元，其 unitType 必须是 discussion。mainTopicUnitId 填这条单元的 id。输出前按 id 找回该单元，确认 unitType 是 discussion。"
     );
@@ -57,14 +60,20 @@ pub fn response_schema() -> Value {
     core_fields["knowledgeUnits"]["items"]["properties"]["unitType"]["description"] = json!(
         "仅使用本字段的 enum。整篇在讲什么或作者发布的目的用 discussion，例如作者推介一套学习资料。具体提供的方法、解释、信息和案例用 provision，例如资料附练习答案。作者主张不等于作者立场。明确立场用 author_position，受众与处境用 audience_context。assertionKind 独立填写。整篇主议题由作者主张时，unitType 填 discussion，assertionKind 填 author_claim，在陈述中注明归因。"
     );
+    core_fields["knowledgeUnits"]["items"]["properties"]["statement"]["description"] = json!(
+        "让这条知识单元单独阅读也能理解。说清主体、所指对象与做法，保留原文有实质影响的归属、语气、个人经验、引述、否定和限定。作者在猜测、推荐、描述亲历或转述他人时，在陈述中保留这种表达。无需判断作者说得是否严谨，不补写原帖没有的限定、归因或结论。"
+    );
     core_fields["knowledgeUnits"]["items"]["properties"]["evidenceRefs"]["description"] = json!(
         "这里仅填证据条目 ID（例如 ev1），不能填材料编号（例如 s1、image_1）。引用直接支撑本单元的细节。书名用《…》。逐字引语标为原话「…」或原文「…」，口播原话「…」引用口播。图片或画面中识读的引句用图片原文「…」。主题与术语可用普通引号。书名及逐字引语应逐字出现在本单元引用的原文或逐图识读引句中。同一细节重复出现时选一个能支撑它的片段。口播细节引用 transcript；整体标题或画面标题不能单独支撑更具体的内容。每个关键数字、否定、条件和先后顺序都要由所列依据支持。"
     );
     core_fields["candidateLabels"]["description"] = json!(
-        "每条候选标签必须同时填写 dimension、label、retrievalUse、unitIds。dimension 只能从本字段的 enum 选择；author_position 是知识单元类型，不能作为标签维度。没有合适维度时省略该候选标签，知识单元仍保留。unitIds 关联 knowledgeUnits 中实际存在的单元 ID，不能遗漏或为空。示例仅演示完整结构，使用本篇实际标签与 ID。"
+        "每条候选标签必须同时填写 dimension、label、retrievalUse、unitIds。dimension 只能从本字段的 enum 选择；author_position 是知识单元类型，不能作为标签维度。没有合适维度时省略该候选标签，知识单元仍保留。unitIds 关联 knowledgeUnits 中实际存在的单元 ID，不能遗漏或为空。同一项资源的内容、呈现形式和获取方式对应不同检索用途时分别保留。仅在资源、维度、检索用途都相同时合并重复标签，保留双方能支撑该用途的单元，超出引用上限时分别保留。示例仅演示结构，使用本篇实际标签与 ID。"
     );
     core_fields["candidateLabels"]["items"]["properties"]["unitIds"]["description"] = json!(
-        "必填，列出支持本标签的已有知识单元 ID；retrievalUse 说明用途，不能代替 unitIds。输出前逐条检查所有标签的关联。"
+        "必填，列出能支撑这条标签的已有知识单元。涉及资源时，核对标签、检索用途和单元证据说的是同一项资源。同帖提到多个资源时，不能借另一项资源的证据。资源名称、内容和领取提示在不同片段时，仅在原文明确把它们连在一起时，引用各自对应的知识单元。同一单元确实支撑两个用途时可以共用；不要把分开的引句拼成一条证据。"
+    );
+    core_fields["candidateLabels"]["items"]["properties"]["retrievalUse"]["description"] = json!(
+        "说明读者在本帖能找到什么。分别写清帖内可见的内容、只展示的示例或目录、只提到的资源和需要另行获取的资源。原帖明确说明评论、私信、报名或购买时，将获取方式写在 participation 标签，并保留资源实际名称。没有入口时只写提及。帖内给出的方法仍可写为 offered_value，不把外部完整资料混入帖内供给。"
     );
     core_fields["candidateLabels"]["items"]["examples"] = json!([{
         "dimension":"offered_value","label":"分步练习","retrievalUse":"查找分步练习方法","unitIds":["u3"]

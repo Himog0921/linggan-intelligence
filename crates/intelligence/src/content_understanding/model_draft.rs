@@ -5,6 +5,9 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const PROTOCOL: &str = "content-understanding.draft.short-sources.v1";
 
+/// Revision of the model-facing L1 classification and citation guidance.
+pub const GUIDANCE_VERSION: &str = "content-understanding.l1.guidance.v1";
+
 pub fn material(snapshot: &Snapshot) -> Value {
     let mut material = json!(snapshot);
     if let Some(texts) = material["texts"].as_array_mut() {
