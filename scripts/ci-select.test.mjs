@@ -171,7 +171,7 @@ test('every current browser script has an explicit proof or manual-only classifi
   ];
   const ocrAudit = ['ocr-recognition-real-chain.mjs'];
   const manualOnly = [
-    'ops-visual.mjs', 'team-member-scroll.mjs',
+    'ops-visual.mjs', 'ops-content-lens.mjs', 'team-member-scroll.mjs',
     'topics-performance.mjs', 'topics-pixels.py', 'topics-visual.mjs',
   ];
   assert.deepEqual(readdirSync(join(root, 'apps/web/test/e2e')).sort(),

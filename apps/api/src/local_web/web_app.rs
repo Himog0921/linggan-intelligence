@@ -35,6 +35,7 @@ const REACT_PAGES: &[&str] = &[
     "/collection/domains",
     "/collection/runtime",
     "/ops/overview",
+    "/ops/content",
     "/ops/publications",
     "/ops/accounts",
     "/ops/daily",
@@ -51,6 +52,7 @@ const AUTHENTICATED_REACT_PAGES: &[&str] = &[
     "/settings/account",
     "/settings/team",
     "/ops/overview",
+    "/ops/content",
     "/ops/publications",
     "/ops/accounts",
     "/ops/daily",
@@ -225,7 +227,10 @@ async fn authenticated_entry(
         Err(response) => return response,
     };
     if member.role != "admin"
-        && matches!(uri.path(), "/ops/overview" | "/ops/io" | "/settings/team")
+        && matches!(
+            uri.path(),
+            "/ops/overview" | "/ops/content" | "/ops/io" | "/settings/team"
+        )
     {
         return StatusCode::FORBIDDEN.into_response();
     }

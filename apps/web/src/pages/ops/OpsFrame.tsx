@@ -1,3 +1,4 @@
+import { useLensStatus } from './content/api';
 import type { ReactNode } from 'react';
 import { AppShell } from '../../app/AppShell';
 import { ContextBreadcrumb } from '../../shared/ContextBar';
@@ -5,6 +6,7 @@ import { Sidebar, type SidebarNavigationItem } from '../../shared/Sidebar';
 
 const DATA_PAGES = [
   { key: 'overview', label: '概览', code: 'OV', icon: 'overview' },
+  { key: 'content', label: '内容回溯', code: 'LENS', icon: 'overview' },
   { key: 'publications', label: '发布记录', code: 'PUB', icon: 'publications' },
   { key: 'accounts', label: '账号管理', code: 'ACC', icon: 'accounts' },
   { key: 'daily', label: '每日数据', code: 'DAY', icon: 'daily' },
@@ -41,7 +43,11 @@ export function OpsFrame({
   children: ReactNode;
 }) {
   const selectedDomain = domain && domain !== 'all' ? '?domain=' + encodeURIComponent(domain) : '';
-  const dataPages = (restricted ? DATA_PAGES.slice(1) : DATA_PAGES).map(item => ({
+  const lens = useLensStatus(!restricted);
+  const dataPages = DATA_PAGES.filter(item => {
+    if (item.key === 'content') return !restricted && lens.isSuccess && lens.data.enabled;
+    return item.key !== 'overview' || !restricted;
+  }).map(item => ({
     id: 'data-' + item.key,
     label: item.label,
     code: item.code,
