@@ -12,14 +12,15 @@ function SectionTitle({ title, grade }: { title: string; grade: string }) {
   return <header className={css.heading}><h2>{title}</h2><Tag>{grade}</Tag></header>;
 }
 export function Quality({ snapshot: { quality: q }, open, spot }: { snapshot: Snapshot; open: Open; spot: () => void }) {
+  const summary = q.agreement.find(a => !a.meetsThreshold) ?? q.agreement[0];
   return <section className={css.quality} aria-label="数据质量">
     <div><span>数据截至</span><strong>{q.latest ?? '未知'}</strong>{q.stale && <small>数据陈旧 · 距今 {q.days} 天</small>}</div>
     <div><span>有阅读量</span><strong>{percent(q.share)}</strong><small>
       <Link label="查看有阅读量的笔记" onClick={() => open({ metric: 'titledViews', label: '有阅读量' })}>{q.withViews}</Link> / <Link label="查看有标题的发布记录" onClick={() => open({ metric: 'titledPublications', label: '有标题的发布记录' })}>{q.titled}</Link> 篇
-    </small></div>
-    <div><span>机器标签一致率</span><details><summary>{q.agreement[0] ? (labels[q.agreement[0].dimension as keyof typeof labels] ?? q.agreement[0].dimension) + ' ' + percent(q.agreement[0].value) : '暂无复标结果'}</summary>{q.agreement.length ? q.agreement.map(a =>
+    </small><small>范围内 {q.publications} 篇，有标题 {q.titled} 篇，待标 {q.pending} 个标题</small></div>
+    <div><span>机器标签一致率</span><details><summary>{summary ? (labels[summary.dimension as keyof typeof labels] ?? summary.dimension) + ' ' + percent(summary.value) + (summary.meetsThreshold ? '' : ' · 未达标') : '暂无复标结果'}</summary>{q.agreement.length ? q.agreement.map(a =>
       <p key={a.run + a.dimension}>{labels[a.dimension as keyof typeof labels] ?? a.dimension} · {percent(a.value)} · κ {a.kappa?.toFixed(2) ?? '未知'} · {a.count} 条 <small>批次 {a.run.slice(0, 8)}</small></p>) : <p>暂无复标结果</p>}</details></div>
-    <div><span>人工抽看</span><Link label="查看人工抽看样本" onClick={spot}>已裁定 {q.adjudicated} 个标题</Link></div>
+    <div><span>人工抽看</span><Link label="查看人工抽看样本" onClick={spot}>查看抽看样本</Link><small>已裁定 {q.adjudicated} 个标题</small></div>
     <div><span>分类体系</span><strong>v{q.taxonomy}</strong><small>指标 v{q.metric}</small></div>
   </section>;
 }
@@ -36,7 +37,7 @@ export function Structure({ snapshot, open }: { snapshot: Snapshot; open: Open }
 }
 const percentCss = (v: number) => new Intl.NumberFormat('en-US', { style: 'percent', maximumFractionDigits: 4 }).format(v);
 export function Coverage({ snapshot, open }: { snapshot: Snapshot; open: Open }) {
-  const { coverage: { cells, sparse, empty }, structure } = snapshot;
+  const { coverage: { cells, sparse, empty, top10Share }, structure } = snapshot;
   const columns = [...new Set(cells.map(cell => cell.column))];
   const rows = new Map<string, Map<string, typeof cells[number]>>();
   for (const cell of cells) {
@@ -46,7 +47,7 @@ export function Coverage({ snapshot, open }: { snapshot: Snapshot; open: Open })
   }
   const names = (dim: Dimension, k: string) => structure[dim].find(v => v.key === k)?.name ?? k;
   return <section className={css.section}><SectionTitle title="覆盖分布" grade="结构事实" />
-    <p>时刻 × 给什么 · {empty} 个空格 · {sparse} 个稀疏格</p>
+    <p>时刻 × 给什么 · {empty} 个空格 · {sparse} 个稀疏格 · 前十格占比 {percent(top10Share)}</p>
     <div className={css.tableScroll}><table className={css.grid}><caption className="v7-sr-only">时刻与给什么的发布篇数</caption>
       <thead><tr><th scope="col">时刻 / 给什么</th>{columns.map(col => <th scope="col" key={col}>{names('offer',col)}</th>)}</tr></thead>
       <tbody>{[...rows].map(([key,row]) => <tr key={key}><th scope="row">{names('moment',key)}</th>{columns.map(col => {
@@ -78,7 +79,7 @@ export function Effects({ snapshot, open }: { snapshot: Snapshot; open: Open }) 
   return <section className={css.section}><SectionTitle title="发布效果" grade="待检验假设" />
     <Tabs label="效果维度" values={dimTabs.filter(([v]) => v !== 'situation')} current={dim} onSelect={v => setDim(v as EffectDimension)} compact />
     {!effect.available ? <p role="status">{labels[dim]}的复标一致率不足，暂不展示该维度的效果。</p> :
-      <div className={css.tableScroll}><table className={css.effects}><thead><tr><th>{labels[dim]}</th><th>过千率</th><th>评论活跃率</th><th>千次阅读评论数</th><th>阅读量中位数</th><th>爆款篇数</th><th>账号内阅读偏差</th></tr></thead>
+      <div className={css.effectTable}><table className={css.effects}><thead><tr><th>{labels[dim]}</th><th>过千率</th><th>评论活跃率</th><th>千次阅读评论数</th><th>阅读量中位数</th><th>爆款篇数</th><th>账号内阅读偏差</th></tr></thead>
         <tbody>{effect.rows.map(row => {
           const label = labelFor(row.key);
           const drill = (metric: Drill['metric']): Drill => ({ metric, label, [dim]:row.key });

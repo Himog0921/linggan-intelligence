@@ -52,12 +52,12 @@ function snapshot(r: d.Json) {
   if (d.str(e, 'grade') !== 'hypothesis') throw new d.ShapeError('effect.grade');
   return { ref: d.str(r, 'snapshotRef'), quality: {
     latest: textOrNull(q, 'latestPublishedDate'), stale: d.optBool(q, 'isStale'), days: numberOrNull(q, 'staleDays'),
-    withViews: d.num(q, 'withViews'), titled: d.num(q, 'titled'), share: numberOrNull(q, 'withViewsShare'),
+    publications: d.num(q, 'publications'), pending: d.num(q, 'pendingTitles'), withViews: d.num(q, 'withViews'), titled: d.num(q, 'titled'), share: numberOrNull(q, 'withViewsShare'),
     taxonomy: d.num(q, 'taxonomyVersion'), metric: d.num(q, 'metricVersion'), adjudicated: d.num(q, 'adjudicatedTitles'),
-    agreement: d.list(q, 'agreement', a => ({ run: d.str(a, 'runRef'), dimension: d.str(a, 'dimension'), value: numberOrNull(a, 'agreement'), kappa: numberOrNull(a, 'kappa'), count: d.num(a, 'sampleCount') })),
+    agreement: d.list(q, 'agreement', a => ({ run: d.str(a, 'runRef'), dimension: d.str(a, 'dimension'), meetsThreshold: d.bool(a, 'meetsThreshold'), value: numberOrNull(a, 'agreement'), kappa: numberOrNull(a, 'kappa'), count: d.num(a, 'sampleCount') })),
   }, structure: { offer: d.list(s, 'offer', group), moment: d.list(s, 'moment', group), situation: d.list(s, 'situation', group) },
   coverage: { cells: d.list(c, 'cells', cell => ({ row: d.str(cell, 'row'), column: d.str(cell, 'column'), count: d.num(cell, 'publications'), state: d.str(cell, 'state') })),
-    empty: d.num(c, 'emptyCells'), sparse: d.num(c, 'sparseCells') },
+    top10Share: numberOrNull(c, 'top10Share'), empty: d.num(c, 'emptyCells'), sparse: d.num(c, 'sparseCells') },
   effect: { offer: effect(d.obj(by, 'offer')), moment: effect(d.obj(by, 'moment')),
     variance: d.list(e, 'varianceShare', v => ({ factor: d.str(v, 'factor'), scope: d.str(v, 'scope'), observed: numberOrNull(v, 'observed'),
       excess: numberOrNull(v, 'excess'), nullMean: numberOrNull(v, 'nullMean'), p: numberOrNull(v, 'pValue'), observations: d.num(v, 'observations') })),

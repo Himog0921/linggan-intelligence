@@ -1,5 +1,6 @@
 .board { min-width:0; min-height:0; overflow:auto; padding:0 var(--lgi-space-2) var(--lgi-space-8) 0; color:var(--lgi-ink); }
 .board h2, .dialog h2 { margin:0; color:var(--lgi-ink); font-size:var(--lgi-text-section); line-height:var(--lgi-lh-heading); }
+.board progress { accent-color:var(--lgi-signal-ink); }
 .board h3 { margin:var(--lgi-space-5) 0 var(--lgi-space-2); font-size:var(--lgi-text-body); }
 .board p, .dialog p { margin:var(--lgi-space-2) 0; }
 .board small, .dialog small { color:var(--lgi-muted); font-size:var(--lgi-text-label); }
@@ -45,3 +46,6 @@
 .note { color:var(--lgi-muted); }
 .dialog { width:min(85vw,calc(var(--lgi-space-24)*9)); max-height:80vh; overflow:auto; }
 .dialog .heading { justify-content:space-between; }
+
+.effectTable { margin-block:var(--lgi-space-2); }
+.effectTable thead th { position:sticky; top:0; z-index:1; }
