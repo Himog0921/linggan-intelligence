@@ -532,6 +532,7 @@ async fn health_reports_the_frontend_build() {
             "/collection/domains",
             "/collection/runtime",
             "/ops/overview",
+            "/ops/content",
             "/ops/publications",
             "/ops/accounts",
             "/ops/daily",

@@ -19,6 +19,6 @@ export const TOPICS_PATH = '/topics';
 export const OFFLINE_REVIEW_PATH = '/topics/offline-review';
 export const TOPIC_WORKSPACE_PATH = '/topics/{canonical_key}';
 
-export const OPS_PATHS = ['/ops/overview', '/ops/publications', '/ops/accounts', '/ops/daily', '/ops/io'] as const;
+export const OPS_PATHS = ['/ops/overview', '/ops/content', '/ops/publications', '/ops/accounts', '/ops/daily', '/ops/io'] as const;
 
 export const REACT_PAGE_PATHS: readonly string[] = [LOGIN_PATH, INVITATION_ACCEPT_PATH, MODEL_SETTINGS_PATH, ACCOUNT_SETTINGS_PATH, TEAM_SETTINGS_PATH, WORKBENCH_PATH, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, OPPORTUNITY_PATH, ...COLLECTION_PATHS, ...OPS_PATHS, TOPICS_PATH, OFFLINE_REVIEW_PATH, TOPIC_WORKSPACE_PATH];

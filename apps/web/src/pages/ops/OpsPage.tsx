@@ -1,3 +1,4 @@
+import { ContentLensPage } from "./content/ContentLensPage";
 import { useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Navigate, useLocation, useSearchParams } from "react-router";
@@ -9,7 +10,7 @@ import { c } from "./styles";
 import { LedgerPage } from "./LedgerPage";
 import { OverviewPage } from "./OverviewPage";
 import { requestJson } from "../../shared/api";
-const entries = [['overview', '概览'], ['publications', '发布记录'], ['accounts', '账号管理'], ['daily', '每日数据']] as const;
+const entries = [['overview', '概览'], ['content', '内容回溯'], ['publications', '发布记录'], ['accounts', '账号管理'], ['daily', '每日数据']] as const;
 export type LedgerKind = "publications" | "accounts" | "daily";
 export function OpsPage() {
   const location = useLocation();
@@ -68,6 +69,7 @@ function OpsDataPage() {
       ? "数据截至时间未知"
       : "尚未迁入数据";
   if (session.isPending) return <p role="status">正在核对团队身份…</p>;
+  if (current[0] === "content" && session.isSuccess && restricted) return <Navigate replace to="/ops/publications" />;
   if (session.isError) return <p role="alert">团队身份读取失败，请刷新页面后重试。</p>;
   return (
     <OpsFrame section="data" domain={business} foot={foot} restricted={restricted} manageTeam={role === 'admin'}
@@ -84,7 +86,7 @@ function OpsDataPage() {
         }} />}
       dataPageKey={current[0]}
       page={current[1]}
-      meta={<><span>可录入台账</span><span>历史迁入数据只读</span></>}>
+      meta={current[0] === "content" ? undefined : <><span>可录入台账</span><span>历史迁入数据只读</span></>}>
         <main className={c("ops-main")} aria-labelledby="ops-title">
           <h1 id="ops-title" className="v7-sr-only">
             {current[1]}
@@ -95,6 +97,8 @@ function OpsDataPage() {
             </Status>
           ) : invalid || options.isPending ? (
             <Status>正在读取业务…</Status>
+          ) : current[0] === "content" ? (
+            <ContentLensPage key={business} domain={business} />
           ) : current[0] === "overview" ? (
             <OverviewPage key={`overview:${business}`} business={business} />
           ) : (
