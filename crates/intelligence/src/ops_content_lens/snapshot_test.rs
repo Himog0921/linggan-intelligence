@@ -1,4 +1,6 @@
 use super::*;
+#[path = "read_tests.rs"]
+mod read_tests;
 
 #[tokio::test]
 #[ignore = "requires the disposable ops ledger proof database"]
@@ -156,6 +158,7 @@ async fn snapshot_generation_reuses_input_and_preserves_frozen_members() {
             .total_publications,
         1
     );
+    read_tests::verify_reads(&db, first.snapshot_ref, after, filtered.snapshot_ref).await;
 }
 
 async fn record_views(db: &Database, publication: Uuid, seq: i64, count: Option<i64>) {

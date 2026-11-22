@@ -1349,6 +1349,20 @@ async fn title_run_route_respects_flag_and_admin_session() {
         (true, StatusCode::FORBIDDEN),
     ] {
         let router = super::ops_content_lens_api::routes(flag).with_state(state.clone());
+        for route in ["status", "snapshot", "publications", "spot-check"] {
+            let path = format!("/api/local/ops/content-lens/{route}");
+            let response = router
+                .clone()
+                .oneshot(session_request(&path, &cookie, "GET"))
+                .await
+                .unwrap();
+            let expected = if !flag && route == "status" {
+                StatusCode::OK
+            } else {
+                status
+            };
+            assert_eq!(response.status(), expected, "{path} enabled={flag}");
+        }
         let response = router
             .oneshot(authenticated_json_request(
                 path,

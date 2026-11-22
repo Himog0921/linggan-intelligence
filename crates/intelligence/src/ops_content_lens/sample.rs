@@ -5,6 +5,8 @@ use uuid::Uuid;
 #[derive(Clone, Copy, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum SampleMetric {
+    TitledPublications,
+    TitledViews,
     Publications,
     Views,
     WithinAccountViews,
@@ -53,8 +55,8 @@ impl SampleMetric {
     ) -> bool {
         let numerator = matches!(subset, Subset::Numerator);
         match self {
-            Self::Publications => true,
-            Self::Views | Self::WithinAccountViews => row.views.value.is_some(),
+            Self::Publications | Self::TitledPublications => true,
+            Self::Views | Self::TitledViews | Self::WithinAccountViews => row.views.value.is_some(),
             Self::OverThousand => row
                 .views
                 .value
@@ -85,7 +87,12 @@ pub fn select_publications(
     let rows = input
         .publications
         .iter()
-        .filter(|(_, row)| !row.labels.is_empty())
+        .filter(|(_, row)| {
+            matches!(
+                metric,
+                SampleMetric::TitledPublications | SampleMetric::TitledViews
+            ) || !row.labels.is_empty()
+        })
         .map(|(id, row)| (*id, row))
         .collect::<Vec<_>>();
     let within = matches!(metric, SampleMetric::WithinAccountViews)
