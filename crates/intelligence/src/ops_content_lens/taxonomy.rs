@@ -192,4 +192,4 @@ const AUDIENCE: &[&str] = &[
 ];
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

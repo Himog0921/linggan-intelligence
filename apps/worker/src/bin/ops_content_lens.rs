@@ -1,6 +1,6 @@
 //! Operator commands for the content retrospect dashboard.
 use linggan_intelligence::ops_content_lens::{
-    SnapshotScope, build_snapshot, enabled_from_env, load_taxonomy,
+    SnapshotScope, build_snapshot, enabled_from_env, label, load_taxonomy_file,
 };
 use linggan_storage_postgres::Database;
 use std::{ffi::OsString, process::ExitCode};
@@ -16,7 +16,7 @@ async fn main() -> ExitCode {
     }
 }
 
-const USAGE: &str = "usage: linggan-ops-content-lens load-taxonomy --file FILE | build-snapshot [--domain UUID] [--from YYYY-MM-DD] [--to YYYY-MM-DD]";
+const USAGE: &str = "usage: linggan-ops-content-lens load-taxonomy --file FILE | plan-run | start-run | build-snapshot [--domain UUID] [--from YYYY-MM-DD] [--to YYYY-MM-DD]";
 
 fn scope(args: &[OsString]) -> Result<SnapshotScope, &'static str> {
     let mut scope = SnapshotScope::default();
@@ -48,9 +48,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .map_err(Box::<dyn std::error::Error>::from)
     };
     let receipt = match (command.to_str(), args) {
-        (Some("load-taxonomy"), [flag, file]) if flag == "--file" => {
-            let bytes = std::fs::read(file)?;
-            serde_json::to_string(&load_taxonomy(&db().await?, &bytes).await?)?
+        (Some("load-taxonomy"), [flag, file]) if flag == "--file" => serde_json::to_string(
+            &load_taxonomy_file(&db().await?, std::path::Path::new(file)).await?,
+        )?,
+        (Some("plan-run" | "start-run"), []) => {
+            if !enabled_from_env() {
+                return Err("ops_content_lens_disabled".into());
+            }
+            let db = db().await?;
+            if command == "plan-run" {
+                serde_json::to_string(&label::plan(&db).await?)?
+            } else {
+                serde_json::to_string(&label::start(&db, uuid::Uuid::new_v4()).await?)?
+            }
         }
         (Some("build-snapshot"), args) => {
             if !enabled_from_env() {

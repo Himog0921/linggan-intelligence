@@ -1,3 +1,5 @@
+// The synthetic ledger export used by the title-label proof is a large JSON literal.
+#![cfg_attr(test, recursion_limit = "256")]
 //! Domain intelligence interfaces. Topic workspaces are explicit, versioned human research
 //! decisions over Work Resource identities; they never manufacture Evidence or source facts.
 

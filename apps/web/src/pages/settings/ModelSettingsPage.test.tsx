@@ -161,7 +161,7 @@ describe('AI 设置四区', () => {
     expect(posts()).toHaveLength(1);
     expect(posts()[0]).toMatchObject({ path: '/api/local/ai-settings/skills/switch', body: { taskKey: 'writing_legacy', versionRef: 'version-2', expectedTaskRevision: 0, expectedBindingRevision: 0 } });
   });
-  it.each(['comment_understanding','comment_problem_consolidation','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research'])('研究阶段 %s 可编辑提示词与切换做法', async taskKey => {
+  it.each(['ops_title_label','comment_understanding','comment_problem_consolidation','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review','creator_research','creator_account_research'])('研究阶段 %s 可编辑提示词与切换做法', async taskKey => {
     const seed = settingsFixture();
     const config = { ...seed.configurations[0]!, taskKey, skillVersionRef: null, executionContract: null };
     const version = { versionRef: 'version-1', versionNo: 1, description: 'Synthetic', packageSha256: 'a'.repeat(64), sourceSha256: 'b'.repeat(64), disableModelInvocation: false, createdAt: config.createdAt, fileCount: 1 };

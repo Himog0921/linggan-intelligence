@@ -20,6 +20,7 @@ mod content_understanding_deep;
 mod creator_account_research;
 mod creator_research;
 mod opportunity_sync;
+mod ops_title_label;
 mod research_call;
 mod topic_research;
 mod work_comparison;
@@ -109,6 +110,7 @@ async fn work_loop(
     let mut automation_scan = Instant::now();
     let mut automation_cursor = None;
     let mut understanding_cursor = None;
+    let lens_enabled = crate::ops_content_lens::enabled_from_env();
     loop {
         if drain.is_requested() && tasks.is_empty() {
             return failure.map_or(Ok(()), Err);
@@ -149,12 +151,15 @@ async fn work_loop(
                     if let Err(error) = crate::ai_foundation::content_understanding::automation_tick(db, &mut understanding_cursor).await {
                         eprintln!("content understanding automation scan deferred: {error}");
                     }
+                    if lens_enabled && let Err(error) = crate::ops_content_lens::label::advance(db).await {
+                        eprintln!("content lens follow-up deferred: {error}");
+                    }
                     if let Err(error) = crate::ai_foundation::comment_understanding::consolidation_queue::tick(db).await {
                         eprintln!("comment consolidation scan deferred: {error}");
                     }
                     automation_scan = Instant::now() + Duration::from_secs(5);
                 }
-                if let Err(error)=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery,&opportunity_sync).await{
+                if let Err(error)=fill_slots(db,fence,concurrency,&mut tasks,&secrets,&adapter,&drain,&mut recovery,&opportunity_sync,lens_enabled).await{
                     failure.get_or_insert(error);drain.request();
                 }
             }
@@ -171,13 +176,14 @@ async fn fill_slots(
     drain: &ModelWorkerDrain,
     recovery: &mut Instant,
     opportunity_sync: &Option<Arc<opportunity_sync::OpportunitySync>>,
+    lens_enabled: bool,
 ) -> Result<(), ExecutorError> {
     if Instant::now() >= *recovery {
         queue::recover_expired(db, fence).await?;
         *recovery = Instant::now() + Duration::from_secs(5);
     }
     while tasks.len() < concurrency as usize && !drain.is_requested() {
-        let claimed = match queue::claim_next(db, fence).await {
+        let claimed = match queue::claim_with_lens(db, fence, lens_enabled).await {
             Err(ExecutorError::FenceLost) if drain.is_requested() => {
                 fence.begin(db, false).await?.commit().await?;
                 break;
@@ -216,6 +222,7 @@ async fn fill_slots(
                 TaskKey::WorkComparison => {
                     work_comparison::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
+                TaskKey::OpsTitleLabel => ops_title_label::execute(&db, &item, secrets.as_ref(), &adapter).await,
                 TaskKey::CommentProblemConsolidation => {
                     comment_problem_consolidation::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }

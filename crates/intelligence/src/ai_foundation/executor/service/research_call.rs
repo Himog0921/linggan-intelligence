@@ -70,11 +70,14 @@ pub(super) async fn prepare_with_images_in(
         system.push_str("\n\n");
         system.push_str(&skill);
     }
-    input
-        .payload
-        .as_object_mut()
-        .ok_or(ExecutorError::Invalid)?
-        .insert("instruction".into(), json!(instruction));
+    if item.task_key == crate::ai_foundation::TaskKey::OpsTitleLabel {
+        // Keep the blind material payload exactly taxonomy + titles, in that order.
+        system.push_str("\n\n");
+        system.push_str(&instruction);
+    } else {
+        input.payload.as_object_mut().ok_or(ExecutorError::Invalid)?
+            .insert("instruction".into(), json!(instruction));
+    }
     if matches!(
         item.task_key,
         crate::ai_foundation::TaskKey::ContentUnderstanding
