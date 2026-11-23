@@ -78,14 +78,23 @@ pub struct Excerpt {
     pub selected_text: Option<String>,
     pub text_hash: String,
 }
+/// What a material card is for in this draft. `Inbox` is "not decided yet"; the rest are the nine uses.
+/// `Argument` is the sample's 观点. Revisions are immutable, so a value that has ever been saved must
+/// keep its name and stay readable: add values, never rename or remove them. Adding one is forward-only:
+/// a server that predates it cannot read a draft that already uses it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CanvasGroup {
     Inbox,
     Opening,
+    Resonance,
+    Experience,
     Argument,
     Example,
     Ending,
+    TitleReference,
+    ReferenceOnly,
+    Counterexample,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -581,4 +590,54 @@ pub struct AdoptionLink {
     pub input_revision: Uuid,
     pub model_invocation_ref: Uuid,
     pub method_version: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// Every value with the name stored in a revision and read by the page.
+    const ROLES: [(CanvasGroup, &str); 10] = [
+        (CanvasGroup::Inbox, "inbox"),
+        (CanvasGroup::Opening, "opening"),
+        (CanvasGroup::Resonance, "resonance"),
+        (CanvasGroup::Experience, "experience"),
+        (CanvasGroup::Argument, "argument"),
+        (CanvasGroup::Example, "example"),
+        (CanvasGroup::Ending, "ending"),
+        (CanvasGroup::TitleReference, "title_reference"),
+        (CanvasGroup::ReferenceOnly, "reference_only"),
+        (CanvasGroup::Counterexample, "counterexample"),
+    ];
+
+    #[test]
+    fn card_roles_keep_the_names_stored_in_revisions() {
+        for (role, name) in ROLES {
+            assert_eq!(serde_json::to_value(&role).unwrap(), json!(name));
+            assert_eq!(
+                serde_json::from_value::<CanvasGroup>(json!(name)).unwrap(),
+                role
+            );
+        }
+        // The five values that existed before the sample's roles were added must still read.
+        for old in ["inbox", "opening", "argument", "example", "ending"] {
+            assert!(
+                serde_json::from_value::<CanvasGroup>(json!(old)).is_ok(),
+                "{old}"
+            );
+        }
+    }
+
+    #[test]
+    fn an_unknown_card_role_is_refused_not_guessed() {
+        let card = |group: &str| json!({"id": Uuid::nil(), "excerptId": null, "group": group, "note": "", "expression": "", "expressionRevision": 1});
+        assert!(serde_json::from_value::<CanvasBlock>(card("resonance")).is_ok());
+        for bad in ["bogus", "Resonance", "title-reference", ""] {
+            assert!(
+                serde_json::from_value::<CanvasBlock>(card(bad)).is_err(),
+                "{bad:?}"
+            );
+        }
+    }
 }
