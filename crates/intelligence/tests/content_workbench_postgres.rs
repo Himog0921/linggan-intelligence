@@ -88,25 +88,26 @@ async fn every_card_role_is_saved_and_read_back_and_older_revisions_are_untouche
     let db = db("creation_card_roles").await;
     let first = create(&db, doc()).await;
     let roles = [
-        (CanvasGroup::Inbox, "inbox"),
-        (CanvasGroup::Opening, "opening"),
-        (CanvasGroup::Resonance, "resonance"),
-        (CanvasGroup::Experience, "experience"),
-        (CanvasGroup::Argument, "argument"),
-        (CanvasGroup::Example, "example"),
-        (CanvasGroup::Ending, "ending"),
-        (CanvasGroup::TitleReference, "title_reference"),
-        (CanvasGroup::ReferenceOnly, "reference_only"),
-        (CanvasGroup::Counterexample, "counterexample"),
+        CanvasGroup::Inbox,
+        CanvasGroup::Opening,
+        CanvasGroup::Resonance,
+        CanvasGroup::Experience,
+        CanvasGroup::Argument,
+        CanvasGroup::Example,
+        CanvasGroup::Ending,
+        CanvasGroup::TitleReference,
+        CanvasGroup::ReferenceOnly,
+        CanvasGroup::Counterexample,
     ];
     let mut next = first.revision.document.clone();
     next.canvas = roles
         .iter()
-        .map(|(group, name)| CanvasBlock {
+        .enumerate()
+        .map(|(index, group)| CanvasBlock {
             id: Uuid::new_v4(),
             excerpt_id: None,
             group: group.clone(),
-            note: format!("用途 {name}"),
+            note: format!("用途 {index}"),
             expression: String::new(),
             expression_revision: 1,
         })
@@ -141,10 +142,20 @@ async fn every_card_role_is_saved_and_read_back_and_older_revisions_are_untouche
         .iter()
         .map(|card| card["group"].as_str().unwrap())
         .collect();
+    // The exact names are pinned by the unit test next to `CanvasGroup`; here the database must hold what serde writes.
+    let written: Vec<String> = roles
+        .iter()
+        .map(|group| {
+            serde_json::to_value(group)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
     assert_eq!(
-        names,
-        roles.iter().map(|(_, name)| *name).collect::<Vec<_>>(),
-        "the stored names are the ones the page decodes"
+        names, written,
+        "the revision stores each role under its serialized name, in card order"
     );
     // The revision saved before any new role existed still reads exactly as it was.
     let history = revisions(&db, first.work_id).await.unwrap();
