@@ -2024,6 +2024,175 @@ async fn first_person_advertising_copy_does_not_require_personal_experience_bind
     );
 }
 
+async fn receipt_count(db: &Database, work: Uuid) -> i64 {
+    sqlx::query_scalar("SELECT count(*) FROM linggan_creation_copy_receipt WHERE work_ref=$1")
+        .bind(work)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn copy_preview_is_what_the_copy_then_hands_out_and_records_nothing() {
+    let db = db("assets_copy_preview").await;
+    let (account, _, _) = accounts(&db).await;
+    let mut doc = draft(Some(account), &["合成示例：我也遇到过这样的日常。"]);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    let work = create(&db, doc).await;
+    let preview = preview_copy(&db, work.work_id).await.unwrap();
+    assert_eq!(preview.revision_id, work.revision.id);
+    assert!(preview.text.contains("合成示例"));
+    assert_eq!(
+        receipt_count(&db, work.work_id).await,
+        0,
+        "a preview records nothing"
+    );
+    let again = preview_copy(&db, work.work_id).await.unwrap();
+    assert_eq!(again.text, preview.text, "asking twice gives the same text");
+    assert_eq!(receipt_count(&db, work.work_id).await, 0);
+    let ready = prepare_copy(
+        &db,
+        work.work_id,
+        &CopyCommand {
+            request_id: Uuid::new_v4(),
+            expected_revision: work.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            &preview.title,
+            &preview.body,
+            &preview.tags,
+            &preview.text,
+            preview.revision_id,
+            preview.warn_count,
+            preview.hint_count,
+            &preview.ruleset_version
+        ),
+        (
+            &ready.title,
+            &ready.body,
+            &ready.tags,
+            &ready.text,
+            ready.revision_id,
+            ready.warn_count,
+            ready.hint_count,
+            &ready.ruleset_version
+        ),
+        "the preview is exactly what the copy then hands out"
+    );
+    assert_eq!(
+        receipt_count(&db, work.work_id).await,
+        1,
+        "only the copy command records a receipt"
+    );
+    assert!(matches!(
+        preview_copy(&db, Uuid::new_v4()).await,
+        Err(AssetsError::NotFound)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn copy_preview_is_blocked_by_a_must_fix_exactly_like_the_copy() {
+    let db = db("assets_copy_preview_blocked").await;
+    let (account, _, _) = accounts(&db).await;
+    let mut doc = draft(Some(account), &["合成正文", ""]);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    doc.experience_gaps.push(doc.paragraphs[1].id);
+    let saved = create(&db, doc).await;
+    assert!(
+        matches!(preview_copy(&db, saved.work_id).await,
+        Err(AssetsError::Blocked(findings)) if findings.iter().any(|f| f.rule == "R-M8" && f.level == Level::Must)),
+        "an unfilled experience slot blocks the preview as it blocks the copy"
+    );
+    assert_eq!(receipt_count(&db, saved.work_id).await, 0);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn copy_preview_stops_showing_an_experience_once_it_is_withdrawn() {
+    let db = db("assets_copy_preview_withdrawal").await;
+    let (account, _, _) = accounts(&db).await;
+    put_identity(
+        &db,
+        account,
+        &identity(0, OrgRelation::Parent, None, Some("妈妈")),
+    )
+    .await
+    .unwrap();
+    let made = create_experience(
+        &db,
+        &ExperienceCreate {
+            request_id: Uuid::new_v4(),
+            account_ref: account,
+            expected_person_ref: read_identity(&db, account)
+                .await
+                .unwrap()
+                .and_then(|value| value.person_ref)
+                .unwrap_or(Uuid::nil()),
+            title: "虚构".into(),
+            body: "合成经历，只供测试。".into(),
+            tags: vec![],
+            origin: "oral".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let id = made.experience.id;
+    confirm_experience(
+        &db,
+        id,
+        &ExperienceConfirm {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            subject_confirmed: true,
+            draft_use: true,
+            send_to_model: None,
+            confirmation_method: "subject_present".into(),
+        },
+    )
+    .await
+    .unwrap();
+    let mut doc = draft(Some(account), &["合成改写经历，只供测试。"]);
+    doc.bridge = Some(BridgeChoice {
+        skip: true,
+        sentence: None,
+        after_paragraph: None,
+    });
+    doc.experience_slots.push(ExperienceSlot {
+        paragraph_id: doc.paragraphs[0].id,
+        experience_ref: id,
+        experience_revision: 1,
+    });
+    let work = create(&db, doc).await;
+    let before = preview_copy(&db, work.work_id).await.unwrap();
+    assert!(
+        before.text.contains("合成改写经历"),
+        "the preview reaches the experience text while it is usable"
+    );
+    withdraw_experience(&db, id, Uuid::new_v4()).await.unwrap();
+    assert!(
+        matches!(
+            preview_copy(&db, work.work_id).await,
+            Err(AssetsError::SourceUnavailable)
+        ),
+        "after the withdrawal the preview refuses, as the copy does"
+    );
+    assert_eq!(receipt_count(&db, work.work_id).await, 0);
+}
+
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn anonymous_comment_can_be_used_with_its_source_and_copied_without_personal_binding() {

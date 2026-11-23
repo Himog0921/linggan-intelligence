@@ -638,6 +638,14 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
         (StatusCode::CONFLICT, Some("creation_assets_blocked"))
     );
     assert_eq!(blocked["findings"][0]["rule"], "R-M1");
+    let preview_uri = format!("/ops/api/creation/works/{id}/copy-preview");
+    let (status, blocked_preview) = call(&app, Method::GET, &preview_uri, None).await;
+    assert_eq!(
+        (status, blocked_preview["code"].as_str()),
+        (StatusCode::CONFLICT, Some("creation_assets_blocked")),
+        "the preview is blocked by the same must-fix"
+    );
+    assert_eq!(blocked_preview["findings"][0]["rule"], "R-M1");
 
     // Decide "这篇不植入", save, and copy.
     let mut document = work["revision"]["document"].clone();
@@ -667,6 +675,27 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
     assert_eq!(status, StatusCode::OK, "{ready}");
     assert_eq!(ready["text"], "第一段。\n\u{3164}\n第二段。\n#ADHD");
     assert_eq!(ready["title"], "合成标题");
+    let (status, preview) = call(&app, Method::GET, &preview_uri, None).await;
+    assert_eq!(status, StatusCode::OK, "{preview}");
+    for field in [
+        "title",
+        "body",
+        "text",
+        "tags",
+        "revisionId",
+        "warnCount",
+        "hintCount",
+        "rulesetVersion",
+    ] {
+        assert_eq!(
+            preview[field], ready[field],
+            "preview {field} is what the copy hands out"
+        );
+    }
+    assert!(
+        preview.get("receiptRef").is_none() && preview.get("replayed").is_none(),
+        "a preview has no receipt: nothing was recorded"
+    );
     let (_, again) = call(&app, Method::POST, &copy, Some(command)).await;
     assert_eq!(again["replayed"], true);
     assert_eq!(again["receiptRef"], ready["receiptRef"]);
@@ -690,6 +719,14 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
         Method::POST,
         &format!("/ops/api/creation/works/{}/copy", Uuid::new_v4()),
         Some(json!({"requestId": rid(), "expectedRevision": Uuid::new_v4()})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+    let (status, _) = call(
+        &app,
+        Method::GET,
+        &format!("/ops/api/creation/works/{}/copy-preview", Uuid::new_v4()),
+        None,
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
