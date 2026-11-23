@@ -32,7 +32,7 @@ impl SnapshotScope {
     }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SnapshotReceipt {
     pub snapshot_ref: Uuid,
@@ -101,25 +101,52 @@ pub(super) async fn build_for_task(
     scope: SnapshotScope,
     task: &str,
 ) -> Result<SnapshotReceipt, LensDefinitionError> {
+    // A concurrent generator may win the unique input hash while this transaction
+    // still sees an older snapshot. Retry with a fresh PostgreSQL snapshot.
+    for attempt in 0..3 {
+        let mut tx = database.pool().begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("LOCK TABLE linggan_ops_lens_adjudication IN SHARE MODE")
+            .execute(&mut *tx)
+            .await?;
+        match build_in(&mut tx, &scope, task).await {
+            Err(LensDefinitionError::Database(sqlx::Error::Database(e)))
+                if e.code().as_deref() == Some("40001") && attempt < 2 =>
+            {
+                continue;
+            }
+            result => {
+                let receipt = result?;
+                tx.commit().await?;
+                return Ok(receipt);
+            }
+        }
+    }
+    unreachable!()
+}
+
+pub(super) async fn build_in(
+    conn: &mut PgConnection,
+    scope: &SnapshotScope,
+    task: &str,
+) -> Result<SnapshotReceipt, LensDefinitionError> {
     scope.validate()?;
-    let mut tx = database.pool().begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY")
-        .execute(&mut *tx)
-        .await?;
     if let Some(domain) = scope.domain_ref {
-        let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT FROM linggan_ops_account WHERE domain_ref=$1 AND ((source_system='content_workbench' AND ledger_state='in_ledger') OR (source_system='linggan_native' AND native_record_state='active')))").bind(domain).fetch_one(&mut *tx).await?;
+        let exists:bool=sqlx::query_scalar("SELECT EXISTS(SELECT FROM linggan_ops_account WHERE domain_ref=$1 AND ((source_system='content_workbench' AND ledger_state='in_ledger') OR (source_system='linggan_native' AND native_record_state='active')))").bind(domain).fetch_one(&mut *conn).await?;
         if !exists {
             return Err(LensDefinitionError::InvalidScope);
         }
     }
     let current=sqlx::query(r#"SELECT t.definition_ref AS taxonomy_ref,t.version AS taxonomy_version,t.body AS vocabulary,
         m.definition_ref AS metric_ref,m.version AS metric_version,m.body AS metric,c.task_config_ref,c.prompt_version_ref,
-        to_char(transaction_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS as_of
+        to_char(clock_timestamp() AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS as_of
       FROM linggan_ops_lens_definition_current tc JOIN linggan_ops_lens_definition t ON t.definition_ref=tc.definition_ref
       CROSS JOIN linggan_ops_lens_definition_current mc JOIN linggan_ops_lens_definition m ON m.definition_ref=mc.definition_ref
       CROSS JOIN linggan_ai_task_setting ts JOIN linggan_ai_task_config c ON c.task_config_ref=ts.current_config_ref
       WHERE tc.kind='taxonomy' AND mc.kind='metric' AND ts.task_key=$1"#)
-        .bind(task).fetch_optional(&mut *tx).await?.ok_or(LensDefinitionError::NoMethod)?;
+        .bind(task).fetch_optional(&mut *conn).await?.ok_or(LensDefinitionError::NoMethod)?;
     let Json(m): Json<MetricDefinition> = current.try_get("metric")?;
     let Json(vocab): Json<Vocabulary> = current.try_get("vocabulary")?;
     let taxonomy: Uuid = current.try_get("taxonomy_ref")?;
@@ -129,8 +156,8 @@ pub(super) async fn build_for_task(
         task_config_ref: current.try_get("task_config_ref")?,
         prompt_version_ref: current.try_get("prompt_version_ref")?,
     };
-    let mut input = read_input(&mut tx, &scope, method).await?;
-    let series = agreements(&mut tx, &input, &m).await?;
+    let mut input = read_input(conn, scope, method).await?;
+    let series = agreements(conn, &input, &m).await?;
     let latest = input
         .publications
         .values()
@@ -140,9 +167,8 @@ pub(super) async fn build_for_task(
         "SELECT (transaction_timestamp() AT TIME ZONE 'Asia/Shanghai')::date - $1::text::date",
     )
     .bind(latest)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *conn)
     .await?;
-    tx.commit().await?;
     // A new audit may change the gate without changing the primary or its effective labels.
     input.agreement_sources = series
         .iter()
@@ -156,7 +182,7 @@ pub(super) async fn build_for_task(
     if let Some(snapshot_ref) = sqlx::query_scalar(find)
         .bind(&hash)
         .bind(metric)
-        .fetch_optional(database.pool())
+        .fetch_optional(&mut *conn)
         .await?
     {
         return Ok(SnapshotReceipt {
@@ -168,6 +194,28 @@ pub(super) async fn build_for_task(
     let id = Uuid::new_v4();
     let frozen =
         serde_json::to_value(&input).map_err(|_| LensDefinitionError::InvalidDefinition)?;
+    // A confirmation has a human source but still equals the original machine value.
+    // Count distinct titles with at least one currently corrected dimension in this scope.
+    let decisions: Vec<_> = input
+        .publications
+        .values()
+        .flat_map(|p| p.labels.values())
+        .filter_map(|l| l.adjudication_ref.map(|a| (a, l.run_ref)))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .collect();
+    let (refs, runs): (Vec<_>, Vec<_>) = decisions.into_iter().unzip();
+    let corrected: i64 = sqlx::query_scalar(
+        "SELECT count(DISTINCT a.title_key)
+        FROM unnest($1::uuid[],$2::uuid[]) x(decision,run)
+        JOIN linggan_ops_lens_adjudication a ON a.adjudication_ref=x.decision
+        JOIN linggan_ops_lens_label l ON l.run_ref=x.run AND l.title_key=a.title_key
+        WHERE a.value <> (to_jsonb(l)->>a.dimension)",
+    )
+    .bind(refs)
+    .bind(runs)
+    .fetch_one(&mut *conn)
+    .await?;
     let stale_after_days = m.stale_after_days;
     let mut body = tokio::task::spawn_blocking(move || summarize(&input, &vocab, &m, &series))
         .await
@@ -175,13 +223,14 @@ pub(super) async fn build_for_task(
     body["snapshotRef"] = json!(id);
     body["asOf"] = json!(as_of);
     let q = &mut body["quality"];
+    q["correctedTitles"] = json!(corrected);
     q["taxonomyVersion"] = json!(current.try_get::<i32, _>("taxonomy_version")?);
     q["metricVersion"] = json!(current.try_get::<i32, _>("metric_version")?);
     q["staleDays"] = json!(stale_days);
     q["isStale"] = json!(stale_days.map(|v| i64::from(v) > i64::from(stale_after_days)));
     let inserted:Option<Uuid>=sqlx::query_scalar("INSERT INTO linggan_ops_lens_snapshot(snapshot_ref,as_of,taxonomy_ref,metric_ref,input_hash,analysis_input,body)
       VALUES ($1,$2::text::timestamptz,$3,$4,$5,$6,$7) ON CONFLICT (input_hash,metric_ref) DO NOTHING RETURNING snapshot_ref")
-        .bind(id).bind(&as_of).bind(taxonomy).bind(metric).bind(&hash).bind(frozen).bind(body).fetch_optional(database.pool()).await?;
+        .bind(id).bind(&as_of).bind(taxonomy).bind(metric).bind(&hash).bind(frozen).bind(body).fetch_optional(&mut *conn).await?;
     match inserted {
         Some(snapshot_ref) => Ok(SnapshotReceipt {
             snapshot_ref,
@@ -191,7 +240,7 @@ pub(super) async fn build_for_task(
             snapshot_ref: sqlx::query_scalar(find)
                 .bind(hash)
                 .bind(metric)
-                .fetch_one(database.pool())
+                .fetch_one(&mut *conn)
                 .await?,
             reused: true,
         }),

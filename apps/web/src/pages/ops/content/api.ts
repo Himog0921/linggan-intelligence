@@ -53,7 +53,7 @@ function snapshot(r: d.Json) {
   return { ref: d.str(r, 'snapshotRef'), quality: {
     latest: textOrNull(q, 'latestPublishedDate'), stale: d.optBool(q, 'isStale'), days: numberOrNull(q, 'staleDays'),
     publications: d.num(q, 'publications'), pending: d.num(q, 'pendingTitles'), withViews: d.num(q, 'withViews'), titled: d.num(q, 'titled'), share: numberOrNull(q, 'withViewsShare'),
-    taxonomy: d.num(q, 'taxonomyVersion'), metric: d.num(q, 'metricVersion'), adjudicated: d.num(q, 'adjudicatedTitles'),
+    taxonomy: d.num(q, 'taxonomyVersion'), metric: d.num(q, 'metricVersion'), adjudicated: d.num(q, 'adjudicatedTitles'), corrected: d.optNum(q, 'correctedTitles'),
     agreement: d.list(q, 'agreement', a => ({ run: d.str(a, 'runRef'), dimension: d.str(a, 'dimension'), meetsThreshold: d.bool(a, 'meetsThreshold'), value: numberOrNull(a, 'agreement'), kappa: numberOrNull(a, 'kappa'), count: d.num(a, 'sampleCount') })),
   }, structure: { offer: d.list(s, 'offer', group), moment: d.list(s, 'moment', group), situation: d.list(s, 'situation', group) },
   coverage: { cells: d.list(c, 'cells', cell => ({ row: d.str(cell, 'row'), column: d.str(cell, 'column'), count: d.num(cell, 'publications'), state: d.str(cell, 'state') })),
@@ -84,12 +84,32 @@ export async function getPublications(ref: string, drill: Drill, offset: number,
     })) };
   });
 }
+export const reviewDimensions = ['moment', 'situation', 'offer', 'audience'] as const;
+export type ReviewDimension = typeof reviewDimensions[number];
+
+function byDimension<T>(read: (dimension: ReviewDimension) => T): Record<ReviewDimension, T> {
+  return { moment: read('moment'), situation: read('situation'), offer: read('offer'), audience: read('audience') };
+}
 export async function getSpotCheck(ref: string, signal: AbortSignal) {
   return d.decode(await requestJson(base + 'spot-check?' + new URLSearchParams({ snapshotRef: ref }), { signal }), r => {
     if (d.str(r, 'snapshotRef') !== ref) throw new d.ShapeError('snapshotRef');
-    return d.list(r, 'items', p => ({ key: d.str(p, 'titleKey'), title: textOrNull(p, 'title'),
-      offer: d.str(p, 'offer'), moment: d.str(p, 'moment'), situation: d.str(p, 'situation') }));
+    const vocabulary = d.obj(r, 'vocabulary');
+    return {
+      vocabulary: byDimension(dim => d.list(vocabulary, dim, item => ({ key: d.str(item, 'key'), name: d.str(item, 'name') }))),
+      items: d.list(r, 'items', item => {
+        const effective = d.obj(item, 'effective');
+        return {
+          key: d.str(item, 'titleKey'), title: textOrNull(item, 'title'), confidence: d.str(item, 'confidence'),
+          machine: byDimension(dim => d.str(item, dim)), effective: byDimension(dim => d.str(effective, dim)),
+        };
+      }),
+    };
   });
+}
+export type ReviewCommand = { snapshotRef: string; titleKey: string; dimension: ReviewDimension; value: string; reason?: string };
+export async function adjudicate(command: ReviewCommand, commandRef: string) {
+  return d.decode(await requestJson(base + 'adjudications', { method: 'POST', body: { ...command, commandRef } }), r =>
+    ({ snapshotRef: d.str(r, 'snapshotRef'), reused: d.bool(r, 'reused') }));
 }
 export async function submitRun(commandRef: string) {
   return d.decode(await requestJson(base + 'runs', { method: 'POST', body: { commandRef } }), r => textOrNull(r, 'runRef'));

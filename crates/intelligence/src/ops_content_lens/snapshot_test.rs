@@ -26,7 +26,7 @@ async fn snapshot_generation_reuses_input_and_preserves_frozen_members() {
         .unwrap();
     record_views(&db, first_pub, 1, Some(900)).await;
     record_views(&db, first_pub, 2, Some(1200)).await;
-    let generate = || build_for_task(&db, SnapshotScope::default(), "comment_understanding");
+    let generate = || build_for_task(&db, SnapshotScope::default(), "ops_title_label");
     assert!(matches!(
         generate().await,
         Err(LensDefinitionError::MissingAgreement)
@@ -114,10 +114,32 @@ async fn snapshot_generation_reuses_input_and_preserves_frozen_members() {
         );
     }
     let before = generate().await.unwrap().snapshot_ref;
-    sqlx::query("INSERT INTO linggan_ops_lens_adjudication(adjudication_ref,title_key,taxonomy_ref,dimension,value,member_ref)
-        SELECT gen_random_uuid(),linggan_ops_lens_title_key('样例A'),definition_ref,'offer','actionable_method',md5('member')::uuid
-        FROM linggan_ops_lens_definition_current WHERE kind='taxonomy'").execute(db.pool()).await.unwrap();
-    let after = generate().await.unwrap().snapshot_ref;
+    let member: Uuid = sqlx::query_scalar("SELECT md5('member')::uuid")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    let command = Uuid::new_v4();
+    let decide = |id| {
+        crate::ops_content_lens::adjudicate(
+            &db,
+            member,
+            crate::ops_content_lens::Adjudication {
+                command_ref: id,
+                snapshot_ref: before,
+                title_key: initial.publications[&first_pub].title_key.clone(),
+                dimension: crate::ops_content_lens::LabelDimension::Offer,
+                value: "actionable_method".into(),
+                reason: None,
+            },
+        )
+    };
+    let after = decide(command).await.unwrap().snapshot_ref;
+    assert_eq!(decide(command).await.unwrap().snapshot_ref, after);
+    assert!(matches!(
+        decide(Uuid::new_v4()).await,
+        Err(LensDefinitionError::AdjudicationConflict)
+    ));
+    assert_eq!(generate().await.unwrap().snapshot_ref, after);
     assert_ne!(after, before);
     let (input, _) = frozen(after).await.unwrap();
     assert_eq!(
@@ -146,7 +168,7 @@ async fn snapshot_generation_reuses_input_and_preserves_frozen_members() {
             from: Some("2026-11-02".into()),
             ..Default::default()
         },
-        "comment_understanding",
+        "ops_title_label",
     )
     .await
     .unwrap();

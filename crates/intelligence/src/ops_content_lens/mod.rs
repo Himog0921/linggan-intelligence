@@ -1,10 +1,12 @@
 //! Definitions shared by title labelling, retrospective analysis and snapshot readers.
+mod adjudication;
+pub use adjudication::{Adjudication, adjudicate};
 mod agreement;
 mod analysis;
 pub use agreement::{Agreement, agreement};
-mod taxonomy;
-pub mod label;
 mod example_titles;
+pub mod label;
+mod taxonomy;
 pub use example_titles::load_taxonomy_file;
 
 pub use analysis::*;
@@ -31,6 +33,8 @@ pub enum LensDefinitionError {
     SnapshotNotFound,
     #[error("ops_lens_run_unavailable")]
     RunUnavailable,
+    #[error("ops_lens_adjudication_conflict")]
+    AdjudicationConflict,
     #[error("ops_lens_database_error")]
     Database(#[from] sqlx::Error),
 }
@@ -67,7 +71,9 @@ pub async fn metric_definition(
 }
 
 mod read;
-pub use read::{BoardStatus, PageRequest, SnapshotLookup, board_status, publications, read_snapshot, spot_check};
+pub use read::{
+    BoardStatus, PageRequest, SnapshotLookup, board_status, publications, read_snapshot, spot_check,
+};
 mod sample;
 mod statistics;
 mod variance;

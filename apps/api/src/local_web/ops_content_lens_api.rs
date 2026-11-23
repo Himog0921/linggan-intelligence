@@ -9,6 +9,7 @@ use linggan_intelligence::ops_content_lens::{
 };
 
 pub(super) fn routes(enabled: bool) -> Router<LocalWebState> {
+    let decisions = "/api/local/ops/content-lens/adjudications";
     let status_path = "/api/local/ops/content-lens/status";
     let snapshot_path = "/api/local/ops/content-lens/snapshot";
     let members_path = "/api/local/ops/content-lens/publications";
@@ -26,6 +27,7 @@ pub(super) fn routes(enabled: bool) -> Router<LocalWebState> {
                     })
                 }),
             )
+            .route(decisions, post(disabled))
             .route(snapshot_path, get(disabled))
             .route(members_path, get(disabled))
             .route(spot_path, get(disabled))
@@ -33,6 +35,7 @@ pub(super) fn routes(enabled: bool) -> Router<LocalWebState> {
             .route(snapshots_path, post(disabled));
     }
     Router::new()
+        .route(decisions, post(decide))
         .route(status_path, get(status))
         .route(snapshot_path, get(snapshot))
         .route(members_path, get(members))
@@ -227,4 +230,37 @@ async fn start(
     super::ai_settings::respond(
         linggan_intelligence::ops_content_lens::label::start(db, request.command_ref).await,
     )
+}
+
+async fn decide(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    body: Result<Json<linggan_intelligence::ops_content_lens::Adjudication>, JsonRejection>,
+) -> Response {
+    let member = match super::ops_overview_api::require_admin_ref(&state, &headers).await {
+        Ok(m) => m,
+        Err(e) => return e,
+    };
+    let Some(db) = state.database.database() else {
+        return super::ops_api::not_connected();
+    };
+    let Ok(Json(request)) = body else {
+        return local_read_json_error(StatusCode::BAD_REQUEST, "ops_lens_invalid_adjudication");
+    };
+    match linggan_intelligence::ops_content_lens::adjudicate(db, member, request).await {
+        Err(LensDefinitionError::AdjudicationConflict) => {
+            local_read_json_error(StatusCode::CONFLICT, "ops_lens_adjudication_conflict")
+        }
+        Err(LensDefinitionError::InvalidScope) => {
+            local_read_json_error(StatusCode::BAD_REQUEST, "ops_lens_invalid_adjudication")
+        }
+        Ok(receipt) => Json(receipt).into_response(),
+        Err(LensDefinitionError::SnapshotNotFound) => {
+            local_read_json_error(StatusCode::NOT_FOUND, "ops_lens_snapshot_not_found")
+        }
+        Err(_) => local_read_json_error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ops_lens_adjudication_unavailable",
+        ),
+    }
 }

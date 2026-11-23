@@ -7,7 +7,8 @@ import { reason } from '../api';
 import { Status } from '../ui';
 import { generate, getSnapshot, percent, submitRun, useLensStatus, type Drill } from './api';
 import { Coverage, Effects, Quality, Structure } from './LensSections';
-import { PublicationList, SpotList } from './LensDetails';
+import { PublicationList } from './LensDetails';
+import { SpotList } from './SpotList';
 import css from './Lens.module.css';
 
 export function ContentLensPage({ domain }: { domain:string }) {
@@ -18,7 +19,7 @@ export function ContentLensPage({ domain }: { domain:string }) {
     enabled:status.isSuccess && status.data.enabled && !active,
     queryFn:({signal}) => getSnapshot(domain,signal)});
   const [ids] = useState(() => new RequestIdentities());
-  const [detail,setDetail] = useState<{ref:string; drill:Drill|'spot'} | null>(null);
+  const [detail,setDetail] = useState<{ref:string; drill:Drill|'spot'; domain:string} | null>(null);
   const action = useMutation({
     mutationFn: async (name:'label'|'snapshot') => {
       if (name === 'snapshot') { await generate(domain); return '快照已生成'; }
@@ -36,7 +37,7 @@ export function ContentLensPage({ domain }: { domain:string }) {
   const run = status.data.run;
   const phase = run?.audit ?? run?.primary;
   const current = snapshot.isSuccess ? snapshot.data : null;
-  const open = (drill:Drill) => current && setDetail({ref:current.ref,drill});
+  const open = (drill:Drill) => current && setDetail({domain,ref:current.ref,drill});
   return <div className={css.board}>
     <div className={css.top}><h2>内容回溯</h2><div className={css.controls}>
       <ActionButton disabled={active || action.isPending} onClick={() => action.mutate('label')}>标注全部业务待标标题</ActionButton>
@@ -50,12 +51,13 @@ export function ContentLensPage({ domain }: { domain:string }) {
     : snapshot.isError ? <Status error retry={() => void snapshot.refetch()}>快照读取失败（{reason(snapshot.error)}）。</Status>
     : snapshot.isPending ? <Status>正在读取快照…</Status> : !current ? <Status>{run ? '当前范围暂无快照。完成标注与复标后可生成快照。' : '暂无标注数据。请先完成一次标题标注与复标，再生成快照。'}</Status>
     : <>
-      <Quality snapshot={current} open={open} spot={() => setDetail({ref:current.ref,drill:'spot'})}/>
+      <Quality snapshot={current} open={open} spot={() => setDetail({domain,ref:current.ref,drill:'spot'})}/>
       <Structure snapshot={current} open={open} /><Coverage snapshot={current} open={open} /><Effects snapshot={current} open={open} />
       <section className={css.section}><h2>假设与检验</h2><p>暂无已登记的假设。</p></section>
-      {detail && detail.ref === current.ref && (detail.drill === 'spot'
-        ? <SpotList snapshot={current} close={() => setDetail(null)} />
-        : <PublicationList snapshotRef={detail.ref} drill={detail.drill} close={() => setDetail(null)} />)}
+      {detail?.domain === domain && detail.drill !== 'spot' && detail.ref === current.ref &&
+        <PublicationList snapshotRef={detail.ref} drill={detail.drill} close={() => setDetail(null)} />}
     </>}
+    {detail?.domain === domain && detail.drill === 'spot' &&
+      <SpotList snapshotRef={detail.ref} domain={domain} ids={ids} close={() => setDetail(null)} />}
   </div>;
 }
