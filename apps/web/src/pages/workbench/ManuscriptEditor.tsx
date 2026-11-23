@@ -1,10 +1,14 @@
 import { ActionButton } from '../../shared/ActionButton';
 import { IdeaBoxLink } from './IdeaBoxLink';
-import { newImagePage } from './imagePageFactory';
 import type { ReactNode } from 'react';
 import type { IdeaBoxSummary } from './workbenchModel';
 import { stepNames, type Step, type WorkDocument } from "./workbenchModel";
 import { ExperiencePicker } from './assets/ExperiencePicker';
+import { CoverCanvas } from './assets/CoverCanvas';
+import { withCoverTitle } from './assets/assetsText';
+import { SelectField } from '../../shared/SelectField';
+const STEP_OPTIONS = [{ value: '', label: '标步骤' }, ...Object.entries(stepNames).map(([key, name]) => ({ value: key, label: name }))];
+
 export function ManuscriptEditor({
   document,
   edit,
@@ -15,10 +19,11 @@ export function ManuscriptEditor({
   onTagsChange,
   workId,
   onCover,
+  onOpenDesk,
   accountName,
   accountChip,
   edMeta,
-  ideas = [], ideaState = 'success', onOpenAnchor = () => {}, draftInputs, onDraftInputs, titleNotes, coverActions, coverCandidates, noteCandidates, noteTitleActions, footer, tools, related,
+  ideas = [], ideaState = 'success', onOpenAnchor = () => {}, draftInputs, onDraftInputs, titleNotes, coverActions, coverCandidates, noteCandidates, noteTitleActions, footer, tools, related, publication,
 }: {
   document: WorkDocument;
   edit: (document: WorkDocument) => void;
@@ -29,6 +34,7 @@ export function ManuscriptEditor({
   onTagsChange: (value: string) => void;
   workId?: string;
   onCover?: () => void;
+  onOpenDesk?: () => void;
   accountName?: string;
   ideas?: IdeaBoxSummary[]; ideaState?: 'pending' | 'error' | 'success'; onOpenAnchor?: (anchor: string) => void;
   draftInputs: { cover: string; note: string; idea: string };
@@ -43,6 +49,8 @@ export function ManuscriptEditor({
   accountChip?: ReactNode;
   edMeta?: ReactNode;
   related?: ReactNode;
+  /** The recovery card of a published draft; sits first in the body, as in the demo. */
+  publication?: ReactNode;
 }) {
   const cover = document.pages.find(page => page.kind === 'cover');
   const coverCandidate = draftInputs.cover;
@@ -55,8 +63,8 @@ export function ManuscriptEditor({
     edit({ ...document, paragraphSteps: step ? [...rest, { paragraphId: id, step }] : rest });
   }
   function setCoverTitle(title: string) {
-    if (cover) edit({ ...document, pages: document.pages.map(page => page.id === cover.id ? { ...page, title } : page) });
-    else if (document.pages.length < 30) edit({ ...document, pages: [{ ...newImagePage('cover'), title }, ...document.pages] });
+    const next = withCoverTitle(document, title);
+    if (next !== document) edit(next);
   }
   function addCandidate(kind: 'cover' | 'note') {
     const value = (kind === 'cover' ? coverCandidate : noteCandidate).trim();
@@ -69,20 +77,20 @@ export function ManuscriptEditor({
     <div className="ed-head">
       <span className="acc-btn"><span className="avatar">{Array.from(accountName ?? '未')[0]}</span>{accountName ?? (document.accountRef ? '账号读取中' : '未选择账号')}</span>
       {accountChip}
+      <IdeaBoxLink document={document} ideas={ideas} state={ideaState} edit={edit} openAnchor={onOpenAnchor} onOpenDesk={onOpenDesk} compose={compose} name={draftInputs.idea} onNameChange={idea => onDraftInputs({ ...draftInputs, idea })} />
       {edMeta}
       <span className="grow" />
       {tools}
     </div>
     <div className="ed-scroll">
       <div className="ed-inner">
-        <IdeaBoxLink document={document} ideas={ideas} state={ideaState} edit={edit} openAnchor={onOpenAnchor} compose={compose} name={draftInputs.idea} onNameChange={idea => onDraftInputs({ ...draftInputs, idea })} />
+        {publication}
         {document.angle ? <div className="intent"><span>选题意图</span><b>{document.angle}</b></div> : null}
         {related}
         <div className="cover-row">
           <div>
-            {cover?.assetId && workId ? <button type="button" className="cover" onClick={onCover} aria-label="查看封面">
-              <img src={`/ops/api/creation/works/${encodeURIComponent(workId)}/assets/${encodeURIComponent(cover.assetId)}`} alt="" />
-              <span className="cover-title">{cover.title || '未写封面大字'}</span>
+            {cover && workId ? <button type="button" className="cover" onClick={onCover} aria-label="查看封面">
+              <CoverCanvas page={cover} workId={workId} quiet />
               <span className="cover-tag">{document.coverAi === true ? 'AI 作图' : document.coverAi === false ? '实拍' : '来源未记录'}</span>
             </button> : <button type="button" className="cover empty" onClick={onCover} aria-label="设置封面"><span className="cover-title">设置封面</span></button>}
             <div className="cover-actions"><ActionButton variant="quiet" onClick={onCover}>{cover?.assetId ? '换一张底图' : '设置封面'}</ActionButton></div>
@@ -160,10 +168,7 @@ export function ManuscriptEditor({
                   {document.derivedSources.some(source => source.target.kind === 'paragraph' && source.target.paragraphId === p.id) ? <span className="src"><span className="dot info" />已记录参考来源 · 来源不可用时本段会暂时隐藏</span> : null}
                   <span className="para-tools">
                     {document.uses.filter((u) => u.target.kind === "paragraph" && u.target.paragraphId === p.id).map((u) => <span key={u.id} className="aux">{u.contentOrigin === "expression" ? "我的表达" : "原文摘录"} · {u.state === "current" ? "当前使用" : u.state === "modified" ? "已手动修改" : "需要核验"}</span>)}
-                    <select className="para-step" aria-label={`第 ${i + 1} 段的步骤`} value={step ?? ''} onChange={(e) => setStep(p.id, e.target.value as Step | '')}>
-                      <option value="">标步骤</option>
-                      {Object.entries(stepNames).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
-                    </select>
+                    <span className="para-step"><SelectField compact label={`第 ${i + 1} 段的步骤`} value={step ?? ''} options={STEP_OPTIONS} onChange={value => setStep(p.id, value as Step | '')} /></span>
                     <button type="button" onClick={() => edit({
                       ...document,
                       paragraphs: document.paragraphs.filter((x) => x.id !== p.id),

@@ -1,6 +1,7 @@
 /** Plain-Chinese labels and small pure helpers shared by the asset pages and the check panel. */
 import type { BridgeChoice, BridgeGroup, BridgeUse, WorkDocument } from '../workbenchModel';
-import type { BridgeState, Finding, Identity, Level, OrgRelation, Sentence, SentenceStatus } from './assetsModel';
+import { newImagePage } from '../imagePageFactory';
+import type { BridgeState, Experience, Finding, Identity, Level, OrgRelation, Sentence, SentenceStatus } from './assetsModel';
 import type { IdentityCommand } from './assetsApi';
 
 export const relationLabel: Record<OrgRelation, string> = {
@@ -74,4 +75,60 @@ export function identityCommand(identity: Identity | null, patch: Partial<Omit<I
     canProvideExperience: identity?.canProvideExperience ?? null,
     ...patch,
   };
+}
+
+/** Confirmed experiences of the current person that the draft does not already carry at the same revision. */
+export function usableExperiences(document: WorkDocument, items: readonly Experience[]): Experience[] {
+  return items.filter(item => item.currentPerson && item.state === 'confirmed' && item.body !== null &&
+    !document.experienceSlots.some(slot => slot.experienceRef === item.id && slot.experienceRevision === item.revision));
+}
+
+/** Fills the first empty experience slot, or appends a paragraph; null when the experience has no readable body. */
+export function insertExperience(document: WorkDocument, experience: Experience): WorkDocument | null {
+  if (!experience.body) return null;
+  const body = experience.body;
+  const gap = document.experienceGaps[0];
+  const paragraphId = gap ?? crypto.randomUUID();
+  return {
+    ...document,
+    paragraphs: gap ? document.paragraphs.map(p => p.id === gap ? { ...p, text: body } : p) : [...document.paragraphs, { id: paragraphId, text: body }],
+    experienceSlots: [...document.experienceSlots, { paragraphId, experienceRef: experience.id, experienceRevision: experience.revision }],
+    experienceGaps: document.experienceGaps.filter(id => id !== paragraphId),
+  };
+}
+
+/** Paragraph texts in reading order, with the bridge sentence where the slot puts it (after the chosen paragraph, else before the last one). */
+export function previewParts(document: WorkDocument): { text: string; bridge: boolean }[] {
+  const parts = document.paragraphs.filter(paragraph => paragraph.text.trim()).map(paragraph => ({ id: paragraph.id, text: paragraph.text, bridge: false }));
+  const bridge = document.bridge;
+  const sentence = bridge && !bridge.skip ? bridge.sentence?.text.trim() : '';
+  if (sentence) {
+    const after = bridge?.afterParagraph ? parts.findIndex(part => part.id === bridge.afterParagraph) : -1;
+    parts.splice(after >= 0 ? after + 1 : Math.max(parts.length - 1, 0), 0, { id: 'bridge', text: sentence, bridge: true });
+  }
+  return parts.map(({ text, bridge: isBridge }) => ({ text, bridge: isBridge }));
+}
+
+/** The same tag twice reads once ("复制时自动去重复话题"); case does not make a tag different. */
+export function dedupeTags(draft: string): string[] {
+  const seen = new Set<string>();
+  return draft.split(/\s+/u).filter(Boolean).filter(tag => { const key = tag.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; });
+}
+
+/**
+ * Puts one of our own past titles into the draft: as the note title, or as the cover headline. Null when a cover
+ * page would have to be added to a draft that already has the 30 pages it may hold.
+ */
+export function adoptTitle(document: WorkDocument, kind: 'cover' | 'note', text: string): WorkDocument | null {
+  if (kind === 'note') return { ...document, title: text };
+  const next = withCoverTitle(document, text);
+  return next === document ? null : next;
+}
+
+/** Sets the cover headline, making a cover page first when the draft has none (at most 30 pages). */
+export function withCoverTitle(document: WorkDocument, title: string): WorkDocument {
+  const cover = document.pages.find(page => page.kind === 'cover');
+  if (cover) return { ...document, pages: document.pages.map(page => page.id === cover.id ? { ...page, title } : page) };
+  if (document.pages.length >= 30) return document;
+  return { ...document, pages: [{ ...newImagePage('cover'), title }, ...document.pages] };
 }

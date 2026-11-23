@@ -6,6 +6,8 @@ import { RequestIdentities } from '../../../shared/requestIdentity';
 import * as api from './assetsApi';
 import type { Experience } from './assetsModel';
 import styles from './Assets.module.css';
+import { SelectField } from '../../../shared/SelectField';
+import { FieldLabel } from '../FieldLabel';
 
 function ExperienceForm({ accountRef, personRef, current: initialCurrent, checking, onSaved, onPending, onDirty, onReload }: { accountRef: string; personRef: string | null; current: Experience | null; checking: boolean; onSaved: (item: Experience) => void; onPending: (pending: boolean) => void; onDirty: (dirty: boolean) => void; onReload: () => void }) {
   const [current, setCurrent] = useState(initialCurrent);
@@ -105,15 +107,13 @@ function ExperienceForm({ accountRef, personRef, current: initialCurrent, checki
     <label>标题<input value={title} disabled={!canEdit || locked} maxLength={200} onChange={e => setTitle(e.target.value)} /></label>
     <label>经历正文<textarea value={body} disabled={!canEdit || locked} maxLength={10000} rows={8} onChange={e => setBody(e.target.value)} /></label>
     <label>标签<input value={tags} disabled={!canEdit || locked} onChange={e => setTags(e.target.value)} placeholder="以空格分隔" /></label>
-    <label>来源<select value={origin} disabled={!canEdit || locked} onChange={e => setOrigin(e.target.value)}>
-      <option value="oral">本人口述</option><option value="manuscript">稿子</option><option value="anonymized_coaching">去标识的陪跑记录</option>
-    </select></label>
+    <FieldLabel>来源<SelectField label="来源" value={origin} disabled={!canEdit || locked} options={[{ value: 'oral', label: '本人口述' }, { value: 'manuscript', label: '稿子' }, { value: 'anonymized_coaching', label: '去标识的陪跑记录' }]} onChange={setOrigin} /></FieldLabel>
     {!current && capturePersonRef === null ? <p className={styles.hint}>请先确认账号背后的真人，再采集经历。</p> : null}
     <div className={styles.actions}><ActionButton type="submit" variant="primary" disabled={!canEdit || locked || (!current && capturePersonRef === null) || !title.trim() || !body.trim()}>保存经历</ActionButton></div>
     {current?.state === 'awaiting_subject' ? <fieldset className={styles.choice} disabled={locked}>
       <legend>本人确认</legend><p className={styles.hint}>请先让提供经历的本人确认当前版本和用于稿件；运营代录不等于本人确认。</p>
       <label><input type="checkbox" checked={confirmed} onChange={e => setConfirmed(e.target.checked)} /> 本人已确认这版内容并同意用于稿件</label>
-      <label>确认方式<select value={method} onChange={e => setMethod(e.target.value)}><option value="subject_present">本人当面确认</option><option value="subject_statement">本人明确表示同意</option></select></label>
+      <FieldLabel>确认方式<SelectField label="确认方式" value={method} options={[{ value: 'subject_present', label: '本人当面确认' }, { value: 'subject_statement', label: '本人明确表示同意' }]} onChange={setMethod} /></FieldLabel>
       {dirty ? <p className={styles.hint}>内容已更改，请先保存，再让本人确认保存后的版本。</p> : null}
       <ActionButton disabled={!confirmed || dirty} onClick={() => void perform('confirm')}>登记本人确认</ActionButton>
     </fieldset> : null}

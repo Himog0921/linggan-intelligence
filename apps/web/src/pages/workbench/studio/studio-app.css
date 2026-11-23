@@ -19,18 +19,31 @@
 .gm-studio .editor > .ed-foot > [class*="footerCopyMount"][hidden] {display:none}
 .gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section {display:contents}
 .gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > :is(p,.chk-sum) {order:0;margin:0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > .aux {order:1;margin:0 0 0 var(--s3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > [class*="actions"] {order:4;display:flex;gap:var(--s3);margin-left:auto;flex:none}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > .aux {order:1;margin:0 0 0 var(--lgi-space-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gm-studio .editor > .ed-foot > [class*="footerCopyMount"] > section > [class*="actions"] {order:4;display:flex;gap:var(--lgi-space-3);margin-left:auto;flex:none}
 .gm-studio .write .field-row [class*="titleCopyMount"][hidden] {display:none}
-.gm-studio .write .field-row [class*="titleCopy_"] {height:32px;padding:0 var(--s3);font-size:var(--t-label)}
+.gm-studio .write .field-row [class*="titleCopy_"] {height:32px;padding:0 var(--lgi-space-3);font-size:var(--lgi-type-label-size)}
 .gm-studio .chk-list {list-style:none;margin:0;padding:0}
 .gm-studio .chk-item {margin-left:0;margin-right:0}
 
 /* Demo 的 .btn.quiet.sub 档位（24px / 12px / 1px 下划线）由 LIDS C09 承担，这里把 C09 映射回该档位。 */
-.gm-studio [data-action-button="v8"][data-variant="quiet"] {height:24px;padding:0 2px;font-size:var(--t-label);font-weight:500;border:0;border-bottom:1px solid var(--lgi-ink);overflow:visible}
+.gm-studio [data-action-button="v8"][data-variant="quiet"] {height:24px;padding:0 2px;font-size:var(--lgi-type-label-size);font-weight:500;border:0;border-bottom:1px solid var(--lgi-ink);overflow:visible}
 .gm-studio [data-action-button="v8"][data-variant="quiet"]:focus-visible {outline-offset:2px}
-.gm-studio .write [data-action-button="v8"][data-variant="quiet"]:not(:disabled) {border-bottom-color:transparent;background:transparent}
-.gm-studio .write [data-action-button="v8"][data-variant="quiet"]:not(:disabled):hover {background:var(--lgi-canvas-low);color:var(--lgi-signal)}
+.gm-studio .write [data-action-button="v8"][data-variant="quiet"]:not(:disabled) {border-bottom-color:transparent;background:var(--lgi-canvas-low)}
+.gm-studio .write [data-action-button="v8"][data-variant="quiet"]:not(:disabled):hover {background:var(--lgi-canvas-sunken);color:var(--lgi-signal)}
+/* 样稿 .write 里的按钮（721–730 行）：次级按钮静止 canvas-low、悬停 canvas-sunken，无描边、无点阵、无硬阴影；
+   主按钮保留填充，去掉阴影和点阵，按下不位移；禁用为扁平灰。C09 的变体名映射到样稿的 .btn / .btn.quiet / .btn.primary。 */
+.gm-studio .write [data-action-button="v8"]::before {display:none}
+.gm-studio .write [data-action-button="v8"]:not([data-variant="primary"],[data-variant="ink"],[data-variant="danger"],[data-variant="quiet"]):not(:disabled) {border-color:transparent;background:var(--lgi-canvas-low);box-shadow:none}
+.gm-studio .write [data-action-button="v8"]:not([data-variant="primary"],[data-variant="ink"],[data-variant="danger"],[data-variant="quiet"]):not(:disabled):hover {background:var(--lgi-canvas-sunken)}
+.gm-studio .write [data-action-button="v8"]:is([data-variant="primary"],[data-variant="ink"]) {box-shadow:none}
+.gm-studio .write [data-action-button="v8"]:is([data-variant="primary"],[data-variant="ink"]):not(:disabled):hover {box-shadow:none;transform:none}
+.gm-studio .write [data-action-button="v8"]:not(:disabled):active {box-shadow:none;transform:none}
+.gm-studio .write [data-action-button="v8"]:disabled {border-color:transparent;border-style:solid;background:var(--lgi-canvas-sunken);color:var(--lgi-muted)}
+/* 还没有数据的来源（高赞标题、我方爆款）保留为禁用项并写明原因，与一级导航里未接通入口的做法一致。 */
+.gm-studio .seg button:disabled {color:var(--lgi-ghost);background:var(--lgi-canvas-low);cursor:not-allowed}
+/* 样稿 .btn.sm：32px 高、12px 字、左右 12px */
+.gm-studio [data-action-button="v8"].sm {height:32px;padding:0 var(--lgi-space-3);font-size:var(--lgi-type-label-size)}
 
 
 .gm-studio .q-item[aria-current="page"] {background:var(--lgi-canvas)}
@@ -38,34 +51,32 @@
 .gm-studio .q-head-top h2 {white-space:nowrap}
 .gm-studio .q-head-top .aux {flex:none;white-space:nowrap}
 .gm-studio .q-item[aria-current="page"] .q-title {font-weight:600}
-.gm-studio .q-item[aria-current="page"]::before {content:"";position:absolute;left:0;top:var(--s3);bottom:var(--s3);width:2px;background:var(--lgi-signal)}
-.gm-studio .q-title,.gm-studio .q-meta,.gm-studio .q-state {display:block}
-.gm-studio .q-meta {display:flex;flex-wrap:wrap;gap:0 var(--s2)}
+.gm-studio .q-item[aria-current="page"]::before {content:"";position:absolute;left:0;top:var(--lgi-space-3);bottom:var(--lgi-space-3);width:2px;background:var(--lgi-signal)}
 
 .gm-studio .para-text {display:block;width:100%;field-sizing:content;min-height:0;resize:none;background:transparent;border-top:0;border-right:0;border-bottom:0;border-radius:0}
 .gm-studio .para-text[readonly] {color:var(--lgi-muted)}
-.gm-studio .para-step {height:24px;padding:0 var(--s2);border:1px solid var(--lgi-border);border-radius:0;background:var(--lgi-canvas);font:500 var(--t-label)/1 var(--lgi-font-ui);color:var(--lgi-body)}
-.gm-studio .para-step:focus {outline:2px solid var(--lgi-focus);outline-offset:2px}
+/* 段落步骤：共享下拉（SelectField 紧凑形态）按样稿 .para-tools button 的样子显示——12px 字、无描边、无点阵尾巴；展开的菜单仍是规范的 M2 菜单。 */
+.gm-studio .para-step {display:inline-flex}
+.gm-studio .para-step button[role="combobox"] {min-height:24px;height:24px;gap:var(--lgi-space-1);padding:0 var(--lgi-space-1);border:0;background:transparent;font:400 var(--t-aux)/1 var(--lgi-font-ui);color:var(--lgi-body)}
+.gm-studio .para-step button[role="combobox"]::after {display:none}
+.gm-studio .para-step button[role="combobox"] > span:last-child {margin-right:0}
+.gm-studio .para-step button[role="combobox"]:hover:not(:disabled) {color:var(--lgi-signal)}
 
-.gm-studio .add-para {margin:var(--s3) 0 var(--s6) calc(var(--writing-gutter) + var(--s3));border:0;border-bottom:1px solid var(--lgi-border-strong);background:transparent;padding:0;font-size:var(--t-aux);color:var(--lgi-body);cursor:pointer}
+.gm-studio .add-para {margin:var(--lgi-space-3) 0 var(--lgi-space-6) calc(var(--writing-gutter) + var(--lgi-space-3));border:0;border-bottom:1px solid var(--lgi-border-strong);background:transparent;padding:0;font-size:var(--t-aux);color:var(--lgi-body);cursor:pointer}
 .gm-studio .add-para:hover {color:var(--lgi-signal);border-bottom-color:var(--lgi-signal-mark)}
 .gm-studio .cover.empty {display:grid;place-items:center;background:var(--lgi-canvas-low);background-image:none}
 .gm-studio .cover.empty .cover-title {position:static;transform:none;color:var(--lgi-muted);font:500 var(--t-aux)/1.4 var(--lgi-font-ui);-webkit-text-stroke:0}
 .gm-studio .cands > span {display:inline-flex;align-items:center}
-.gm-studio .cands > span > button:last-child {border:0;background:transparent;color:var(--lgi-muted);font-size:var(--t-aux);cursor:pointer;padding:0 var(--s1)}
+.gm-studio .cands > span > button:last-child {border:0;background:transparent;color:var(--lgi-muted);font-size:var(--t-aux);cursor:pointer;padding:0 var(--lgi-space-1)}
 
-.gm-studio .intent {display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s4)}
-.gm-studio .idea-link {display:flex;align-items:baseline;gap:var(--s2);flex-wrap:wrap;margin-bottom:var(--s3);font-size:var(--t-label);color:var(--lgi-muted)}
-.gm-studio .idea-link strong {font:600 var(--t-body)/1.5 var(--lgi-font-ui);color:var(--lgi-body)}
-.gm-studio .idea-link details {font-size:var(--t-label);color:var(--lgi-muted)}
-.gm-studio .idea-link label {display:grid;gap:var(--s1);margin-top:var(--s2)}
+.gm-studio .intent {display:flex;align-items:baseline;gap:var(--lgi-space-2);flex-wrap:wrap;margin-bottom:var(--lgi-space-4)}
 .gm-studio .idea-link textarea {min-height:64px}
 
 .gm-studio .right > .r-tabs ~ * {min-height:0}
 .gm-studio .r-body > section {padding:0}
-.gm-studio .r-body h3 {margin:0 0 var(--s2);font:600 var(--t-control)/1.5 var(--lgi-font-ui)}
-.gm-studio .r-body h4 {margin:var(--s3) 0 var(--s1);font:600 var(--t-aux)/1.5 var(--lgi-font-ui);color:var(--lgi-muted);letter-spacing:.04em}
-.gm-studio .r-body p {margin:0 0 var(--s2);font-size:var(--t-aux)}
+.gm-studio .r-body h3 {margin:0 0 var(--lgi-space-2);font:600 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui)}
+.gm-studio .r-body h4 {margin:var(--lgi-space-3) 0 var(--lgi-space-1);font:600 var(--t-aux)/1.5 var(--lgi-font-ui);color:var(--lgi-muted);letter-spacing:.04em}
+.gm-studio .r-body p {margin:0 0 var(--lgi-space-2);font-size:var(--t-aux)}
 .gm-studio .r-tabs button[aria-current="page"] {color:var(--lgi-ink)}
 .gm-studio .r-tabs button[aria-current="page"]::after {content:"";position:absolute;inset:auto 0 0;height:2px;background:var(--lgi-signal-mark)}
 
@@ -76,36 +87,80 @@
 
 .gm-studio.assets-page {height:100%;min-height:0;display:grid;grid-template-rows:auto auto minmax(0,1fr)}
 .gm-studio.assets-page > .assets {min-height:0}
-.gm-studio .asset-kicker {display:block;font:500 var(--t-label)/1.4 var(--lgi-font-ui);letter-spacing:.12em;color:var(--lgi-muted)}
+.gm-studio .asset-kicker {display:block;font:500 var(--lgi-type-label-size)/1.4 var(--lgi-font-ui);letter-spacing:.12em;color:var(--lgi-muted)}
 .gm-studio .asset-tabs button[aria-current="page"] {position:relative;color:var(--lgi-ink);font-weight:600}
 .gm-studio .asset-tabs button[aria-current="page"]::after {content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--lgi-signal-mark)}
 .gm-studio .as-head .asset-count {flex:none}
 
 /* Tab interiors keep the app's own markup and borrow the demo's type scale and rows. */
-.gm-studio .lib-tools .lbl {display:inline-flex;align-items:center;gap:var(--s2);margin:0}
-.gm-studio .lib-tools .lbl select {height:var(--action);padding:0 var(--s3);border:1px solid var(--lgi-border-strong);border-radius:0;background:var(--lgi-canvas);font:400 var(--t-control)/1.5 var(--lgi-font-ui);color:var(--lgi-ink)}
+.gm-studio .lib-tools .lbl {display:inline-flex;align-items:center;gap:var(--lgi-space-2);margin:0}
+.gm-studio .lib-tools .lbl select {height:var(--lgi-action-height);padding:0 var(--lgi-space-3);border:1px solid var(--lgi-border-strong);border-radius:0;background:var(--lgi-canvas);font:400 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui);color:var(--lgi-ink)}
 .gm-studio .lib-tools .lbl select:focus {outline:none;background:var(--lgi-focus-warm)}
 .gm-studio .lib-row td > button {display:block;width:100%;padding:0;border:0;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
 .gm-studio .lib-row td > button b {font-weight:600}
 .gm-studio .lib-row td > button small {display:block;margin-top:2px;font-size:var(--t-aux);font-weight:400;line-height:1.6;color:var(--lgi-muted)}
 .gm-studio .lib-row td > button[aria-current="true"] b {box-shadow:inset 0 -2px var(--lgi-signal-mark)}
-.gm-studio .lib-insp h3 {margin:0;font:600 var(--t-body)/1.5 var(--lgi-font-ui)}
-.gm-studio .lib-insp form {display:grid;gap:var(--s3)}
-.gm-studio .lib-insp form > label {display:grid;gap:var(--s1);font:500 var(--t-aux)/1.6 var(--lgi-font-ui);color:var(--lgi-muted)}
+.gm-studio .lib-insp h3 {margin:0;font:600 var(--lgi-type-body-size)/1.5 var(--lgi-font-ui)}
+.gm-studio .lib-insp form {display:grid;gap:var(--lgi-space-3)}
+.gm-studio .lib-insp form > label {display:grid;gap:var(--lgi-space-1);font:500 var(--t-aux)/1.6 var(--lgi-font-ui);color:var(--lgi-muted)}
 .gm-studio .lib-insp form > label > input:not([type="checkbox"]),
 .gm-studio .lib-insp form > label > textarea,
-.gm-studio .lib-insp form > label > select {width:100%;padding:var(--s2) var(--s3);border:1px solid var(--lgi-border-strong);border-radius:0;background:var(--lgi-canvas);font:400 var(--t-control)/1.6 var(--lgi-font-ui);color:var(--lgi-ink)}
+.gm-studio .lib-insp form > label > select {width:100%;padding:var(--lgi-space-2) var(--lgi-space-3);border:1px solid var(--lgi-border-strong);border-radius:0;background:var(--lgi-canvas);font:400 var(--lgi-type-control-size)/1.6 var(--lgi-font-ui);color:var(--lgi-ink)}
 .gm-studio .lib-insp form > label > textarea {min-height:96px;resize:vertical}
-.gm-studio .lib-insp form > label:has(input[type="checkbox"]) {display:flex;align-items:center;gap:var(--s2);font-weight:400;color:var(--lgi-ink)}
+.gm-studio .lib-insp form > label:has(input[type="checkbox"]) {display:flex;align-items:center;gap:var(--lgi-space-2);font-weight:400;color:var(--lgi-ink)}
 .gm-studio .lib-insp form > label:has(input[type="checkbox"]) input {width:auto}
 .gm-studio .lib-insp form > button {justify-self:start;width:auto}
-.gm-studio .statusChip {display:inline-flex;align-items:center;height:22px;padding:0 6px;border:1px solid var(--lgi-border);background:var(--lgi-canvas);font-size:var(--t-label);line-height:1;font-weight:500;color:var(--lgi-body);white-space:nowrap}
+.gm-studio .statusChip {display:inline-flex;align-items:center;height:22px;padding:0 6px;border:1px solid var(--lgi-border);background:var(--lgi-canvas);font-size:var(--lgi-type-label-size);line-height:1;font-weight:500;color:var(--lgi-body);white-space:nowrap}
 .gm-studio .experience-list > li[aria-current="true"] .ex-row {background:var(--lgi-focus-warm)}
 .gm-studio .experience .ex-title > button {padding:0;border:0;background:none;font:inherit;color:inherit;text-align:left;cursor:pointer}
 .gm-studio .experience .ex-title > button:hover {text-decoration:underline;text-underline-offset:4px}
-.gm-studio .lib-empty {margin:0;padding:var(--s8) 0;color:var(--lgi-body);font:400 var(--t-control)/1.7 var(--lgi-font-ui)}
+.gm-studio .lib-empty {margin:0;padding:var(--lgi-space-8) 0;color:var(--lgi-body);font:400 var(--lgi-type-control-size)/1.7 var(--lgi-font-ui)}
 
 .gm-studio .immersive-desk .mcard .q.paper,
 .gm-studio .immersive-desk .mcard.note .txt {display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:6;overflow:hidden}
 .gm-studio .immersive-desk .frame-head .ttl {overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gm-studio .immersive-desk .frame-head:active {cursor:grabbing}
+
+/* 页头里的选题框标签（样稿 .frame-chip 在 .write 内：28px、无描边、canvas-low 底、悬停 canvas-sunken）。
+   名称、材料数、去材料桌；编辑意图/更换关联/补一个选题框收进它下方的弹出面板，不再占一整行。 */
+.gm-studio .ed-head .idea-link {position:relative;display:inline-flex;align-items:center;gap:6px;height:28px;max-width:calc(100% - 256px);padding:0 10px;background:var(--lgi-canvas-low);font:500 var(--lgi-type-label-size)/1 var(--lgi-font-ui);color:var(--lgi-ink);white-space:nowrap}
+.gm-studio .ed-head .idea-link:hover {background:var(--lgi-canvas-sunken)}
+.gm-studio .ed-head .idea-link small {font:inherit;color:var(--lgi-muted)}
+.gm-studio .ed-head .idea-link strong {min-width:0;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.gm-studio .ed-head .idea-link .aux {font-size:var(--lgi-type-aux-size);line-height:1}
+.gm-studio .ed-head .idea-link .idea-desk {border:0;background:transparent;padding:0 2px;font:inherit;color:var(--lgi-muted)}
+.gm-studio .ed-head .idea-link .idea-desk:hover, .gm-studio .ed-head .idea-link summary:hover {color:var(--lgi-signal)}
+.gm-studio .ed-head .idea-link details {position:static}
+.gm-studio .ed-head .idea-link summary {list-style:none;cursor:pointer;color:var(--lgi-body)}
+.gm-studio .ed-head .idea-link summary::-webkit-details-marker {display:none}
+.gm-studio .ed-head .idea-link summary::after {content:" ▾";color:var(--lgi-muted)}
+.gm-studio .ed-head .idea-link .idea-panel {position:absolute;top:calc(100% + 6px);left:0;z-index:var(--lgi-z-popover);display:grid;gap:var(--lgi-space-3);width:min(360px,calc(100vw - 32px));padding:var(--lgi-space-3);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal);white-space:normal;font:400 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui);color:var(--lgi-body)}
+.gm-studio .ed-head .idea-link .idea-panel label {display:grid;gap:var(--lgi-space-1);font-size:var(--lgi-type-label-size);color:var(--lgi-muted)}
+.gm-studio .ed-head .idea-link .idea-panel p {margin:0}
+
+/* 写稿工具菜单（⋯）：沿用样稿 .menu-list 的语言——1px 墨线、小硬阴影、分区用发丝线；视图用分段控件，AI 三项为整行菜单项，保存在底部。 */
+.gm-studio .ed-head .tools-menu {width:264px;gap:0;padding:var(--lgi-space-1);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal);align-items:stretch}
+.gm-studio .tools-menu .tm-sec {display:grid;gap:var(--lgi-space-1);padding:var(--lgi-space-3);border-bottom:1px solid var(--lgi-hairline)}
+.gm-studio .tools-menu .tm-label {font-size:var(--lgi-type-aux-size);line-height:1.6;color:var(--lgi-muted);letter-spacing:.04em}
+.gm-studio .tools-menu .seg {display:flex}
+.gm-studio .tools-menu .seg button {flex:1}
+.gm-studio .tools-menu .tm-row {display:flex;align-items:center;gap:var(--lgi-space-3)}
+.gm-studio .tools-menu .tm-count {margin-left:auto}
+.gm-studio .tools-menu .tm-item {display:block;width:100%;min-height:var(--lgi-space-8);padding:0 var(--lgi-space-2);border:0;background:transparent;text-align:left;font:500 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui);color:var(--lgi-ink)}
+.gm-studio .tools-menu .tm-item:hover:not(:disabled) {background:var(--lgi-canvas-low);color:var(--lgi-signal)}
+.gm-studio .tools-menu .tm-item:disabled {color:var(--lgi-ghost);cursor:not-allowed}
+.gm-studio .tools-menu .tm-foot {display:flex;align-items:center;justify-content:space-between;gap:var(--lgi-space-3);padding:var(--lgi-space-3)}
+.gm-studio button.cover {padding:0}
+/* ⋯ 按钮与页头里其他小标签同高（28px），否则它会把整个页头撑高；封面按钮是块级、无内边距。 */
+.gm-studio .ed-head summary[aria-label^="写稿工具"] {display:inline-flex;align-items:center;justify-content:center;height:28px;min-width:32px;padding:0 var(--lgi-space-2);border:1px solid var(--lgi-border);background:var(--lgi-canvas);color:var(--lgi-body);line-height:1}
+.gm-studio .ed-head summary[aria-label^="写稿工具"]:hover {background:var(--lgi-canvas-low)}
+.gm-studio button.cover {display:block}
+/* 链接统一为设计里的小号 quiet 样式（样稿没有裸链接）：墨色字、无下划线、与同行的 quiet 按钮同高同底，悬停变 Signal；
+   正文里的链接保留细下划线以便识别。 */
+.gm-studio .cand-tools a, .gm-studio .r-body > p a, .gm-studio .pub-steps a {display:inline-flex;align-items:center;min-height:24px;padding:0 var(--lgi-space-1);background:var(--lgi-canvas-low);color:var(--lgi-ink);font:500 var(--lgi-type-label-size)/1 var(--lgi-font-ui);text-decoration:none}
+.gm-studio .cand-tools a:hover, .gm-studio .r-body > p a:hover, .gm-studio .pub-steps a:hover {background:var(--lgi-canvas-sunken);color:var(--lgi-signal)}
+/* 底栏变窄时先省略那句提示，不挤坏左边的“必改 n · 提醒 n”。 */
+.gm-studio .ed-foot .chk-sum {flex:none;white-space:nowrap}
+.gm-studio .ed-foot > .aux, .gm-studio .ed-foot [class*="footerCopy"] .aux {min-width:0;flex:1 1 0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* 材料桌右下角“看全部”与旁边的缩放框等高（样稿里两者同为 36px，墨色描边）。 */
+.gm-studio .immersive-desk .view-tools .btn {height:var(--lgi-studio-control-height);border-color:var(--lgi-ink)}

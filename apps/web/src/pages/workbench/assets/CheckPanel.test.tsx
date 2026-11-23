@@ -7,16 +7,21 @@ import { RequestIdentities } from '../../../shared/requestIdentity';
 import { newDocument, type Revision, type WorkDocument } from '../workbenchModel';
 import * as workbenchApi from '../workbenchApi';
 import * as api from './assetsApi';
+import * as stylesApi from './stylesApi';
 import type { AccountView, CheckReport, Finding, Identity, Sentence } from './assetsModel';
 import { CheckPanel } from './CheckPanel';
+import { chooseOption } from '../../../test/selectField';
 
 vi.mock('./assetsApi', async importOriginal => {
   const original = await importOriginal<typeof import('./assetsApi')>();
   return {
     ...original, listAccounts: vi.fn(), checkDraft: vi.fn(), candidates: vi.fn(), copyStatus: vi.fn(),
-    prepareCopy: vi.fn(), confirmCopy: vi.fn(), putIdentity: vi.fn(), createSentence: vi.fn(),
+    prepareCopy: vi.fn(), copyPreview: vi.fn(), confirmCopy: vi.fn(), putIdentity: vi.fn(), createSentence: vi.fn(),
+    listExperiences: vi.fn(), listPersonaFacts: vi.fn(), listFactCards: vi.fn(),
   };
 });
+vi.mock('./CoverCanvas', () => ({ CoverCanvas: () => null }));
+vi.mock('./stylesApi', async importOriginal => ({ ...await importOriginal<typeof import('./stylesApi')>(), listStyles: vi.fn() }));
 vi.mock('../workbenchApi', async importOriginal => ({ ...await importOriginal<typeof import('../workbenchApi')>(), readWork: vi.fn() }));
 
 const WORK = '00000000-0000-4000-8000-000000000010';
@@ -74,7 +79,12 @@ beforeEach(() => {
   vi.mocked(api.listAccounts).mockResolvedValue([account()]);
   vi.mocked(api.candidates).mockResolvedValue({ state: 'ready', group: 'parent', items: [sentence('XJ-0001', '我也是学员家长'), sentence('XJ-0002', '一起慢慢来')] });
   vi.mocked(api.copyStatus).mockResolvedValue({ copied: null });
+  vi.mocked(api.copyPreview).mockResolvedValue({ workId: WORK, revisionId: REV, rulesetVersion: 'creation-checks.v1', title: '合成标题', body: '甲😀孩子变好了，真好', tags: [], text: '甲😀孩子变好了，真好\n#ADHD', warnCount: 0, hintCount: 0 });
   vi.mocked(api.checkDraft).mockResolvedValue(report([]));
+  vi.mocked(api.listExperiences).mockResolvedValue([]);
+  vi.mocked(api.listPersonaFacts).mockResolvedValue([]);
+  vi.mocked(api.listFactCards).mockResolvedValue([]);
+  vi.mocked(stylesApi.listStyles).mockResolvedValue([]);
 });
 afterEach(() => vi.useRealTimers());
 
@@ -85,7 +95,7 @@ describe('check results', () => {
     const view = show();
     await ready();
     fireEvent.click(screen.getByRole('button', { name: '素材' }));
-    expect(screen.getByText('还没有加入材料。可以从材料桌选择。')).toBeVisible();
+    expect(screen.getByText('还没有材料。可以去画布找材料，放进这一篇。')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '标题' }));
     expect(screen.getByRole('region', { name: '稿件标题' })).toHaveTextContent('合成标题');
     fireEvent.click(screen.getByRole('button', { name: '编辑封面' }));
@@ -524,7 +534,7 @@ describe('account and bridge slot', () => {
     vi.mocked(api.listAccounts).mockResolvedValue([account(), account({ accountRef: '00000000-0000-4000-8000-000000000099', accountName: '另一个号', identity: null })]);
     const { edit } = show();
     await ready();
-    fireEvent.change(screen.getByLabelText('所属账号'), { target: { value: '00000000-0000-4000-8000-000000000099' } });
+    chooseOption('所属账号', '另一个号');
     expect(edit).toHaveBeenLastCalledWith(expect.objectContaining({ accountRef: '00000000-0000-4000-8000-000000000099' }));
     fireEvent.click(screen.getByRole('button', { name: '编辑账号身份' }));
     expect(await screen.findByRole('heading', { name: /示例账号 · 账号身份/ })).toBeInTheDocument();
@@ -554,7 +564,7 @@ describe('account and bridge slot', () => {
     expect(edit.mock.calls.at(-1)?.[0].bridge.sentence).toMatchObject({ sentenceCode: 'XJ-0002', text: '一起慢慢来', edited: false });
     fireEvent.change(within(slot).getByLabelText('本篇的衔接句'), { target: { value: '我改写了这一句' } });
     expect(edit.mock.calls.at(-1)?.[0].bridge.sentence).toMatchObject({ sentenceCode: 'XJ-0001', text: '我改写了这一句', edited: true });
-    fireEvent.change(within(slot).getByLabelText('衔接句的位置'), { target: { value: P1 } });
+    chooseOption('衔接句的位置', '第 1 段之后');
     expect(edit.mock.calls.at(-1)?.[0].bridge.afterParagraph).toBe(P1);
     fireEvent.click(within(slot).getByRole('button', { name: '这篇不植入' }));
     expect(edit.mock.calls.at(-1)?.[0].bridge.skip).toBe(true);
@@ -576,5 +586,80 @@ describe('account and bridge slot', () => {
     await ready();
     fireEvent.click(await screen.findByRole('button', { name: '恢复衔接' }));
     expect(edit.mock.calls.at(-1)?.[0].bridge.skip).toBe(false);
+  });
+});
+
+describe('material tab actions', () => {
+  const citation = { asOf: '2026-11-01T00:00:00Z', blockRef: 'b', sourceKind: 'note' as const, sourceRef: 's', workRef: null, field: 'body' as const, sourceVersion: 'v', start: 0, end: 4, textHash: 'h', location: null };
+  const withCard = () => doc({
+    excerpts: [{ id: 'e1', citation, selectedText: '孩子一坐下就开始发呆', textHash: 'h' }],
+    canvas: [{ id: 'c1', excerptId: 'e1', group: 'opening', note: '', expression: '', expressionRevision: 0 }],
+  });
+  const experience = { id: '00000000-0000-4000-8000-0000000000e1', code: 'JL-0001', accountRef: ACCOUNT, currentPerson: true, state: 'confirmed' as const, revision: 2,
+    title: '一次小事', body: '那天我们慢慢来。', tags: null, origin: null, sendToModel: null, confirmedAt: 't', confirmedSubjectRole: '妈妈' };
+  it('hands the desk, the placement dialog and the library to the page instead of doing them itself', async () => {
+    const onGoDesk = vi.fn(); const onPlaceCard = vi.fn(); const onOpenAssets = vi.fn();
+    show({ document: withCard(), onGoDesk, onPlaceCard, onOpenAssets });
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '素材' }));
+    fireEvent.click(await screen.findByRole('button', { name: '去画布整理' }));
+    expect(onGoDesk).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole('button', { name: /插入正文：孩子一坐下/ }));
+    expect(onPlaceCard).toHaveBeenCalledWith('c1');
+    fireEvent.click(screen.getByRole('button', { name: '去采集' }));
+    expect(onOpenAssets).toHaveBeenCalledWith('experience');
+  });
+  it('uses a listed bridge sentence and inserts a confirmed experience through the ordinary edit', async () => {
+    vi.mocked(api.listExperiences).mockResolvedValue([experience]);
+    const view = show();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '素材' }));
+    fireEvent.click(await screen.findByRole('button', { name: /用这句：一起慢慢来/ }));
+    expect(view.edit).toHaveBeenLastCalledWith(expect.objectContaining({ bridge: expect.objectContaining({ skip: false, sentence: expect.objectContaining({ sentenceCode: 'XJ-0002' }) }) }));
+    fireEvent.click(await screen.findByRole('button', { name: '插入经历 JL-0001' }));
+    expect(view.edit).toHaveBeenLastCalledWith(expect.objectContaining({
+      paragraphs: expect.arrayContaining([expect.objectContaining({ text: '那天我们慢慢来。' })]),
+      experienceSlots: [expect.objectContaining({ experienceRef: experience.id, experienceRevision: 2 })],
+    }));
+  });
+  it('reads no personal assets until the tab is opened, and none while the page hides sensitive content', async () => {
+    const view = show();
+    await ready();
+    expect(api.listExperiences).not.toHaveBeenCalled();
+    expect(api.listPersonaFacts).not.toHaveBeenCalled();
+    view.rerenderWith({ sensitiveVisible: false });
+    fireEvent.click(screen.getByRole('button', { name: '素材' }));
+    expect(await screen.findByText('正在核验稿件，经历和事实暂时不显示。')).toBeVisible();
+    expect(api.listExperiences).not.toHaveBeenCalled();
+  });
+});
+
+describe('copy preview in the 预览 tab', () => {
+  it('reads the text the copy would give only once the 预览 tab is open, for the saved revision, and records nothing', async () => {
+    show();
+    await ready();
+    expect(api.copyPreview).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '预览' }));
+    expect(await screen.findByLabelText(/复制出去的文字/)).toHaveValue('甲😀孩子变好了，真好\n#ADHD');
+    expect(api.copyPreview).toHaveBeenCalledWith(WORK, expect.any(AbortSignal));
+    expect(api.prepareCopy).not.toHaveBeenCalled();
+    expect(api.confirmCopy).not.toHaveBeenCalled();
+  });
+});
+
+describe('sidebar tab driven by the page', () => {
+  it('shows the tab the page asks for, and tells the page when the writer picks another', async () => {
+    const onViewChange = vi.fn();
+    show({ view: 'titles', onViewChange });
+    await ready();
+    expect(screen.getByRole('region', { name: '稿件标题' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '预览' }));
+    expect(onViewChange).toHaveBeenLastCalledWith('preview');
+  });
+  it('keeps its own tab when the page does not drive it', async () => {
+    show();
+    await ready();
+    fireEvent.click(screen.getByRole('button', { name: '素材' }));
+    expect(screen.getByRole('region', { name: '稿件素材' })).toBeVisible();
   });
 });

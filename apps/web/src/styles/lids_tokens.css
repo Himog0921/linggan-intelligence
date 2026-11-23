@@ -1,3 +1,7 @@
+/* 创作工作台作用域：只在 .gm-studio 内把焦点色与 info 色换成 demo 的墨黑，写稿区的警告圆点用更深的警告色；全站值不变。 */
+.gm-studio{--lgi-focus:var(--lgi-studio-focus);--lgi-info:var(--lgi-studio-info)}
+.gm-studio .write{--lgi-warning-dot:var(--lgi-warning)}
+
 [data-theme="linggan-intelligence"] {
   /* Canvas */
   --lgi-canvas: #ffffff;
@@ -175,6 +179,95 @@
 
   /* WebGL quality */
   --lgi-scene-pixel-ratio-max: 1.75;
+
+  /* Creation studio (2026-11-06 V2 demo, apps/web/design-reference): values the demo uses that LIDS did not yet register. Mog 2026-11-22. */
+
+  /* 创作工作台作用域 */
+  --lgi-studio-focus: var(--lgi-ink); /* demo 的焦点色是墨黑；只在 .gm-studio 内覆盖 --lgi-focus，全站值不变 */
+  --lgi-studio-info: var(--lgi-ink); /* demo 的 info 文字色是墨黑；只在 .gm-studio 内覆盖 --lgi-info */
+
+  /* 字号（不在 B 角色表内的 demo 字号） */
+  --lgi-studio-text-10: 10px;
+  --lgi-studio-text-15: 15px;
+  --lgi-studio-text-20: 20px;
+  --lgi-studio-text-26: 26px;
+  --lgi-studio-sample-name-weight: 600; /* 样板库名称字重 */
+
+  /* 写稿区（.write）局部字号与边距 */
+  --lgi-studio-write-aux-size: 12px; /* 写稿区辅助字号，高于全局 11px */
+  --lgi-studio-write-reading-size: 17px; /* 写稿区正文阅读字号，高于全局 16px */
+  --lgi-studio-write-gutter: 56px; /* 写稿区正文左右留白 */
+  --lgi-studio-write-gutter-compact: 44px; /* 1280–1439 宽度下的留白 */
+
+  /* 尺寸 */
+  --lgi-studio-control-height: 36px; /* 材料桌工具条控件高度 */
+  --lgi-studio-side: 160px; /* demo 壳层侧栏宽度（演示壳层的遗留规则使用） */
+
+  /* 材料桌：表面与线条 */
+  --lgi-studio-hover-soft: #f1f3f4;
+  --lgi-studio-hover: #edf0f0;
+  --lgi-studio-hover-strong: #e3e7e7;
+  --lgi-studio-hover-back: #e9ecec;
+  --lgi-studio-disabled-fill: #f2f3f3;
+  --lgi-studio-disabled-fill-desk: #f2f4f5;
+  --lgi-studio-field-focus: #f5f5f5;
+  --lgi-studio-chip-fill: #f3f5f6;
+  --lgi-studio-chip-fill-hover: #e8e8e8;
+  --lgi-studio-code-fill: #f4f6f7;
+  --lgi-studio-drop-fill: #f0f0f0;
+  --lgi-studio-hint-fill: #f6f8f8ef;
+  --lgi-studio-selection: #e5e5e5;
+  --lgi-studio-role-hover: #30383c;
+  --lgi-studio-field-line: #cdd4d8;
+  --lgi-studio-edge: #bcc4c8;
+  --lgi-studio-scroll-line: #aab5bc;
+  --lgi-studio-label: #46535b;
+  --lgi-studio-dot-ok: #7b8a92;
+  --lgi-studio-note-edge: #8a6d1f; /* 便签卡边线 */
+  --lgi-studio-signal-hover: #ad2c12; /* 材料桌主按钮悬停色 */
+  --lgi-studio-signal-wash: rgba(242,74,35,.06); /* 选题框拖入高亮 */
+
+  /* 深色表面上的白色透明层 */
+  --lgi-studio-on-dark-line: #ffffff55;
+  --lgi-studio-on-dark-wash: #ffffff24;
+  --lgi-studio-on-dark-14: rgba(255,255,255,.14);
+  --lgi-studio-on-dark-40: rgba(255,255,255,.4);
+  --lgi-studio-on-dark-50: rgba(255,255,255,.5);
+  --lgi-studio-on-dark-55: rgba(255,255,255,.55);
+  --lgi-studio-on-dark-60: rgba(255,255,255,.6);
+  --lgi-studio-on-dark-62: rgba(255,255,255,.62);
+  --lgi-studio-on-dark-75: rgba(255,255,255,.75);
+  --lgi-studio-on-dark-85: rgba(255,255,255,.85);
+
+  /* 遮罩 */
+  --lgi-studio-scrim: rgba(11,15,18,.32);
+  --lgi-studio-scrim-strong: rgba(11,15,18,.46);
+  --lgi-studio-cover-tag-fill: rgba(0,0,0,.55); /* 封面角标底色 */
+
+  /* 封面底图 */
+  --lgi-studio-cover-base: #5c6b78;
+  --lgi-studio-cover-stroke: #111; /* 封面大字描边 */
+  --lgi-studio-cover-dusk-1: #3d4e73;
+  --lgi-studio-cover-dusk-2: #8b6f8f;
+  --lgi-studio-cover-dusk-3: #e3a27a;
+  --lgi-studio-cover-dusk-4: #6b5a63;
+  --lgi-studio-cover-sea-1: #b9cbd6;
+  --lgi-studio-cover-sea-2: #8fb0c2;
+  --lgi-studio-cover-sea-3: #56798c;
+  --lgi-studio-cover-sea-4: #2f4b5a;
+  --lgi-studio-cover-night-1: #141b2b;
+  --lgi-studio-cover-night-2: #26324a;
+  --lgi-studio-cover-night-3: #4b4a5c;
+  --lgi-studio-cover-night-4: #e0b27a;
+  --lgi-studio-cover-forest-1: #dfe8d6;
+  --lgi-studio-cover-forest-2: #a9c09a;
+  --lgi-studio-cover-forest-3: #62805d;
+  --lgi-studio-cover-forest-4: #2f4532;
+
+  /* 手机预览 */
+  --lgi-studio-phone-ink: #222;
+  --lgi-studio-phone-line: #eee;
+  --lgi-studio-phone-muted: #888;
 
   /* LIDS-UI-001 generated: start */
   --lgi-font-ui: "Linggan UI Digits","Linggan Albert","Linggan OPPO",Arial,Helvetica,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;

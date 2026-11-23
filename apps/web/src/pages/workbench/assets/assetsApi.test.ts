@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../../../shared/api';
 import { newDocument } from '../workbenchModel';
 import {
-  assetsErrorText, candidates, checkDocument, checkDraft, checkSentence, confirmCopy, confirmFactCard, copyStatus, createSentence,
+  assetsErrorText, candidates, checkDocument, checkDraft, checkSentence, confirmCopy, confirmFactCard, copyPreview, copyStatus, createSentence,
   editSentence, listAccounts, listFactCards, listSentences, prepareCopy, putIdentity, reviewSentence, saveFactCard,
 } from './assetsApi';
 import { blockedFindings, decodeCheckReport, decodeCandidates, decodeSentences } from './assetsModel';
@@ -177,6 +177,16 @@ describe('asset requests', () => {
     ]);
     stub(reply({ nope: true }));
     await expect(checkSentence('一句')).rejects.toBeInstanceOf(ApiError);
+  });
+
+  it('reads the copy preview with a plain GET and nothing in the body, and refuses a reply that is not one', async () => {
+    const preview = { workId: id, revisionId: id, rulesetVersion: 'creation-checks.v1', title: '标题', body: '正文', tags: ['#ADHD'], text: '正文\n#ADHD', warnCount: 1, hintCount: 0 };
+    const f = stub(reply(preview), reply({ nope: true }));
+    const read = await copyPreview(id);
+    expect(read).toEqual(preview);
+    expect(`${call(f, 0).method ?? 'GET'} ${call(f, 0).path}`).toBe(`GET /ops/api/creation/works/${id}/copy-preview`);
+    expect(call(f, 0).body).toBeUndefined();
+    await expect(copyPreview(id)).rejects.toBeInstanceOf(ApiError);
   });
 
   it('turns failures into plain sentences without blaming the user or hiding that the input is kept', () => {

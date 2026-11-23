@@ -102,6 +102,22 @@ const creationJson = async path => {
   const response = await context.request.get(`${origin}/ops/api/creation${path}`);
   assert.equal(response.status(),200,path); return response.json();
 };
+// The workbench's dropdowns are the shared SelectField: a combobox button that opens a listbox. `choice` is the option's
+// visible text (a string is matched from its start), a RegExp, or the option's position (a number).
+const choose = async (trigger, choice) => {
+  // The menu closes when an ancestor of its trigger scrolls, and a scroll event arrives a frame after the scroll itself:
+  // bring the trigger into view and let that event pass first, or it would close the menu that the click just opened.
+  await trigger.scrollIntoViewIfNeeded();
+  await trigger.page().evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await trigger.click();
+  const menu = trigger.page().getByRole('listbox', { name: await trigger.getAttribute('aria-label'), exact: true });
+  const options = menu.getByRole('option');
+  const wanted = typeof choice === 'string' ? new RegExp('^' + choice.replace(/[.*+?^$|(){}[\]\\]/g, '\\$&')) : choice;
+  await (typeof choice === 'number' ? options.nth(choice) : options.filter({ hasText: wanted }).first()).click();
+  await menu.waitFor({ state: 'detached' });
+};
+// The visible name of the fixture account, as the 所属账号 dropdown lists it.
+const fixtureAccountName = async () => (await creationJson(`/accounts?domainRef=${domainRef}`)).items.find(item => item.accountRef === accountRef).accountName;
 const bridgeSentence = '我也是示例营里的家长，和孩子一起慢慢练。';
 async function step(name, run) {
   try { await run(); report.steps.push({name,result:'PASS'}); console.log(`PASS ${name}`); }
@@ -272,7 +288,7 @@ try {
     await page.getByRole('button',{name:'建立选题',exact:true}).click();await page.getByLabel('正文标题').waitFor();
     workId=new URL(page.url()).searchParams.get('work');assert.ok(workId);workUrl=page.url();report.workId=workId;
     await page.getByRole('button',{name:'＋ 继续写一段',exact:true}).click();await page.getByLabel('正文第 1 段').fill('先把练习本放到桌上。');
-    await page.locator('summary').filter({hasText:'账号与衔接设置'}).first().click();await page.getByLabel('所属账号').selectOption(accountRef);await save();
+    await page.locator('summary').filter({hasText:'账号与衔接设置'}).first().click();await choose(page.getByRole('combobox',{name:'所属账号',exact:true}),await fixtureAccountName());await save();
     const saved=await envelope();assert.equal(saved.revision.document.title,'作业启动');assert.equal(saved.revision.document.accountRef,accountRef);assert.equal(saved.revision.document.paragraphs.length,1);
     await screenshot('workbench-1440-topic');
   });
@@ -300,7 +316,7 @@ try {
     await area.getByRole('button',{name:'撤销标题带入'}).click();await until(async()=>await area.getByLabel('图页标题').inputValue()==='','title import undone');assert.equal(await area.getByLabel('图页标题').inputValue(),'');
     await area.getByRole('button',{name:'预览带入正文标题'}).click();await area.getByRole('button',{name:'确认带入标题'}).click();
     await area.getByLabel('副标题').fill('先开始两分钟');await area.getByRole('button',{name:/留白大字/}).click();
-    await area.getByRole('button',{name:'配色：鼠尾草绿',exact:true}).click();await area.getByRole('combobox',{name:'图页文字对齐',exact:true}).selectOption('center');
+    await area.getByRole('button',{name:'配色：鼠尾草绿',exact:true}).click();await choose(area.getByRole('combobox',{name:'图页文字对齐',exact:true}),'居中');
     await assertWholeEditPreview();await screenshot('workbench-1440-cover');await stage('内页');assert.equal(await area.getAttribute('data-step'),'inner');await area.getByRole('navigation',{name:'图页顺序'}).getByRole('button',{name:/添加内页/}).click();
     const definitions=[['观点','把开始缩小','先把练习本放到桌上。'],['原声','听见真实困难','困难常常在第一步。'],['步骤','今天可以这样做','放好练习本。'],['观点','给家庭留出缓冲','允许短暂停顿。']];
     for(const [index,[kind,title,body]] of definitions.entries()){if(index)await area.getByRole('button',{name:`添加${kind}页`,exact:true}).click();await area.getByLabel('图页标题').fill(title);await area.getByLabel(kind==='步骤'?'步骤 1':'文案 1',{exact:true}).fill(body);}
@@ -369,8 +385,7 @@ try {
     for(let index=0;index<2;index++){
       const card=cards.nth(index);await card.getByRole('textbox',{name:/我的表达/}).fill(index===0?'先把练习本放到桌上。':'先做两分钟，再决定下一步。');
       await card.getByRole('button',{name:'放入正文 / 指定图页 →',exact:true}).click();const dialog=page.getByRole('dialog',{name:'放入作品'});
-      await dialog.getByLabel('指定内页',{exact:true}).check();const options=await dialog.getByLabel('放入图页位置').locator('option').evaluateAll(nodes=>nodes.filter(node=>node.value).map(node=>node.value));
-      await dialog.getByLabel('放入图页位置').selectOption(options[index]);await dialog.getByRole('button',{name:'确认放入',exact:true}).click();await dialog.waitFor({state:'detached'});
+      await dialog.getByLabel('指定内页',{exact:true}).check();await choose(dialog.getByRole('combobox',{name:'放入图页位置',exact:true}),index+1);await dialog.getByRole('button',{name:'确认放入',exact:true}).click();await dialog.waitFor({state:'detached'});
     }
     await save();const doc=(await envelope()).revision.document;assert.equal(doc.paragraphs.length,3);assert.equal(doc.uses.filter(item=>item.target.kind==='paragraph').length,2);assert.equal(doc.uses.filter(item=>item.target.kind==='pageBlock').length,2);
     await cards.first().getByRole('button',{name:'回到出处 ↗',exact:true}).click();
@@ -497,9 +512,9 @@ try {
     const panel=page.getByRole('complementary',{name:'检查与复制'}),footer=page.getByRole('region',{name:'复制',exact:true}),copy=footer.getByRole('button',{name:'复制到小红书',exact:true});
     await panel.getByText('账号与衔接设置').click();
     await until(async()=>await panel.getByLabel('本篇的衔接句').inputValue()===bridgeSentence,'the approved sentence is placed in the draft');
-    const account=panel.getByLabel('所属账号');await account.selectOption('');
+    const account=panel.getByRole('combobox',{name:'所属账号',exact:true});await choose(account,'还没选');
     await panel.getByText('这篇还没选账号，不知道能不能放衔接句').waitFor();await panel.getByText(/^必须先改 1$/).waitFor();assert.equal(await copy.isDisabled(),true,'a 必改 left keeps the copy button disabled');
-    await account.selectOption(accountRef);await panel.getByText(/^必须先改 \d+$/).waitFor({state:'detached'});
+    await choose(account,await fixtureAccountName());await panel.getByText(/^必须先改 \d+$/).waitFor({state:'detached'});
     const first=page.getByLabel('正文第 1 段');await first.fill('今天先把示例课的练习本放到桌上。');
     await panel.getByText(/^提醒 \d+$/).click();
     const wording='“示例课”不是产品的可用叫法，建议统一为“示例营”';await panel.getByText(wording).waitFor();
@@ -521,6 +536,18 @@ try {
     await panel.getByRole('button',{name:'标题',exact:true}).click();await panel.getByRole('button',{name:'复制标题',exact:true}).click();await footer.getByText('标题已复制。').waitFor();
     assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),current.revision.document.title.trim());
     await page.getByLabel('正文第 2 段').fill('本页版本：保留自己的新表达，再补一句。');await until(async()=>!(await footer.innerText()).includes('已复制（还没有发布）'),'edited draft is no longer marked copied');await save();
+  });
+  await step('预览页“复制出去的文字”等于服务器的复制预览，且看预览不留复制回执',async()=>{
+    // The page asks the server what the saved revision would copy; it must show exactly that and must not record a copy.
+    const panel=page.getByRole('complementary',{name:'检查与复制'});
+    const before=(await creationJson(`/works/${workId}/copy-status`)).copied;
+    const server=await creationJson(`/works/${workId}/copy-preview`);
+    assert.equal(server.revisionId,(await envelope()).revision.id,'the preview is of the saved current revision');
+    await panel.getByRole('button',{name:'预览',exact:true}).click();
+    const box=panel.getByLabel(/^复制出去的文字/);await box.waitFor();
+    await until(async()=>await box.inputValue()===server.text,'the box shows the text the server would copy');
+    assert.deepEqual((await creationJson(`/works/${workId}/copy-status`)).copied,before,'looking at the preview records nothing');
+    await panel.getByRole('button',{name:/^检查/}).click();
   });
   for(const [width,height] of [[1440,900],[1280,720]]){
     await step(`${width}×${height} 正文与图组可操作，无页面横向溢出`,async()=>{
@@ -574,8 +601,8 @@ try {
     await library.getByText('本人已确认 · 修改内容后需要再次确认。').waitFor();
     const editor=await context.newPage();editor.setDefaultTimeout(20_000);await editor.goto(workUrl);await stage('正文',editor);
     const panel=editor.getByRole('complementary',{name:'检查与复制'});await panel.getByText('账号与衔接设置').click();
-    await panel.getByLabel('所属账号').selectOption(accountRef);await save(editor);
-    await editor.getByRole('button',{name:'从经历库选'}).click();const selected=editor.getByLabel('选择本人已确认的经历');const experienceOption=selected.locator('option').filter({hasText:'双页撤回测试'}); await experienceOption.waitFor({state:'attached'}); await selected.selectOption(await experienceOption.getAttribute('value'));
+    await choose(panel.getByRole('combobox',{name:'所属账号',exact:true}),await fixtureAccountName());await save(editor);
+    await editor.getByRole('button',{name:'从经历库选'}).click();await choose(editor.getByRole('combobox',{name:'选择本人已确认的经历',exact:true}),/双页撤回测试/);
     await editor.getByRole('button',{name:'放入正文',exact:true}).click();await save(editor);
     assert.ok((await envelope()).revision.document.experienceSlots.length>0,'saved draft has experience reference');
     if (process.env.CW_BROWSER_TITLE_PROOF === '1') {

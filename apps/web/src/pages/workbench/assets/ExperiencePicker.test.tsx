@@ -23,9 +23,9 @@ describe('经历位', () => {
     render(<Harness />);
     fireEvent.click(screen.getByRole('button', { name: '留一个经历位' }));
     fireEvent.click(screen.getByRole('button', { name: '从经历库选' }));
-    const select = await screen.findByLabelText('选择本人已确认的经历');
+    fireEvent.click(await screen.findByRole('combobox', { name: '选择本人已确认的经历' }));
     expect(screen.queryByRole('option', { name: /未确认/ })).not.toBeInTheDocument();
-    fireEvent.change(select, { target: { value: id } });
+    fireEvent.click(screen.getByRole('option', { name: /JL-0001/ }));
     fireEvent.click(screen.getByRole('button', { name: '放入正文' }));
     await waitFor(() => expect(JSON.parse(screen.getByLabelText('稿件状态').textContent ?? '{}')).toMatchObject({
       experienceGaps: [], experienceSlots: [{ experienceRef: id, experienceRevision: 1 }], paragraphs: [{ text: '合成正文' }],
