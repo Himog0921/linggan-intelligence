@@ -855,6 +855,27 @@ function WorkEditor({
       setCreatingFrame(false);
     }
   }
+  // One draft for each chosen account under this idea. The command copies from the idea's saved anchor draft,
+  // so this draft is saved first; the same accounts asked again after a lost answer keep the original request.
+  async function openIdeaDrafts(accountRefs: string[]) {
+    const ideaRef = live.current.ideaRef;
+    if (!ideaRef) throw new api.WorkbenchActionError('这篇还没有选题框，先在写稿页补一个');
+    await saveBeforeCopy();
+    // One order for the key and the body, so a retry in another pick order is still the same request.
+    const refs = [...accountRefs].sort();
+    const requestId = identities.keyFor('open-idea-drafts', JSON.stringify({ ideaRef, accountRefs: refs }));
+    try {
+      const opened = await api.openIdeaDrafts(ideaRef, { requestId, accountRefs: refs });
+      identities.settle('open-idea-drafts');
+      return opened;
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.failure.kind === 'http') identities.settle('open-idea-drafts');
+      throw cause;
+    } finally {
+      // Whatever the answer was, the drafts may exist by now: read the list again.
+      await queryClient.invalidateQueries({ queryKey: ['creation-works', initial.domainRef] });
+    }
+  }
   function updateCanvas(id: string, patch: Partial<CanvasBlock>) {
     edit({
       ...live.current,
@@ -1275,7 +1296,7 @@ function WorkEditor({
     }}>丢弃本页编辑并重新读取</ActionButton></div> : null}
     {recheckStatus === 'checking' ? <p role="status">正在核验稿件来源…</p> : recheckStatus === 'failed' ? <p role="alert">暂时无法核验稿件来源。未保存的编辑仍在本页。<ActionButton variant="quiet" onClick={() => setRecheckAttempt(value => value + 1)}>重新核验</ActionButton></p> : null}
     <fieldset hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} className={styles.editingSurface}>
-    {view === 'desk' ? <div className="gm-studio"><MaterialDesk domain={initial.domainRef} works={drafts} currentWorkId={initial.workId} currentDocument={document} accounts={accounts.data ?? []} sourceFocus={sourceFocus} onClearSourceFocus={() => setSourceFocus(null)} onOpenWork={onOpenDraftWriting} onSwitchWork={onSwitchWork} onCreateFrame={createFrame} onCreateFramePending={creatingFrame} onAddNote={addDeskNote} onPlaceMaterial={placeMaterial} onUpdateCard={updateCanvas} onRemoveCard={id => edit({ ...live.current, canvas: live.current.canvas.filter(block => block.id !== id) })} onRenameTitle={next => edit({ ...live.current, title: next })} onPickAccount={ref => edit({ ...live.current, accountRef: ref })} /></div> : null}
+    {view === 'desk' ? <div className="gm-studio"><MaterialDesk domain={initial.domainRef} works={drafts} currentWorkId={initial.workId} currentDocument={document} accounts={accounts.data ?? []} sourceFocus={sourceFocus} onClearSourceFocus={() => setSourceFocus(null)} onOpenWork={onOpenDraftWriting} onSwitchWork={onSwitchWork} onCreateFrame={createFrame} onCreateFramePending={creatingFrame} onAddNote={addDeskNote} onPlaceMaterial={placeMaterial} onUpdateCard={updateCanvas} onRemoveCard={id => edit({ ...live.current, canvas: live.current.canvas.filter(block => block.id !== id) })} onRenameTitle={next => edit({ ...live.current, title: next })} onPickAccount={ref => edit({ ...live.current, accountRef: ref })} idea={ideas.find(item => item.ideaRef === document.ideaRef) ?? null} ideaState={ideaState} onOpenIdeaDrafts={openIdeaDrafts} /></div> : null}
     {view === 'canvas' ? <CanvasBoard onCompose={compose} document={document} busy={busy} onChange={edit} onUpdate={updateCanvas} onLocate={citation=>{setSourceFocus(citation);onView('desk');}} onMaterials={()=>onView('desk')} onUse={target=>{const location=targetLocation(target,document);return {label:location.label,open:()=>onView(location.view)};}} onPlace={openPlacement} /> : null}
     {view === 'body' ? <div className={styles.bodyWorkspace}>
 {compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}

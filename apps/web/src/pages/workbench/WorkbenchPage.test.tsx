@@ -1239,6 +1239,104 @@ it('writes material memo from the desk and shows every material in frame setting
   expect(await screen.findByRole('group', { name: /^便签：/ })).toBeInTheDocument();
 });
 
+const ideaRef = '00000000-0000-4000-8000-0000000000a1', accountA = '00000000-0000-4000-8000-0000000000b1', accountB = '00000000-0000-4000-8000-0000000000b2';
+const ideaDesk = (over: Partial<WorkEnvelope['revision']['document']> = {}) => {
+  const result = deskEnvelope();
+  result.revision.document = { ...result.revision.document, ideaRef, ideaName: '放手也是爱', accountRef: accountA, ...over };
+  return result;
+};
+const ideaBox = (anchorWorkId = work) => ({ ideaRef, anchorWorkId, anchorRevisionId: revision, savedAt: '2026-10-15T01:00:00Z', name: '放手也是爱', intent: '' });
+function ideaDeskReady(anchorWorkId = work, document = ideaDesk()) {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z', ideaRef }]);
+  vi.mocked(api.readWork).mockResolvedValue(document);
+  vi.mocked(api.listIdeaBoxes).mockResolvedValue([ideaBox(anchorWorkId)]);
+  vi.mocked(api.accounts).mockResolvedValue([
+    { ref: accountA, name: '甲号', platform: 'xhs', identity: null },
+    { ref: accountB, name: '乙号', platform: 'xhs', identity: null },
+  ]);
+}
+
+it('opens a draft for each chosen account from the idea’s own frame settings and says what happened', async () => {
+  ideaDeskReady();
+  vi.mocked(api.openIdeaDrafts).mockImplementation(async (_idea, body) => ({
+    requestId: body.requestId, ideaRef, skippedExcerpts: 0, replayed: false,
+    drafts: body.accountRefs.map(accountRef => ({ workId: '00000000-0000-4000-8000-0000000000c1', accountRef, created: true, revisionId: revision })),
+  }));
+  show('desk');
+  fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+  expect(await screen.findByRole('button', { name: '甲号 · 已开稿' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '用这组材料开稿' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '乙号' }));
+  const listCalls = vi.mocked(api.listWorks).mock.calls.length;
+  fireEvent.click(screen.getByRole('button', { name: '用这组材料开稿' }));
+  await waitFor(() => expect(api.openIdeaDrafts).toHaveBeenCalledWith(ideaRef, { requestId: expect.any(String), accountRefs: [accountB] }));
+  expect(await screen.findByText('已开稿 1 篇：乙号')).toBeInTheDocument();
+  // The new drafts show up on the desk: the list of drafts is read again.
+  await waitFor(() => expect(vi.mocked(api.listWorks).mock.calls.length).toBeGreaterThan(listCalls));
+  expect(screen.getByRole('button', { name: '乙号' })).toBeInTheDocument();
+});
+
+it('keeps the request identity when the answer was lost, and takes a new one once the server has answered', async () => {
+  ideaDeskReady();
+  vi.mocked(api.openIdeaDrafts).mockRejectedValueOnce(new ApiError({ kind: 'network' }, null)).mockImplementation(async (_idea, body) => ({
+    requestId: body.requestId, ideaRef, skippedExcerpts: 0, replayed: true,
+    drafts: [{ workId: '00000000-0000-4000-8000-0000000000c1', accountRef: accountB, created: true, revisionId: revision }],
+  }));
+  show('desk');
+  fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+  fireEvent.click(await screen.findByRole('button', { name: '乙号' }));
+  fireEvent.click(screen.getByRole('button', { name: '用这组材料开稿' }));
+  const listCalls = vi.mocked(api.listWorks).mock.calls.length;
+  await waitFor(() => expect(api.openIdeaDrafts).toHaveBeenCalledTimes(1));
+  expect(await screen.findByText('未确认')).toBeInTheDocument();
+  // The drafts may exist even though the answer was lost, so the list is read again.
+  await waitFor(() => expect(vi.mocked(api.listWorks).mock.calls.length).toBeGreaterThan(listCalls));
+  fireEvent.click(await screen.findByRole('button', { name: '用这组材料开稿' }));
+  await waitFor(() => expect(api.openIdeaDrafts).toHaveBeenCalledTimes(2));
+  const [first, second] = vi.mocked(api.openIdeaDrafts).mock.calls;
+  expect(second?.[1].requestId).toBe(first?.[1].requestId);
+  expect(await screen.findByText(/这些稿是上一次同一个请求已经开好的/)).toBeInTheDocument();
+});
+
+it('waits until every draft of the idea has been read before saying which accounts are taken, and asks in one account order', async () => {
+  const accountC = '00000000-0000-4000-8000-0000000000b3', sibling = '00000000-0000-4000-8000-0000000000e1';
+  ideaDeskReady();
+  vi.mocked(api.accounts).mockResolvedValue([
+    { ref: accountA, name: '甲号', platform: 'xhs', identity: null },
+    { ref: accountB, name: '乙号', platform: 'xhs', identity: null },
+    { ref: accountC, name: '丙号', platform: 'xhs', identity: null },
+  ]);
+  vi.mocked(api.listWorks).mockResolvedValue([
+    { workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z', ideaRef },
+    { workId: sibling, domainRef: domain, title: '同一选题的另一篇', revisionId: revision, savedAt: '2026-10-15T01:00:00Z', ideaRef },
+  ]);
+  let release: (value: WorkEnvelope) => void = () => undefined;
+  vi.mocked(api.readWork).mockImplementation(id => id === sibling ? new Promise(resolve => { release = resolve; }) : Promise.resolve(ideaDesk()));
+  vi.mocked(api.openIdeaDrafts).mockImplementation(async (_idea, body) => ({
+    requestId: body.requestId, ideaRef, skippedExcerpts: 0, replayed: false,
+    drafts: body.accountRefs.map(accountRef => ({ workId: '00000000-0000-4000-8000-0000000000c1', accountRef, created: true, revisionId: revision })),
+  }));
+  show('desk');
+  fireEvent.click((await screen.findAllByRole('button', { name: '设置' }))[0]!);
+  expect(await screen.findByText(/正在读取这个选题下的稿件/)).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '乙号' })).toBeNull();
+  const other = ideaDesk({ accountRef: accountB });
+  other.workId = sibling;
+  release(other);
+  fireEvent.click(await screen.findByRole('button', { name: '丙号' }));
+  expect(screen.getByRole('button', { name: '乙号 · 已开稿' })).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '用这组材料开稿' }));
+  await waitFor(() => expect(api.openIdeaDrafts).toHaveBeenCalledWith(ideaRef, { requestId: expect.any(String), accountRefs: [accountC] }));
+});
+
+it('does not offer to open drafts from a draft that is not the idea’s own', async () => {
+  ideaDeskReady('00000000-0000-4000-8000-0000000000d1');
+  show('desk');
+  fireEvent.click(await screen.findByRole('button', { name: '设置' }));
+  expect(await screen.findByRole('button', { name: '切到选题框原稿' })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: '用这组材料开稿' })).toBeNull();
+});
+
 it('renames a frame title and writes a sticky note directly on the desk', async () => {
   vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
   show('desk');

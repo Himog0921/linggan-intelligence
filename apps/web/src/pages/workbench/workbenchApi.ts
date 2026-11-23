@@ -1,5 +1,5 @@
 import { ApiError, requestJson, requestBinaryJson } from '../../shared/api';
-import { parseTitleStatus, parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseRevision, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, parseDeskCardPosition, parseDeskCardPositions, parseDeskPosition, parseDeskPositions, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
+import { parseTitleStatus, parseMaterialDocument, parseMaterialCollection, type MaterialSelection, type MaterialKind, object, parseAiStatus, parseAnchor, parseAsset, parseContext, parseEnvelope, parseExportRecord, parseFrozen, parseHistory, parsePreview, parseReadiness, parseRevision, parseSaveReceipt, parseSourceList, parseWorkList, parseIdeaBoxList, parseOpenedIdeaDrafts, parseDeskCardPosition, parseDeskCardPositions, parseDeskPosition, parseDeskPositions, uuid, WorkbenchContractError, type Citation, type UseTarget, type WorkDocument, type WritingAction, type WritingSelection } from './workbenchModel';
 import { listAccounts as listCreationAccounts } from './assets/assetsApi';
 import type { Identity } from './assets/assetsModel';
 const base = '/ops/api/creation';
@@ -14,6 +14,12 @@ export async function listWorks(domain: string, signal?: AbortSignal) {
 }
 export async function listIdeaBoxes(domain: string, signal?: AbortSignal) {
   return parseIdeaBoxList(await requestJson(`${base}/idea-boxes?domainRef=${encodeURIComponent(domain)}`, { signal })).items;
+}
+/** One draft for each account that has none under the idea, all or none. The same `requestId` sent again finds the drafts it made. */
+export async function openIdeaDrafts(idea: string, body: { requestId: string; accountRefs: string[] }) {
+  const opened = parseOpenedIdeaDrafts(await post(`${base}/idea-boxes/${uuid(idea)}/drafts`, body));
+  if (opened.requestId !== body.requestId || opened.ideaRef !== idea) throw new WorkbenchContractError();
+  return opened;
 }
 export async function deskPositions(domain: string, signal?: AbortSignal) {
   return parseDeskPositions(await requestJson(`${base}/desk/positions?domainRef=${encodeURIComponent(domain)}`, { signal })).items;
