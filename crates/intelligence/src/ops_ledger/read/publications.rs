@@ -26,6 +26,9 @@ pub struct OpsPublicationFilter {
     pub from: Option<String>,
     pub to: Option<String>,
     pub pending_views: bool,
+    /// Only Xiaohongshu records whose latest reported views reach the hit line, the same rule as
+    /// `OpsViews::hit`. Cannot be combined with `pending_views`: a hit has views, a pending one has none.
+    pub hit_views: bool,
     pub page: i64,
 }
 
@@ -59,6 +62,9 @@ impl OpsPublicationFilter {
             {
                 return Err(OpsReadError::InvalidParameter(name));
             }
+        }
+        if self.pending_views && self.hit_views {
+            return Err(OpsReadError::InvalidParameter("views"));
         }
         if self.page < 1 || self.page > 100_000 {
             return Err(OpsReadError::InvalidParameter("page"));
@@ -188,7 +194,8 @@ pub struct OpsPublicationPage {
 }
 
 /// Rows of the current business that the filters keep. `$1` business domain, `$2` operator,
-/// `$3` platform, `$4` account pattern, `$5`/`$6` date range, `$7` pending views only.
+/// `$3` platform, `$4` account pattern, `$5`/`$6` date range, `$7` pending views only, `$8` visible
+/// members, `$9` viewer, `$10` account, `$11` exact publication, `$12` hit views only, `$13` the hit line.
 const FILTERED: &str = "kept AS ( \
     SELECT p.*, a.account_name, a.ledger_state, publisher.display_name AS native_publisher_name, \
            lv.view_count, lv.views_as_of, sync.request_ref AS sync_request_ref, \
@@ -304,7 +311,8 @@ const FILTERED: &str = "kept AS ( \
        AND ($6::date IS NULL OR coalesce(p.published_business_date,p.native_published_on) <= $6::date) \
        AND (NOT $7 OR (p.platform = 'xhs' AND lv.view_count IS NULL)) \
        AND ($10::uuid IS NULL OR p.account_ref = $10) \
-       AND ($11::uuid IS NULL OR p.publication_ref = $11))";
+       AND ($11::uuid IS NULL OR p.publication_ref = $11) \
+       AND (NOT $12::boolean OR (p.platform = 'xhs' AND lv.view_count >= $13::bigint)))";
 
 pub async fn read_ops_publications(
     database: &Database,
@@ -336,6 +344,8 @@ pub async fn read_ops_publications_scoped(
         .bind(viewer)
         .bind(filter.account_ref)
         .bind(filter.publication_ref)
+        .bind(filter.hit_views)
+        .bind(XHS_HIT_VIEW_THRESHOLD)
         .fetch_one(database.pool())
         .await?;
     let items = read_page(
@@ -495,7 +505,7 @@ async fn read_page(
           ORDER BY CASE WHEN $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END ASC, \
                    CASE WHEN NOT $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END DESC, \
                    kept.source_created_at DESC NULLS LAST, kept.publication_ref DESC \
-          LIMIT $13 OFFSET $12"
+          LIMIT $15 OFFSET $14"
     );
     let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(business.domain_ref())
@@ -509,6 +519,8 @@ async fn read_page(
         .bind(viewer)
         .bind(filter.account_ref)
         .bind(filter.publication_ref)
+        .bind(filter.hit_views)
+        .bind(XHS_HIT_VIEW_THRESHOLD)
         .bind((filter.page - 1) * OPS_PAGE_SIZE)
         .bind(limit)
         .fetch_all(database.pool())
@@ -778,6 +790,16 @@ mod tests {
             }
             .validated()
             .is_err()
+        );
+        assert!(
+            OpsPublicationFilter {
+                pending_views: true,
+                hit_views: true,
+                ..base.clone()
+            }
+            .validated()
+            .is_err(),
+            "a pending record has no views to be a hit"
         );
         let cleaned = OpsPublicationFilter {
             operator: Some("  ".into()),
