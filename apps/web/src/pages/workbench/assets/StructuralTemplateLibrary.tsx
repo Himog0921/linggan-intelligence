@@ -8,6 +8,7 @@ import { stepNames, type Step } from '../workbenchModel';
 import { assetsErrorText } from './assetsApi';
 import styles from './Assets.module.css';
 import { SelectField } from '../../../shared/SelectField';
+import { FieldLabel } from '../FieldLabel';
 
 type ReviewAction = 'approve' | 'disable' | 'enable';
 type Pending = { kind: 'review'; code: string; requestId: string; expectedRevision: number; action: ReviewAction }
@@ -61,7 +62,7 @@ export function StructuralTemplateLibrary({ domainRef, onPendingChange, onDirtyC
     </header>
     <div className="lib-tools">
       <div className="find"><b>FIND</b><input aria-label="搜索样板编码" placeholder="搜编码" value={search} onChange={event => setSearch(event.target.value)} /></div>
-      <label className="lbl">状态<SelectField label="样板状态" value={status} options={[{ value: 'all', label: '全部' }, { value: 'review', label: '待审核' }, { value: 'ok', label: '已通过' }, { value: 'off', label: '已停用' }, { value: 'unavailable', label: '来源不可用' }]} onChange={setStatus} /></label>
+      <FieldLabel className="lbl">状态<SelectField label="样板状态" value={status} options={[{ value: 'all', label: '全部' }, { value: 'review', label: '待审核' }, { value: 'ok', label: '已通过' }, { value: 'off', label: '已停用' }, { value: 'unavailable', label: '来源不可用' }]} onChange={setStatus} /></FieldLabel>
     </div>
     {query.isPending ? <p role="status">正在读取…</p> : null}{query.isError ? <p role="alert">读取失败。<ActionButton variant="quiet" onClick={() => void query.refetch()}>重试</ActionButton></p> : null}
     {query.isSuccess && !items.length ? <p className="lib-empty">还没有样板，可在写稿页保存结构。</p> : query.isSuccess && !filtered.length ? <p className="lib-empty">没有符合条件的样板。</p> : null}

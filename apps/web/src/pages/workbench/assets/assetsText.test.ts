@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { newDocument } from '../workbenchModel';
 import type { Experience, Finding, Identity, Sentence } from './assetsModel';
 import {
-  applyRange, bridgeFromSentence, countByLevel, dedupeTags, identityCommand, identitySummary, insertExperience, nextSentence, previewParts, triLabel, usableExperiences, withBridge, withCoverTitle, withoutTag,
+  adoptTitle, applyRange, bridgeFromSentence, countByLevel, dedupeTags, identityCommand, identitySummary, insertExperience, nextSentence, previewParts, triLabel, usableExperiences, withBridge, withCoverTitle, withoutTag,
 } from './assetsText';
 
 const identity = (patch: Partial<Identity> = {}): Identity => ({
@@ -151,5 +151,12 @@ describe('cover title', () => {
     const page = (id: string) => ({ ...withCoverTitle(newDocument('t'), 'x').pages[0]!, id, kind: 'opinion' as const });
     const full = { ...newDocument('t'), pages: Array.from({ length: 30 }, (_, index) => page(`p${index}`)) };
     expect(withCoverTitle(full, '新封面')).toBe(full);
+  });
+  it('adopting one of our own titles says no when the cover would need a 31st page, and still sets the note title', () => {
+    const page = (id: string) => ({ ...withCoverTitle(newDocument('t'), 'x').pages[0]!, id, kind: 'opinion' as const });
+    const full = { ...newDocument('t'), pages: Array.from({ length: 30 }, (_, index) => page(`p${index}`)) };
+    expect(adoptTitle(full, 'cover', '新封面')).toBeNull();
+    expect(adoptTitle(full, 'note', '新标题')).toMatchObject({ title: '新标题' });
+    expect(adoptTitle(newDocument('t'), 'cover', '新封面')?.pages[0]).toMatchObject({ kind: 'cover', title: '新封面' });
   });
 });

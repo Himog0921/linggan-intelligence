@@ -13,13 +13,12 @@ export function PublicationCard({ workId, domainRef, accountRef }: { workId: str
   const links = useQuery({ queryKey: ['creation-assets', 'publication-links', workId], queryFn: ({ signal }) => api.publicationLinks(workId, signal), retry: false, gcTime: 0 });
   const link = links.data?.find(item => item.available) ?? null;
   const record = useQuery({
-    queryKey: ['creation-assets', 'publication-recovery', domainRef, accountRef, link?.publicationRef, link?.publishedOn],
-    enabled: !!link && !!accountRef,
+    queryKey: ['creation-assets', 'publication-recovery', domainRef, link?.publicationRef],
+    enabled: !!link,
     retry: false, gcTime: 0,
     queryFn: async ({ signal }) => {
-      // The ledger lists a business's publications by date; one account on the publication day narrows it to the record.
-      const day: Record<string, string> = link?.publishedOn ? { from: link.publishedOn, to: link.publishedOn } : {};
-      const list = await ops.get(ops.url('publications', { domain: domainRef, account_ref: accountRef ?? '', ...day }), ops.publications, signal);
+      // The ledger can return exactly one publication by its ref, so nothing depends on which page, account or day it falls on.
+      const list = await ops.get(ops.url('publications', { domain: domainRef, publication_ref: link?.publicationRef ?? '' }), ops.publications, signal);
       return list.items.find(item => item.ref === link?.publicationRef) ?? null;
     },
   });

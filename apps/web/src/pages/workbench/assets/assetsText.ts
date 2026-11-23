@@ -115,6 +115,16 @@ export function dedupeTags(draft: string): string[] {
   return draft.split(/\s+/u).filter(Boolean).filter(tag => { const key = tag.toLowerCase(); if (seen.has(key)) return false; seen.add(key); return true; });
 }
 
+/**
+ * Puts one of our own past titles into the draft: as the note title, or as the cover headline. Null when a cover
+ * page would have to be added to a draft that already has the 30 pages it may hold.
+ */
+export function adoptTitle(document: WorkDocument, kind: 'cover' | 'note', text: string): WorkDocument | null {
+  if (kind === 'note') return { ...document, title: text };
+  const next = withCoverTitle(document, text);
+  return next === document ? null : next;
+}
+
 /** Sets the cover headline, making a cover page first when the draft has none (at most 30 pages). */
 export function withCoverTitle(document: WorkDocument, title: string): WorkDocument {
   const cover = document.pages.find(page => page.kind === 'cover');

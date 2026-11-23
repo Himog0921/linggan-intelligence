@@ -8,7 +8,7 @@ export function CoverCanvas({ page, workId, quiet = false }: { page: ImagePage; 
   const [failure, setFailure] = useState<{ page: ImagePage; message: string } | null>(null);
   useEffect(() => {
     const controller = new AbortController();
-    void renderPage(page, { signal: controller.signal, assetUrl: page.assetId ? `/ops/api/creation/works/${workId}/assets/${page.assetId}` : undefined })
+    void renderPage(page, { signal: controller.signal, assetUrl: page.assetId ? `/ops/api/creation/works/${encodeURIComponent(workId)}/assets/${encodeURIComponent(page.assetId)}` : undefined })
       .then(result => {
         if (controller.signal.aborted || !host.current) return;
         host.current.width = result.canvas.width;

@@ -22,6 +22,13 @@ beforeEach(() => {
 });
 
 describe('recovery card of a published draft', () => {
+  it('still finds the record when the link has no publication day', async () => {
+    vi.mocked(api.publicationLinks).mockResolvedValue([link({ publishedOn: null })]);
+    vi.mocked(ops.get).mockResolvedValue({ items: [item({ state: 'value', value: 6116, overdue: false, hit: true })] } as never);
+    show();
+    expect(await screen.findByText('6,116')).toBeVisible();
+    expect(String(vi.mocked(ops.get).mock.calls[0]?.[0])).toContain(`publication_ref=${PUB}`);
+  });
   it('shows the publication day, the reads and likes from the ledger, and calls a record over the line a hit', async () => {
     vi.mocked(ops.get).mockResolvedValue({ items: [item({ state: 'value', value: 6116, overdue: false, hit: true })] } as never);
     show();
@@ -31,15 +38,15 @@ describe('recovery card of a published draft', () => {
     expect(screen.getByText('已有阅读数据')).toBeVisible();
     expect(screen.getByText(/2026-11-10 · 为什么越催越慢/)).toBeVisible();
   });
-  it('finds the record by account and publication day, and links to where the numbers are filled in', async () => {
+  it('asks the ledger for exactly that record, whatever its day or account, and links to where the numbers are filled in', async () => {
     vi.mocked(ops.get).mockResolvedValue({ items: [item({ state: 'value', value: 6116, overdue: false, hit: true })] } as never);
     show();
     await screen.findByText('6,116');
     const requested = String(vi.mocked(ops.get).mock.calls[0]?.[0]);
     expect(requested).toContain(`domain=${DOMAIN}`);
-    expect(requested).toContain(`account_ref=${ACCOUNT}`);
-    expect(requested).toContain('from=2026-11-10');
-    expect(requested).toContain('to=2026-11-10');
+    expect(requested).toContain(`publication_ref=${PUB}`);
+    // No page of someone's busy account or a missing publication day can hide the record.
+    expect(requested).not.toMatch(/account_ref=|from=|to=/);
     expect(screen.getByRole('link', { name: '去运营发布记录 ↗' })).toHaveAttribute('href', `/ops/publications?domain=${DOMAIN}&account_ref=${ACCOUNT}`);
   });
   it('says a record with reads below the line is not a hit', async () => {

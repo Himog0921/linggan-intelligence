@@ -652,7 +652,7 @@ export function MaterialDesk({
             <p className="editor-caption">改完自动保存到这篇稿件。</p>
             <label className="lbl" htmlFor="desk-frame-title">选题</label>
             <input id="desk-frame-title" className="input" value={settingsFrame.title} onChange={event => onRenameTitle(event.target.value)} />
-            <label className="lbl" htmlFor="desk-frame-account">给哪个账号写</label>
+            <p className="lbl">给哪个账号写</p>
             <SelectField label="给哪个账号写" value={currentDocument.accountRef ?? ''} options={[{ value: '', label: '不指定' }, ...accounts.map(account => ({ value: account.ref, label: account.name }))]} onChange={value => onPickAccount(value || null)} />
             <p className="lbl">材料 · {settingsFrame.cards.length} 张 · 每张写清用途和思路</p>
             {settingsFrame.cards.length ? settingsFrame.cards.map((card, index) => <div className="mrow" key={card.id}>

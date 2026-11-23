@@ -26,13 +26,20 @@ describe('phone preview', () => {
   });
   it('draws the cover with the export renderer, and tags it only when it is known whether AI made it', () => {
     const cover = { ...newImagePage('cover'), title: '先做一步' };
-    const { container, rerender } = render(<PreviewTab document={doc({ pages: [cover] })} workId="w1" tagsDraft="" />);
+    const { container, rerender } = render(<PreviewTab document={doc({ pages: [cover] })} workId="w1" tagsDraft="" enabled />);
     expect(screen.getByTestId('cover-canvas')).toHaveTextContent('先做一步@w1');
     expect(container.querySelector('.cover-tag')).toBeNull();
-    rerender(<PreviewTab document={doc({ pages: [cover], coverAi: true })} workId="w1" tagsDraft="" />);
+    rerender(<PreviewTab document={doc({ pages: [cover], coverAi: true })} workId="w1" tagsDraft="" enabled />);
     expect(container.querySelector('.cover-tag')).toHaveTextContent('AI 作图');
-    rerender(<PreviewTab document={doc({ pages: [cover], coverAi: false })} workId="w1" tagsDraft="" />);
+    rerender(<PreviewTab document={doc({ pages: [cover], coverAi: false })} workId="w1" tagsDraft="" enabled />);
     expect(container.querySelector('.cover-tag')).toHaveTextContent('实拍');
+  });
+  it('does not run the export renderer while the preview tab is hidden', () => {
+    const cover = { ...newImagePage('cover'), title: '先做一步' };
+    const { rerender } = render(<PreviewTab document={doc({ pages: [cover] })} workId="w1" tagsDraft="" />);
+    expect(screen.queryByTestId('cover-canvas')).toBeNull();
+    rerender(<PreviewTab document={doc({ pages: [cover] })} workId="w1" tagsDraft="" enabled />);
+    expect(screen.getByTestId('cover-canvas')).toBeInTheDocument();
   });
   it('shows an empty cover frame when there is no cover page yet, and says so when there is no body', () => {
     render(<PreviewTab document={doc({ paragraphs: [], title: '' })} workId="w1" tagsDraft="" />);

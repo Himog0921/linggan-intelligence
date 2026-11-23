@@ -18,7 +18,7 @@ export function PreviewTab({ document, workId, tagsDraft, savedRevisionId = null
   return <>
     <div className="phone">
       <div className="cover">
-        {cover ? <CoverCanvas page={cover} workId={workId} /> : null}
+        {cover && enabled ? <CoverCanvas page={cover} workId={workId} /> : null}
         {document.coverAi === null ? null : <span className="cover-tag">{document.coverAi ? 'AI 作图' : '实拍'}</span>}
       </div>
       <div className="phone-body">

@@ -9,7 +9,7 @@ import type { Citation, Revision, WorkDocument } from '../workbenchModel';
 import { readWork } from '../workbenchApi';
 import * as api from './assetsApi';
 import { blockedFindings, type Experience, type Finding, type Fix, type Level, type Location, type Sentence } from './assetsModel';
-import { applyRange, bridgeFromSentence, countByLevel, identityCommand, insertExperience, nextSentence, withBridge, withCoverTitle, withoutTag } from './assetsText';
+import { adoptTitle, applyRange, bridgeFromSentence, countByLevel, identityCommand, insertExperience, nextSentence, withBridge, withoutTag } from './assetsText';
 import { BridgeSlot } from './BridgeSlot';
 import { IdentityForm } from './IdentityForm';
 import { MaterialsTab } from './MaterialsTab';
@@ -17,6 +17,7 @@ import { PreviewTab } from './PreviewTab';
 import { TitlesTab, type TitleTools } from './TitlesTab';
 import styles from './Assets.module.css';
 import { SelectField } from '../../../shared/SelectField';
+import { FieldLabel } from '../FieldLabel';
 
 export type PanelView = 'checks' | 'materials' | 'titles' | 'preview';
 type SaveState = 'saved' | 'dirty' | 'saving' | 'failed' | 'unknown' | 'conflict';
@@ -178,7 +179,8 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
   }
   /** Puts one of our own past titles into the draft through the ordinary edit; the checks then look at it like any other text. */
   function adoptOwnTitle(kind: 'cover' | 'note', text: string) {
-    edit(kind === 'cover' ? withCoverTitle(document, text) : { ...document, title: text });
+    const next = adoptTitle(document, kind, text);
+    if (next) edit(next); else setNotice('这篇已经有 30 页图，不能再加封面页，先删掉一页再用作封面。');
   }
   function chooseBridge(sentence: Sentence) {
     edit(withBridge(document, { skip: false, sentence: bridgeFromSentence(sentence) }));
@@ -372,9 +374,9 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
       </>}
     </section>
     <details ref={settings}><summary>账号与衔接设置 · {bridgeSummary}</summary><div ref={slotTop}>
-      <label>所属账号
+      <FieldLabel>所属账号
         <span ref={accountSelect}><SelectField label="所属账号" disabled={locked || accounts.isPending} value={document.accountRef ?? ''} options={[{ value: '', label: '还没选' }, ...(document.accountRef && !account && !accounts.isPending ? [{ value: document.accountRef, label: '当前账号（不在可写稿的小红书账号里）' }] : []), ...(accounts.data ?? []).map(item => ({ value: item.accountRef, label: item.accountName }))]} onChange={value => edit({ ...document, accountRef: value || null })} /></span>
-      </label>
+      </FieldLabel>
       {accounts.isError ? <p role="alert" className={styles.problem}>账号读取失败，可以<ActionButton variant="quiet" onClick={() => void accounts.refetch()}>重试</ActionButton></p> : null}
       {account ? <p className={styles.hint}>{account.identity ? '' : '这个号的身份还没有填写。'}<ActionButton variant="quiet" disabled={locked} onClick={() => setIdentityOpen(true)}>编辑账号身份</ActionButton></p> : null}
     </div>
