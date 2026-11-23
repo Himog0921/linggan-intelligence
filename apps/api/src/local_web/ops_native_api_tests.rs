@@ -404,6 +404,19 @@ async fn operator_reads_own_records_and_lead_reads_only_current_group() {
     let (status, pending) = get(app.clone(), &pending_url, Some(&cookies[1])).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(pending["total"], 0);
+    // 1200 views are reported now: filled, but below the hit line, so `views=hit` keeps it out.
+    let hit_url = format!("/api/local/ops/publications?account_ref={imported_account}&views=hit");
+    let (status, hits) = get(app.clone(), &hit_url, Some(&cookies[1])).await;
+    assert_eq!(status, StatusCode::OK, "{hits}");
+    assert_eq!(hits["total"], 0, "1200 views are not a hit");
+    let (status, rejected) = get(
+        app.clone(),
+        "/api/local/ops/publications?views=bogus",
+        Some(&cookies[1]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(rejected["code"], "ops_parameter_invalid");
     let recorded: (Uuid, String) = sqlx::query_as(
         "SELECT report.reported_by_member_ref, publication.publisher_name
            FROM linggan_ops_view_report report JOIN linggan_ops_publication publication USING(publication_ref)

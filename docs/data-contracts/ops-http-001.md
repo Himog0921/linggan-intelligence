@@ -55,9 +55,10 @@
 
 ### `GET /api/local/ops/publications`
 
-参数：`domain`、`operator`（发布人名，精确匹配）、`platform`（`xhs` / `douyin`）、`account`（账号名包含匹配）、`from` / `to`（业务日，含首尾）、`views=pending`、`publication_ref`（精确发布编号）、`page`（从 1 开始）。
+参数：`domain`、`operator`（发布人名，精确匹配）、`platform`（`xhs` / `douyin`）、`account`（账号名包含匹配）、`from` / `to`（业务日，含首尾）、`views=pending` 或 `views=hit`（二选一，其他取值返回 400 `ops_parameter_invalid`）、`publication_ref`（精确发布编号）、`page`（从 1 开始）。
 
 - 排序：发布时间从新到旧；`views=pending` 时只返回小红书、阅读量未填的主记录，按发布时间从旧到新，最该补的排在前面。
+- `views=hit` 只返回小红书、最新阅读量已填且达到爆款线（`items[].views.hit` 为真，同一常量 5,000）的主记录，仍按发布时间从新到旧，并与其他筛选和成员可见范围叠加；`total` 按筛选后的条数。抖音永不是爆款，阅读量未填的不计入。
 - 每页 50 条。返回 `page`、`pageSize`、`total`、`totalPages`、`operators`（当前业务下全部发布人名，供页签使用）与 `items`。
 
 每条 `item`：

@@ -23,7 +23,7 @@ JSON 统一 camelCase、UUID 稳定身份；范围为 Unicode scalar / code-poin
 - bridge（可选，缺省即未决定）：`{skip, sentence?, afterParagraph?}`。`skip` 是“这篇不植入”；`sentence` 是本稿使用的衔接句 `{sentenceCode, sentenceRevision, group, text, edited}`，`text` 是本稿实际所说，改写过则 `edited` 为真、不再跟库同步；`afterParagraph` 指向某个段落 id，缺失或该段已删除时落在默认位置（最后一段之前）。写入时校验编码 `XJ-` 加数字、修订号为正、文本为一行且不超过 500 字。衔接句库、规则与复制格式见 [CREATION-ASSETS-001](creation-assets-001.md)。
 - coverAi（可选）：封面是否 AI 作图；缺省表示未记录，不等于“否”。
 - excerpts：id/citation/selectedText/textHash；source 原文与自己的表达分开。
-- canvas：id/excerptId/group/note/expression/expressionRevision；group 限 inbox/opening/argument/example/ending。
+- canvas：id/excerptId/group/note/expression/expressionRevision；group 是这张材料卡在本稿里的用途，限 `inbox`（待分）、`opening`（开头）、`resonance`（共鸣）、`experience`（经历）、`argument`（观点）、`example`（例子）、`ending`（结尾）、`title_reference`（标题参考）、`reference_only`（只做参考）、`counterexample`（反例）。修订不可变：已保存过的值不得改名或删除，只能新增；新增值只向前兼容，不含该值的旧服务读不了已使用它的稿件，所以不能回退到不认识新值的版本。未知值读取时被拒绝，不做猜测。`experience` 只是用途分类，不表示这张卡来自个人经历库，也不进入经历撤回追踪（经历的引用仍只走 `experienceSlots`）。
 - pages：id/kind(cover/opinion/voice/steps)/templateVersion/title/subtitle/blocks{id,text}/assetId/crop/style。宽1080高1440；crop归一化且finite，V3 模板版本 creation-v3-type（留白大字）/ creation-v3-split（双色分栏）/ creation-v3-list（清单笔记）；creation-v1 / creation-v1-editorial 保留旧版原始绘图含义，palette cream/sage/ink；alignment start/center/end。自有图 PNG/JPEG/WebP 解码验真，禁止任意远程URL和SVG。
 - uses：id/canvasId/expressionRevision/excerptId/target/placedTextHash/contentOrigin/state/sourceSpan；target 闭集为标题、角度、提纲项、标签项、画布笔记、画布表达、正文段落、图页标题、副题或文字块；提纲与标签按 index，画布、段落和图页按稳定 UUID 定位。sourceSpan 固定实际使用原文在目标中的 Unicode scalar 范围和 hash；state current/modified/needs_review 由服务端核定。contentOrigin(excerpt/expression) 由服务端核定，原文与自主表达不混同。手工文字不会被后续表达或模型自动覆盖。
 

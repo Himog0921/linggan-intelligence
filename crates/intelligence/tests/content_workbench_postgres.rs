@@ -84,6 +84,98 @@ async fn save_replay_stale_and_restore_keep_linear_history() {
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn every_card_role_is_saved_and_read_back_and_older_revisions_are_untouched() {
+    let db = db("creation_card_roles").await;
+    let first = create(&db, doc()).await;
+    let roles = [
+        CanvasGroup::Inbox,
+        CanvasGroup::Opening,
+        CanvasGroup::Resonance,
+        CanvasGroup::Experience,
+        CanvasGroup::Argument,
+        CanvasGroup::Example,
+        CanvasGroup::Ending,
+        CanvasGroup::TitleReference,
+        CanvasGroup::ReferenceOnly,
+        CanvasGroup::Counterexample,
+    ];
+    let mut next = first.revision.document.clone();
+    next.canvas = roles
+        .iter()
+        .enumerate()
+        .map(|(index, group)| CanvasBlock {
+            id: Uuid::new_v4(),
+            excerpt_id: None,
+            group: group.clone(),
+            note: format!("用途 {index}"),
+            expression: String::new(),
+            expression_revision: 1,
+        })
+        .collect();
+    let saved = save(
+        &db,
+        first.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: first.revision.id,
+            document: next.clone(),
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved.outcome, "accepted");
+    let read = read_work(&db, first.work_id).await.unwrap();
+    assert_eq!(
+        read.revision.document.canvas, next.canvas,
+        "every role and the card order come back as saved"
+    );
+    let stored: serde_json::Value = sqlx::query_scalar(
+        "SELECT document->'canvas' FROM linggan_creation_revision WHERE revision_ref=$1",
+    )
+    .bind(saved.revision.id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    let names: Vec<&str> = stored
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|card| card["group"].as_str().unwrap())
+        .collect();
+    // The exact names are pinned by the unit test next to `CanvasGroup`; here the database must hold what serde writes.
+    let written: Vec<String> = roles
+        .iter()
+        .map(|group| {
+            serde_json::to_value(group)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_eq!(
+        names, written,
+        "the revision stores each role under its serialized name, in card order"
+    );
+    // The revision saved before any new role existed still reads exactly as it was.
+    let history = revisions(&db, first.work_id).await.unwrap();
+    let earlier = history
+        .iter()
+        .find(|item| item.id == first.revision.id)
+        .expect("the first revision stays in the history");
+    assert_eq!(earlier.document, first.revision.document);
+    // A role cannot be changed behind the immutable revision.
+    assert!(
+        sqlx::query("UPDATE linggan_creation_revision SET document='{}' WHERE revision_ref=$1")
+            .bind(saved.revision.id)
+            .execute(db.pool())
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn legacy_citation_revisions_keep_a_safe_library_entry_without_becoming_readable() {
     let db = db("creation_legacy_citation").await;
     let current = create(&db, doc()).await;

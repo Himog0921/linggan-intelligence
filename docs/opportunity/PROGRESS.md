@@ -685,3 +685,19 @@
 - 首页直接显示服务端卡片级质量标记；列表指纹纳入待重建状态，状态在翻页之间变化时沿用 `PageChanged`。补充 0225 有数据的机会卡迁移升级、重建和队列锁释放恢复测试。原 0226 编号下 `env -u LINGGAN_OPPORTUNITY_CARD bash scripts/test-opportunity-postgres.sh` → exit 0、25 组 132 passed / 0 failed，专用数据库、容器和卷清理通过；`npm --prefix apps/web run verify` → exit 0、172 文件 1797 passed；`node scripts/check-opportunity-clippy.mjs` → exit 0、机会卡诊断 0、其他诊断 952。
 - 修复期间远端 main 前进到 `3d16debdd4a3223181cb9a77c50f0f84b9c3d944`，占用 0226 为 `0226_ai_connection_billing_pause`。机会卡迁移此前未应用于运行库，按前向迁移规则重排为 0227，内容哈希不变；历史 0226 测试记录保留。整合 main 后需重新验证 0226→0227 有数据升级及运行登记。未执行运行库或生产迁移。
 - 整合 main 后，`bash scripts/test-local-runtime-schema.sh` → exit 0，`Fresh and repeat runtime schema migration passed; retired tables absent.`；`env -u LINGGAN_OPPORTUNITY_CARD bash scripts/test-opportunity-postgres.sh` → exit 0、25 组 132 passed、0 failed，专用数据库、容器和卷清理通过；其中 `card::exclusion_upgrade_requeues_existing_cards_and_rebuilds_counts` 覆盖 0226→0227 已有卡片升级，`card::list_cursor_restarts_when_pending_card_state_changes` 覆盖翻页队列变化。队列锁测试另覆盖释放后读取恢复。`npm --prefix apps/web run verify` → exit 0、173 文件 1807 passed；`node scripts/check-opportunity-clippy.mjs` → exit 0，目标诊断 0、其他诊断 957；`bash scripts/ci-preflight.sh origin/main` → exit 0。上述均在本地隔离环境，无运行库写入。
+
+## 2026-11-22 机会首页核查与默认领域
+
+- 对本机 3001（运行版本 `1e5ccf05`）进行只读核查：ADHD 机会列表共 53 张卡、106 个协议分组；本次读取全部不可比较（未知协议 53、本周提及率不可用 53）。卡片变更队列和来源事件队列均为 0。首屏将其他观察收起，真实卡片及一条评论依据可打开；供给未评估，大量作者姓名未知。
+- 在独立分支 `codex/opportunity-default-adhd` 中，仅为机会页补充无领域参数时的 ADHD 默认选择；显式领域仍优先，未找到唯一 ADHD 时保留手动选择。未部署，未运行迁移、真实采集或模型外发。
+- 实际验证：`npm run test -- src/pages/opportunity/OpportunityPage.test.tsx` → 1 个文件、15 项通过；`npm run typecheck` → exit 0；`npx eslint src/pages/opportunity/OpportunityPage.tsx src/pages/opportunity/OpportunityPage.test.tsx` → exit 0；`npm run build` → exit 0、653 个模块，存在字体运行时解析及大包提示；`bash scripts/ci-preflight.sh origin/main` → exit 0，`Preflight passed; required module proofs and independent review remain separate.`
+
+## 2026-11-22 机会页面可用性修复
+
+- 工作包：机会首页、详情和机会页专属面包屑的展示/交互修正。默认选择 ADHD 时保留显式领域；首页直接展示其他观察，按协议分组并保留不可比较说明；作者预览按服务器原顺序逐组展示，完整列表可展开，不变更业务指标、来源资格或协议规则。
+- 候选前端独立运行于 loopback，读取 3001 的现有数据：无参进入解析 ADHD；首屏 100 个协议组直接可见；面包屑计算色为 `rgb(213, 210, 221)`；详情真实样例默认展示 14 位作者，展开至 370 位，收起回到 14 位。只做页面只读交互，未迁移、真实采集或模型外发。
+- `bash scripts/ci-preflight.sh origin/main` → exit 0，54 项检查通过；`impeccable detect --json` → `[]`；`npm run test -- src/pages/opportunity/OpportunityPage.test.tsx` → 1 文件、17 项通过。完整前端验证与独立审阅另行记录在 PR，不以该候选页面访问冒充部署或业务验收。
+- 独立规格与工程审阅基线 `1e5ccf05`、候选 `79557dec`：发现列表翻页入口过远、作者展开缺少组别与状态、暗底焦点对比不足；本次一起修正。候选页实测顶部翻至第 2 页的 3 个问题，键盘焦点实际颜色 `rgb(255, 255, 255)`，作者控件可读出所属协议、展开状态和受控列表。
+- 增量回归：`npm run test -- src/pages/opportunity/OpportunityPage.test.tsx` → exit 0、1 文件 18 项通过；`bash scripts/ci-preflight.sh origin/main` → exit 0、54 项通过。未执行迁移或触发真实采集及模型外发。
+- 完整前端验证：`npm run test -- --maxWorkers=2` → exit 0、173 文件 1812 项通过；`npm run build` → exit 0。默认并行首轮多个其他页面用例出现超时后被中止，原因未确定。
+- 远端 Delivery `45128452889` 的机会卡浏览器证明因仍查找已删除的“查看本页其他观察与不可比较项”按钮而失败；同步更新证明脚本，改为直接等待其他观察表格可见。复验结果以 PR 对应最新提交的 CI 为准。

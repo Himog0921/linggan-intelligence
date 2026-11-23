@@ -659,6 +659,22 @@ pub struct CopyCommand {
 pub struct CopyConfirm {
     pub request_id: Uuid,
 }
+/// What copying the saved current revision would produce, before anything is recorded: the same
+/// fields as `CopyReady` without a receipt, because none exists yet.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CopyPreview {
+    pub work_id: Uuid,
+    pub revision_id: Uuid,
+    pub ruleset_version: String,
+    pub title: String,
+    pub body: String,
+    pub tags: Vec<String>,
+    /// Body followed by the topic line, exactly what would go to the clipboard.
+    pub text: String,
+    pub warn_count: usize,
+    pub hint_count: usize,
+}
 /// Text ready for the clipboard, plus the receipt that says which rules it was checked under.
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]

@@ -8,6 +8,10 @@ import styles from './Opportunity.module.css';
 
 interface Row { card: Card; group: DemandGroup; comparison: Comparison }
 
+function Pagination({ label, canGoBack, canGoNext, onPrevious, onNext }: { label: string; canGoBack: boolean; canGoNext: boolean; onPrevious: () => void; onNext: () => void }) {
+  return <nav className={styles.pagination} aria-label={label}><button type="button" disabled={!canGoBack} onClick={onPrevious}>上一页</button><button type="button" disabled={!canGoNext} onClick={onNext}>下一页</button></nav>;
+}
+
 function taskLinks(domain: string) {
   return [
     { label: '查看用户问题', description: '从评论研究的问题出发', to: `/corpus/comments?${new URLSearchParams({ domain, view: 'problems' })}` },
@@ -48,9 +52,11 @@ export function OpportunityHome({ domain }: { domain: string }) {
     <nav className={styles.tasks} aria-label="从任务开始">{taskLinks(domain).map(item => <Link key={item.to} to={item.to}><strong>{item.label}</strong><span>{item.description}</span></Link>)}</nav>
     <section className={styles.section} aria-labelledby="rising-title"><div className={styles.sectionHeading}><div><h2 id="rising-title">本周观察到上升</h2><p>同一已知采集协议的本周与上周提及率对比；这不是显著性或市场趋势判断。</p></div>{query.data && !query.isError ? <small>读取于 {query.data.page.asOf}（UTC）</small> : null}</div>
       {query.isPending ? <p role="status">正在读取机会列表…</p> : query.isError ? <div role="alert"><p>{readableError(query.error)}</p><button type="button" onClick={restart}>从第一页重新读取</button></div> : !query.data.items.length ? <p>当前领域尚无可读取的机会卡。</p> : <>
+        <p>本页 {query.data.items.length} 个问题；同一问题按采集协议分别展示。</p>
+        <Pagination label="机会列表顶部翻页" canGoBack={cursors.length > 1} canGoNext={query.data.page.hasMore} onPrevious={() => setCursors(old => old.slice(0, -1))} onNext={() => { const next = query.data.page.nextCursor; if (next) setCursors(old => [...old, next]); }} />
         {rising.length ? <ObservationTable rows={rising} domain={domain} label="本周观察到上升的问题" /> : <p>本页没有观察到上升的问题。</p>}
-        {other.length ? <details className={styles.other}><summary>查看本页其他观察与不可比较项</summary><ObservationTable rows={other} domain={domain} label="本页其他观察与不可比较项" /></details> : null}
-        <div className={styles.pagination}><button type="button" disabled={cursors.length === 1} onClick={() => setCursors(old => old.slice(0, -1))}>上一页</button><button type="button" disabled={!query.data.page.hasMore} onClick={() => { const next = query.data.page.nextCursor; if (next) setCursors(old => [...old, next]); }}>下一页</button></div>
+        {other.length ? <section className={styles.other} aria-labelledby="other-title"><h3 id="other-title">本页其他观察与不可比较项</h3><p className={styles.muted}>这些问题仍可查看；不可比较的项目不会视为上升。</p><ObservationTable rows={other} domain={domain} label="本页其他观察与不可比较项" /></section> : null}
+        <Pagination label="机会列表底部翻页" canGoBack={cursors.length > 1} canGoNext={query.data.page.hasMore} onPrevious={() => setCursors(old => old.slice(0, -1))} onNext={() => { const next = query.data.page.nextCursor; if (next) setCursors(old => [...old, next]); }} />
       </>}
       <p className={styles.limitation}>提及人数反映讨论热度，不等于问题对用户的重要性；评论只代表愿意留言的人，且每篇作品只采集平台排序靠前的部分评论。</p>
     </section>

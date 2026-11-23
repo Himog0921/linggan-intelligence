@@ -168,6 +168,81 @@ async fn publication_filters_narrow_the_kept_records_and_keep_search_literal() {
         ids(&db, OpsBusiness::All, with(|f| f.pending_views = true)).await,
         ["pub-6"]
     );
+    // Hits: pub-8 (exactly 5000) and pub-1 (6000). Not hits: pub-5 (4999), pub-3 (100), pub-7 (Douyin
+    // is never a hit however many views) and pub-6 (no views reported).
+    assert_eq!(
+        ids(&db, OpsBusiness::All, with(|f| f.hit_views = true)).await,
+        ["pub-8", "pub-1"],
+        "the same line as `views.hit`, newest first"
+    );
+    let hits = read_ops_publications(&db, OpsBusiness::All, with(|f| f.hit_views = true))
+        .await
+        .unwrap();
+    assert_eq!(
+        (hits.total, hits.items.len(), hits.total_pages),
+        (2, 2, 1),
+        "the count follows the filter, not the whole list"
+    );
+    assert!(hits.items.iter().all(|item| item.views.hit));
+    assert_eq!(
+        ids(
+            &db,
+            OpsBusiness::Domain(ADHD_DOMAIN),
+            with(|f| f.hit_views = true)
+        )
+        .await,
+        ["pub-1"],
+        "a record without an account belongs to no business, hit or not"
+    );
+    assert_eq!(
+        ids(
+            &db,
+            OpsBusiness::All,
+            with(|f| f.account = Some("账号甲".into()))
+        )
+        .await,
+        ["pub-3", "pub-1"],
+        "baseline for the combined filter below"
+    );
+    assert_eq!(
+        ids(
+            &db,
+            OpsBusiness::All,
+            with(|f| {
+                f.hit_views = true;
+                f.account = Some("账号甲".into());
+            })
+        )
+        .await,
+        ["pub-1"],
+        "hit combines with the other filters"
+    );
+    assert!(
+        ids(
+            &db,
+            OpsBusiness::All,
+            with(|f| {
+                f.hit_views = true;
+                f.platform = Some("douyin".into());
+            })
+        )
+        .await
+        .is_empty(),
+        "Douyin is never a hit"
+    );
+    assert!(
+        read_ops_publications(
+            &db,
+            OpsBusiness::All,
+            with(|f| {
+                f.hit_views = true;
+                f.pending_views = true;
+            })
+        )
+        .await
+        .is_err(),
+        "hit and pending cannot both be asked for"
+    );
     let adhd = ids(&db, OpsBusiness::Domain(ADHD_DOMAIN), filter()).await;
     assert_eq!(
         adhd.len(),

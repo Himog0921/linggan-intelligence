@@ -48,6 +48,7 @@ S1a 的事实卡、衔接句等记录追加式，更正以新修订追加。S1b 
 | `POST bridge-sentences/check` | 输入时的入库检查 | 不写任何东西 |
 | `POST checks` | 对编辑器当前稿件（`{document}`）跑全部稿件规则 | 不写任何东西；文档先过同一套校验 |
 | `POST works/{id}/copy` | 检查**已保存的当前修订**，通过则返回文本并写回执 | `expectedRevision` 须是当前修订，否则 409 stale；有必改 409 blocked 并附 `findings`；当前不可用的来源仍出现在复制范围时返回 409 `creation_assets_source_unavailable`；正文为空 400。原请求重放也重新核验来源 |
+| `GET works/{id}/copy-preview` | 与 `POST works/{id}/copy` 同一套检查和文本规则，对**已保存的当前修订**返回将会复制的 `title`、`body`、`tags`、`text`、`warnCount`、`hintCount`、`rulesetVersion`、`revisionId` | 只读事务，不写回执、不写任何东西，也没有 `receiptRef`；有必改 409 blocked 并附 `findings`，来源不可用 409，正文为空 400，作品不存在 404，与复制一致；与经历撤回互斥（先等撤回完成再读），撤回后的经历不会出现。不代替复制：真正复制仍须走 `POST copy` 取得回执 |
 | `POST works/{id}/copy/{receipt}/confirm` | 剪贴板成功后写确认 | 重复确认返回第一次 |
 | `GET works/{id}/copy-status` | 最近一次已确认的复制 | 编辑器比较其 `revisionId` 与当前修订，区分“已复制”与“草稿中” |
 
