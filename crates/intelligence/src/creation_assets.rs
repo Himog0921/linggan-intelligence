@@ -20,8 +20,8 @@ pub mod types;
 mod words;
 
 pub use bridge_sentences::{
-    candidates_for_account, check_sentence_text, create_sentence, edit_sentence, list_sentences,
-    review_sentence,
+    candidates_for_account, check_sentence_text, create_sentence, create_sentence_in,
+    edit_sentence, edit_sentence_in, list_sentences, review_sentence,
 };
 pub use checks::{blocks_entry, check_manuscript, check_sentence, title_has_cure_promise};
 pub use copy_format::{CopyText, SPACER, format_copy, normalize_tags};
@@ -33,25 +33,31 @@ pub use drafts::{
     check_draft, check_draft_for_work, check_saved_drafts, confirm_copy, copy_status, prepare_copy,
 };
 pub use experiences::{
-    cancel_experience_request, confirm_experience, create_experience, edit_experience,
-    experience_request_status, list_experiences, read_experience, read_usable_experience,
-    withdraw_experience,
+    cancel_experience_request, confirm_experience, create_experience, create_experience_in,
+    edit_experience, experience_request_status, list_experiences, list_experiences_in,
+    read_experience, read_usable_experience, withdraw_experience,
 };
-pub use fact_cards::{confirm_fact_card, list_fact_cards, put_fact_card};
-pub use identity::{list_accounts, put_identity, read_identity};
+pub use fact_cards::{confirm_fact_card, list_fact_cards, put_fact_card, put_fact_card_in};
+pub use identity::{
+    latest_in as read_identity_in, list_accounts, put_identity, put_identity_in, read_identity,
+};
 pub use persona_facts::{
-    cancel_persona_request, confirm_persona_fact, list_persona_facts, persona_fact_history,
-    persona_request_status, put_persona_fact, withdraw_persona_fact,
+    cancel_persona_request, confirm_persona_fact, list_persona_facts, list_persona_facts_in,
+    persona_fact_history, persona_request_status, put_persona_fact, put_persona_fact_in,
+    withdraw_persona_fact,
 };
 pub use publications::{
-    link_publication, publication_candidates, publication_links, unlink_publication,
+    existing_native_publication_in, link_native_publication_in, link_publication,
+    lock_native_publication_draft, publication_candidates, publication_links, publication_links_in,
+    unlink_publication,
 };
-pub use styles::{CreationStyle, StyleCommand, StyleReceipt, list_styles, put_style};
+pub use styles::{CreationStyle, StyleCommand, StyleReceipt, list_styles, put_style, put_style_in};
 pub use subject::{CardTerms, Context, Subject};
 pub use templates::{
     CreateTemplate, ReviewTemplate, ReviseTemplate, StructuralStep, StructuralTemplate,
-    TemplateAction, TemplateReceipt, create_structural_template, list_structural_templates,
-    review_structural_template, revise_structural_template, structural_template_history,
+    TemplateAction, TemplateReceipt, create_structural_template, create_structural_template_in,
+    list_structural_templates, review_structural_template, revise_structural_template,
+    structural_template_history,
 };
 pub use types::*;
 pub use words::*;

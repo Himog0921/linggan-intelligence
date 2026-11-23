@@ -229,6 +229,17 @@ pub async fn create_structural_template(
     db: &Database,
     cmd: &CreateTemplate,
 ) -> Result<TemplateReceipt, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    let result = create_structural_template_in(&mut tx, cmd, None).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub async fn create_structural_template_in(
+    tx: &mut Transaction<'_, Postgres>,
+    cmd: &CreateTemplate,
+    member: Option<Uuid>,
+) -> Result<TemplateReceipt, AssetsError> {
     if cmd.steps.is_empty() || cmd.steps.len() > 12 {
         return Err(AssetsError::Invalid("template_steps"));
     }
@@ -236,8 +247,7 @@ pub async fn create_structural_template(
         "structural_template_create",
         &(cmd.work_id, cmd.expected_revision, &cmd.steps),
     )?;
-    let mut tx = db.pool().begin().await?;
-    workbench::ensure_request_owner_in(&mut tx, cmd.request_id, workbench::RequestOwner::Template)
+    workbench::ensure_request_owner_in(tx, cmd.request_id, workbench::RequestOwner::Template)
         .await
         .map_err(|error| match error {
             workbench::WorkbenchError::RequestConflict => AssetsError::RequestConflict,
@@ -246,14 +256,13 @@ pub async fn create_structural_template(
     if let Some(row) =
         sqlx::query("SELECT code,request_hash FROM linggan_creation_template WHERE request_ref=$1")
             .bind(cmd.request_id)
-            .fetch_optional(&mut *tx)
+            .fetch_optional(&mut **tx)
             .await?
     {
         if row.get::<String, _>("request_hash") != sha {
             return Err(AssetsError::RequestConflict);
         }
-        let template = get_in(&mut tx, &row.get::<String, _>("code")).await?;
-        tx.commit().await?;
+        let template = get_in(tx, &row.get::<String, _>("code")).await?;
         return Ok(TemplateReceipt {
             template,
             replayed: true,
@@ -263,15 +272,15 @@ pub async fn create_structural_template(
         "SELECT EXISTS(SELECT 1 FROM linggan_creation_template_status WHERE request_ref=$1 UNION ALL SELECT 1 FROM linggan_creation_template_revision WHERE request_ref=$1)",
     )
     .bind(cmd.request_id)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?
     {
         return Err(AssetsError::RequestConflict);
     }
-    workbench::work_lock(&mut tx, cmd.work_id.to_string())
+    workbench::work_lock(tx, cmd.work_id.to_string())
         .await
         .map_err(AssetsError::Workbench)?;
-    let (_, current) = workbench::read_revision_in(&mut tx, cmd.work_id, None)
+    let (_, current) = workbench::read_revision_in(tx, cmd.work_id, None)
         .await
         .map_err(AssetsError::Workbench)?;
     if current.id != cmd.expected_revision {
@@ -285,21 +294,20 @@ pub async fn create_structural_template(
     {
         return Err(AssetsError::Invalid("template_empty_draft"));
     }
-    if !qualified(&mut tx, cmd.work_id, cmd.expected_revision).await? {
+    if !qualified(tx, cmd.work_id, cmd.expected_revision).await? {
         return Err(AssetsError::SourceUnavailable);
     }
     let code: String = sqlx::query_scalar(
         "SELECT 'YB-' || CASE WHEN length(n)<4 THEN lpad(n,4,'0') ELSE n END FROM (SELECT nextval('linggan_creation_template_code_seq')::text n) seq",
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     let id = Uuid::new_v4();
-    sqlx::query("INSERT INTO linggan_creation_template(template_ref,code,work_ref,revision_ref,request_ref,request_hash) VALUES($1,$2,$3,$4,$5,$6)")
-        .bind(id).bind(&code).bind(cmd.work_id).bind(cmd.expected_revision).bind(cmd.request_id).bind(sha).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_creation_template(template_ref,code,work_ref,revision_ref,request_ref,request_hash,created_by_member_ref) VALUES($1,$2,$3,$4,$5,$6,$7)")
+        .bind(id).bind(&code).bind(cmd.work_id).bind(cmd.expected_revision).bind(cmd.request_id).bind(sha).bind(member).execute(&mut **tx).await?;
     sqlx::query("INSERT INTO linggan_creation_template_revision(template_ref,revision,steps) VALUES($1,1,$2)")
-        .bind(id).bind(serde_json::to_value(&cmd.steps)?).execute(&mut *tx).await?;
-    let template = get_in(&mut tx, &code).await?;
-    tx.commit().await?;
+        .bind(id).bind(serde_json::to_value(&cmd.steps)?).execute(&mut **tx).await?;
+    let template = get_in(tx, &code).await?;
     Ok(TemplateReceipt {
         template,
         replayed: false,

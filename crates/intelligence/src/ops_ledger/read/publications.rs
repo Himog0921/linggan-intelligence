@@ -22,6 +22,7 @@ pub struct OpsPublicationFilter {
     pub platform: Option<String>,
     pub account: Option<String>,
     pub account_ref: Option<Uuid>,
+    pub publication_ref: Option<Uuid>,
     pub from: Option<String>,
     pub to: Option<String>,
     pub pending_views: bool,
@@ -113,6 +114,15 @@ pub struct OpsPublicationItem {
     pub field_adoption: OpsPublicationFieldAdoption,
     pub duplicates: Vec<OpsDuplicate>,
     pub cover: OpsCoverState,
+    pub creation: Option<OpsPublicationCreation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpsPublicationCreation {
+    pub work_id: Uuid,
+    pub domain_ref: Uuid,
+    pub revision_id: Uuid,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -293,7 +303,8 @@ const FILTERED: &str = "kept AS ( \
        AND ($5::date IS NULL OR coalesce(p.published_business_date,p.native_published_on) >= $5::date) \
        AND ($6::date IS NULL OR coalesce(p.published_business_date,p.native_published_on) <= $6::date) \
        AND (NOT $7 OR (p.platform = 'xhs' AND lv.view_count IS NULL)) \
-       AND ($10::uuid IS NULL OR p.account_ref = $10))";
+       AND ($10::uuid IS NULL OR p.account_ref = $10) \
+       AND ($11::uuid IS NULL OR p.publication_ref = $11))";
 
 pub async fn read_ops_publications(
     database: &Database,
@@ -324,6 +335,7 @@ pub async fn read_ops_publications_scoped(
         .bind(member_refs)
         .bind(viewer)
         .bind(filter.account_ref)
+        .bind(filter.publication_ref)
         .fetch_one(database.pool())
         .await?;
     let items = read_page(
@@ -398,8 +410,18 @@ async fn read_page(
                 kept.comment_count_state,kept.published_at_state, \
                 kept.sync_request_ref, kept.sync_decision, coalesce(kept.sync_state,'not_requested') AS sync_state, \
                 cover.publication_ref IS NOT NULL AS has_cover, \
+                draft.work_ref AS draft_work_ref, draft.domain_ref AS draft_domain_ref, \
+                draft.revision_ref AS draft_revision_ref, \
                 media.media_state,media.observed_media,media.available_media,media.failed_media,media.unavailable_media \
            FROM kept LEFT JOIN linggan_ops_publication_cover cover ON cover.publication_ref = kept.publication_ref \
+           LEFT JOIN LATERAL ( \
+             SELECT l.work_ref, w.domain_ref, l.revision_ref \
+               FROM linggan_creation_publication_link l JOIN linggan_creation_work w ON w.work_ref=l.work_ref \
+              WHERE l.publication_ref=kept.publication_ref \
+                AND $9::uuid IS NOT NULL AND ($8::uuid[] IS NULL OR w.created_by_member_ref=$9) \
+                AND NOT EXISTS (SELECT 1 FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref) \
+              ORDER BY l.linked_at DESC, l.link_ref DESC LIMIT 1 \
+           ) draft ON true \
            LEFT JOIN LATERAL ( \
              SELECT CASE \
                  WHEN NOT EXISTS (SELECT 1 FROM collection_work_order_ops_publication_target scope \
@@ -473,7 +495,7 @@ async fn read_page(
           ORDER BY CASE WHEN $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END ASC, \
                    CASE WHEN NOT $7 THEN coalesce(kept.published_at,kept.native_published_on::timestamp) END DESC, \
                    kept.source_created_at DESC NULLS LAST, kept.publication_ref DESC \
-          LIMIT $12 OFFSET $11"
+          LIMIT $13 OFFSET $12"
     );
     let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(business.domain_ref())
@@ -486,6 +508,7 @@ async fn read_page(
         .bind(member_refs)
         .bind(viewer)
         .bind(filter.account_ref)
+        .bind(filter.publication_ref)
         .bind((filter.page - 1) * OPS_PAGE_SIZE)
         .bind(limit)
         .fetch_all(database.pool())
@@ -527,6 +550,16 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError>
     );
     let account_name: Option<String> = row.try_get("account_name")?;
     let ledger_state: Option<String> = row.try_get("ledger_state")?;
+    let creation = row
+        .try_get::<Option<Uuid>, _>("draft_work_ref")?
+        .map(|work_id| {
+            Ok::<_, sqlx::Error>(OpsPublicationCreation {
+                work_id,
+                domain_ref: row.try_get("draft_domain_ref")?,
+                revision_id: row.try_get("draft_revision_ref")?,
+            })
+        })
+        .transpose()?;
     Ok(OpsPublicationItem {
         r#ref: row.try_get("publication_ref")?,
         source_id: row.try_get("source_record_id")?,
@@ -569,6 +602,7 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError>
             comments: field_adoption_state(&row.try_get::<String, _>("comment_count_state")?)?,
             published_at: field_adoption_state(&row.try_get::<String, _>("published_at_state")?)?,
         },
+        creation,
         duplicates: Vec::new(),
         cover: OpsCoverState {
             available: row.try_get("has_cover")?,

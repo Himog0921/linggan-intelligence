@@ -133,6 +133,7 @@ struct NewRevision<'a> {
     text: &'a str,
     origin: SentenceOrigin,
     findings: &'a [Finding],
+    member: Option<Uuid>,
 }
 
 async fn insert_revision(
@@ -140,8 +141,8 @@ async fn insert_revision(
     new: NewRevision<'_>,
 ) -> Result<(), AssetsError> {
     sqlx::query(
-        "INSERT INTO linggan_creation_bridge_sentence(sentence_ref,code,revision_number,request_ref,bridge_group,body,origin,entry_findings,saved_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'local_machine')",
+        "INSERT INTO linggan_creation_bridge_sentence(sentence_ref,code,revision_number,request_ref,bridge_group,body,origin,entry_findings,saved_by,saved_by_member_ref)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'local_machine',$9)",
     )
     .bind(Uuid::new_v4())
     .bind(new.code)
@@ -151,6 +152,7 @@ async fn insert_revision(
     .bind(new.text)
     .bind(new.origin.as_str())
     .bind(serde_json::to_value(new.findings)?)
+    .bind(new.member)
     .execute(&mut **tx)
     .await?;
     Ok(())
@@ -161,29 +163,38 @@ pub async fn create_sentence(
     db: &Database,
     cmd: &SentenceCreate,
 ) -> Result<SentenceReceipt, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    let result = create_sentence_in(&mut tx, cmd, None).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub async fn create_sentence_in(
+    tx: &mut Transaction<'_, Postgres>,
+    cmd: &SentenceCreate,
+    member: Option<Uuid>,
+) -> Result<SentenceReceipt, AssetsError> {
     let text = clean_text(&cmd.text)?;
     let sha = command_hash(
         "sentence_create",
         &(group_str(cmd.group), &text, cmd.origin.as_str()),
     )?;
-    let mut tx = db.pool().begin().await?;
-    if let Claim::Replay = claim(&mut tx, cmd.request_id, "sentence_create", &sha).await? {
-        let sentence = by_request(&mut tx, cmd.request_id, false).await?;
-        tx.commit().await?;
+    if let Claim::Replay = claim(tx, cmd.request_id, "sentence_create", &sha).await? {
+        let sentence = by_request(tx, cmd.request_id, false).await?;
         return Ok(SentenceReceipt {
             sentence,
             replayed: true,
         });
     }
-    let findings = entry_findings_in(&mut tx, &text).await?;
+    let findings = entry_findings_in(tx, &text).await?;
     let code: String = sqlx::query_scalar(
         "SELECT 'XJ-'||lpad(nextval('linggan_creation_bridge_sentence_code_seq')::text,4,'0')",
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
-    lock(&mut tx, &format!("sentence:{code}")).await?;
+    lock(tx, &format!("sentence:{code}")).await?;
     insert_revision(
-        &mut tx,
+        tx,
         NewRevision {
             code: &code,
             revision: 1,
@@ -192,11 +203,11 @@ pub async fn create_sentence(
             text: &text,
             origin: cmd.origin,
             findings: &findings,
+            member,
         },
     )
     .await?;
-    let sentence = by_request(&mut tx, cmd.request_id, false).await?;
-    tx.commit().await?;
+    let sentence = by_request(tx, cmd.request_id, false).await?;
     Ok(SentenceReceipt {
         sentence,
         replayed: false,
@@ -209,6 +220,18 @@ pub async fn edit_sentence(
     code: &str,
     cmd: &SentenceEdit,
 ) -> Result<SentenceReceipt, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    let result = edit_sentence_in(&mut tx, code, cmd, None).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub async fn edit_sentence_in(
+    tx: &mut Transaction<'_, Postgres>,
+    code: &str,
+    cmd: &SentenceEdit,
+    member: Option<Uuid>,
+) -> Result<SentenceReceipt, AssetsError> {
     let text = clean_text(&cmd.text)?;
     if cmd.expected_revision < 1 {
         return Err(AssetsError::Invalid("expected_revision"));
@@ -217,23 +240,21 @@ pub async fn edit_sentence(
         "sentence_edit",
         &(code, cmd.expected_revision, group_str(cmd.group), &text),
     )?;
-    let mut tx = db.pool().begin().await?;
-    if let Claim::Replay = claim(&mut tx, cmd.request_id, "sentence_edit", &sha).await? {
-        let sentence = by_request(&mut tx, cmd.request_id, false).await?;
-        tx.commit().await?;
+    if let Claim::Replay = claim(tx, cmd.request_id, "sentence_edit", &sha).await? {
+        let sentence = by_request(tx, cmd.request_id, false).await?;
         return Ok(SentenceReceipt {
             sentence,
             replayed: true,
         });
     }
-    lock(&mut tx, &format!("sentence:{code}")).await?;
-    let current = latest_in(&mut tx, code).await?;
+    lock(tx, &format!("sentence:{code}")).await?;
+    let current = latest_in(tx, code).await?;
     if current.revision != cmd.expected_revision {
         return Err(AssetsError::Stale);
     }
-    let findings = entry_findings_in(&mut tx, &text).await?;
+    let findings = entry_findings_in(tx, &text).await?;
     insert_revision(
-        &mut tx,
+        tx,
         NewRevision {
             code,
             revision: current.revision + 1,
@@ -242,11 +263,11 @@ pub async fn edit_sentence(
             text: &text,
             origin: current.origin,
             findings: &findings,
+            member,
         },
     )
     .await?;
-    let sentence = by_request(&mut tx, cmd.request_id, false).await?;
-    tx.commit().await?;
+    let sentence = by_request(tx, cmd.request_id, false).await?;
     Ok(SentenceReceipt {
         sentence,
         replayed: false,

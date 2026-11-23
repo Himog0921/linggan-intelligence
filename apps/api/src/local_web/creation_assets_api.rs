@@ -159,6 +159,19 @@ fn reply<T: serde::Serialize>(result: Result<T, AssetsError>) -> Response {
     }
 }
 
+async fn finish_write<T: serde::Serialize>(
+    tx: sqlx::Transaction<'_, sqlx::Postgres>,
+    result: Result<T, AssetsError>,
+) -> Response {
+    match result {
+        Ok(value) => match tx.commit().await {
+            Ok(()) => Json(value).into_response(),
+            Err(error) => failure(error.into()),
+        },
+        Err(error) => failure(error),
+    }
+}
+
 fn failure(error: AssetsError) -> Response {
     let (status, code) = match error {
         AssetsError::Invalid("person_change_required") => {
@@ -210,9 +223,17 @@ async fn list_structural_templates(
 }
 async fn create_structural_template(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Json(command): Json<assets::CreateTemplate>,
 ) -> Response {
-    reply(assets::create_structural_template(database!(state), &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result =
+        assets::create_structural_template_in(&mut tx, &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 async fn review_structural_template(
     State(state): State<LocalWebState>,
@@ -255,10 +276,17 @@ async fn accounts(State(state): State<LocalWebState>, Query(q): Query<AccountsQu
 }
 async fn put_identity(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Path(id): Path<Uuid>,
     Json(command): Json<IdentityCommand>,
 ) -> Response {
-    reply(assets::put_identity(database!(state), id, &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result = assets::put_identity_in(&mut tx, id, &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 async fn candidates(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
     reply(assets::candidates_for_account(database!(state), id).await)
@@ -279,9 +307,16 @@ async fn list_persona_facts(
 }
 async fn put_persona_fact(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Json(command): Json<PersonaFactPut>,
 ) -> Response {
-    reply(assets::put_persona_fact(database!(state), &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result = assets::put_persona_fact_in(&mut tx, &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 async fn persona_fact_history(
     State(state): State<LocalWebState>,
@@ -338,9 +373,16 @@ async fn list_experiences(
 }
 async fn create_experience(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Json(command): Json<ExperienceCreate>,
 ) -> Response {
-    reply(assets::create_experience(database!(state), &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result = assets::create_experience_in(&mut tx, &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 async fn experience_request_status(
     State(state): State<LocalWebState>,
@@ -395,16 +437,31 @@ async fn list_fact_cards(State(state): State<LocalWebState>) -> Response {
 }
 async fn create_fact_card(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Json(command): Json<FactCardCommand>,
 ) -> Response {
-    reply(assets::put_fact_card(database!(state), None, &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result = assets::put_fact_card_in(&mut tx, None, &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 async fn put_fact_card(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Path(code): Path<String>,
     Json(command): Json<FactCardCommand>,
 ) -> Response {
-    reply(assets::put_fact_card(database!(state), Some(&code), &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result =
+        assets::put_fact_card_in(&mut tx, Some(&code), &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 async fn confirm_fact_card(
     State(state): State<LocalWebState>,
@@ -428,16 +485,31 @@ async fn list_styles(State(state): State<LocalWebState>, Query(q): Query<StylesQ
 }
 async fn create_style(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Json(command): Json<assets::StyleCommand>,
 ) -> Response {
-    reply(assets::put_style(database!(state), None, &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result = assets::put_style_in(&mut tx, None, &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 async fn edit_style(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Path(code): Path<String>,
     Json(command): Json<assets::StyleCommand>,
 ) -> Response {
-    reply(assets::put_style(database!(state), Some(&code), &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result =
+        assets::put_style_in(&mut tx, Some(&code), &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 
 #[derive(Deserialize)]
@@ -457,16 +529,30 @@ async fn list_sentences(
 }
 async fn create_sentence(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Json(command): Json<SentenceCreate>,
 ) -> Response {
-    reply(assets::create_sentence(database!(state), &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result = assets::create_sentence_in(&mut tx, &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 async fn edit_sentence(
     State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
     Path(code): Path<String>,
     Json(command): Json<SentenceEdit>,
 ) -> Response {
-    reply(assets::edit_sentence(database!(state), &code, &command).await)
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result = assets::edit_sentence_in(&mut tx, &code, &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
 }
 async fn review_sentence(
     State(state): State<LocalWebState>,

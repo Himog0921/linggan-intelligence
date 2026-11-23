@@ -7,6 +7,7 @@ use super::{AssetsError, types::*};
 use linggan_storage_postgres::Database;
 use sqlx::{Postgres, Row, Transaction, postgres::PgRow};
 use std::collections::BTreeMap;
+use uuid::Uuid;
 
 const SELECT: &str = "SELECT c.card_ref,c.code,c.revision_number,c.name,c.allowed_names,c.banned_names,c.what,c.who,c.can_say,c.cannot_say,c.must_note,k.confirmed_by,k.confirmed_at::text AS confirmed_at,c.saved_at::text AS saved_at,c.saved_by FROM linggan_creation_fact_card c LEFT JOIN linggan_creation_fact_card_confirmation k ON k.card_ref=c.card_ref";
 
@@ -184,6 +185,18 @@ pub async fn put_fact_card(
     code: Option<&str>,
     cmd: &FactCardCommand,
 ) -> Result<FactCardReceipt, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    let result = put_fact_card_in(&mut tx, code, cmd, None).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub async fn put_fact_card_in(
+    tx: &mut Transaction<'_, Postgres>,
+    code: Option<&str>,
+    cmd: &FactCardCommand,
+    member: Option<Uuid>,
+) -> Result<FactCardReceipt, AssetsError> {
     let cmd = normalized(cmd)?;
     if code.is_none() != (cmd.expected_revision == 0) {
         return Err(AssetsError::Invalid("expected_revision"));
@@ -203,10 +216,8 @@ pub async fn put_fact_card(
             &cmd.must_note,
         ),
     )?;
-    let mut tx = db.pool().begin().await?;
-    if let Claim::Replay = claim(&mut tx, cmd.request_id, "fact_card", &sha).await? {
-        let card = by_request(&mut tx, cmd.request_id, false).await?;
-        tx.commit().await?;
+    if let Claim::Replay = claim(tx, cmd.request_id, "fact_card", &sha).await? {
+        let card = by_request(tx, cmd.request_id, false).await?;
         return Ok(FactCardReceipt {
             card,
             replayed: true,
@@ -217,14 +228,14 @@ pub async fn put_fact_card(
             let code: String = sqlx::query_scalar(
                 "SELECT 'CP-'||lpad(nextval('linggan_creation_fact_card_code_seq')::text,4,'0')",
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await?;
-            lock(&mut tx, &format!("fact_card:{code}")).await?;
+            lock(tx, &format!("fact_card:{code}")).await?;
             (code, 1)
         }
         Some(code) => {
-            lock(&mut tx, &format!("fact_card:{code}")).await?;
-            let latest = latest_revision_in(&mut tx, code)
+            lock(tx, &format!("fact_card:{code}")).await?;
+            let latest = latest_revision_in(tx, code)
                 .await?
                 .ok_or(AssetsError::NotFound)?;
             if latest != cmd.expected_revision {
@@ -234,8 +245,8 @@ pub async fn put_fact_card(
         }
     };
     sqlx::query(
-        "INSERT INTO linggan_creation_fact_card(card_ref,code,revision_number,request_ref,name,allowed_names,banned_names,what,who,can_say,cannot_say,must_note,saved_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'local_machine')",
+        "INSERT INTO linggan_creation_fact_card(card_ref,code,revision_number,request_ref,name,allowed_names,banned_names,what,who,can_say,cannot_say,must_note,saved_by,saved_by_member_ref)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'local_machine',$13)",
     )
     .bind(uuid::Uuid::new_v4())
     .bind(&code)
@@ -249,10 +260,10 @@ pub async fn put_fact_card(
     .bind(&cmd.can_say)
     .bind(&cmd.cannot_say)
     .bind(&cmd.must_note)
-    .execute(&mut *tx)
+    .bind(member)
+    .execute(&mut **tx)
     .await?;
-    let card = by_request(&mut tx, cmd.request_id, false).await?;
-    tx.commit().await?;
+    let card = by_request(tx, cmd.request_id, false).await?;
     Ok(FactCardReceipt {
         card,
         replayed: false,

@@ -75,12 +75,12 @@ it('shows team management for admins and preserves selected business in the side
   expect(screen.queryByText('导入导出')).not.toBeInTheDocument();
   expect(within(nav).getByRole('link', { name: '账号管理' })).toHaveAttribute('href', '/ops/accounts?domain=d1');
 });
-it('limits the operator navigation and keeps prior sync state noninteractive on localhost', async () => {
+it('opens creation for the operator while keeping restricted operations unavailable on localhost', async () => {
   sessionRole = 'operator'; persistedSync = true; show();
   await screen.findByRole('button', { name: '查看发布记录：测试发布标题' });
-  expect(within(screen.getByLabelText('运营导航')).queryByRole('link', { name: '创作' })).not.toBeInTheDocument();
+  expect(within(screen.getByLabelText('运营导航')).getByRole('link', { name: '创作' })).toHaveAttribute('href', '/ops/creation?domain=d1');
   expect(within(screen.getByLabelText('运营导航')).queryByRole('link', { name: '团队与权限' })).not.toBeInTheDocument();
-  expect(within(screen.getByRole('navigation', { name: '页面导航' })).getAllByRole('link').map(link => link.getAttribute('aria-label') ?? link.textContent)).toEqual(['数据', '发布记录', '账号管理', '每日数据']);
+  expect(within(screen.getByRole('navigation', { name: '页面导航' })).getAllByRole('link').map(link => link.getAttribute('aria-label') ?? link.textContent)).toEqual(['数据', '发布记录', '账号管理', '每日数据', '创作']);
   expect(screen.queryByRole('button', { name: '同步数据' })).not.toBeInTheDocument();
   expect(screen.queryByRole('button', { name: '等待分派' })).not.toBeInTheDocument();
   expect(screen.getByText('等待分派')).toBeInTheDocument();

@@ -19,7 +19,7 @@ async fn ai_settings_http_writing_confirmation_is_queued_and_cancelled_without_i
     let db = writing_fixture::db("ai_writing_http_queue").await;
     let config = writing_setup::configure_fake_prerequisites(&db).await;
     let work = writing_fixture::create(&db, writing_fixture::doc()).await;
-    let app = app_with_database(db.clone());
+    let app = super::creation_members_tests::admin_app(db.clone()).await;
     let preview = ai::PreviewRequest {
         selection: None,
         preview_ref: Uuid::new_v4(),

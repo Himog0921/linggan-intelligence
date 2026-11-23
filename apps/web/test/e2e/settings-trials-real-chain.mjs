@@ -13,6 +13,9 @@ const phase=process.argv[2];assert.ok(['trial','refreshed-source','restricted-so
 const report={phase,scope:'owned synthetic probe and two SDK trial calls only',steps:[],errors:[],blocked:[],screenshots:[]};
 const browser=await chromium.launch({headless:true,...(process.env.DOSSIER_BROWSER_EXECUTABLE?{executablePath:process.env.DOSSIER_BROWSER_EXECUTABLE}:{})});
 const context=await browser.newContext({viewport:{width:1440,height:1000},reducedMotion:'reduce'});
+const sessionCookie=process.env.WEB_SETTINGS_TRIAL_COOKIE?.split(';')[0];
+assert.ok(sessionCookie?.startsWith('linggan_ops_session='),'isolated administrator session required');
+await context.addCookies([{name:'linggan_ops_session',value:sessionCookie.slice('linggan_ops_session='.length),url:origin,httpOnly:true}]);
 await context.route('**/*',route=>{
  if(new URL(route.request().url()).origin!==origin){report.blocked.push(route.request().url());return route.abort();}
  return route.continue();

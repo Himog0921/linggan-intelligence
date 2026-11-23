@@ -626,6 +626,8 @@ async fn settings_page_real_chain_browser_proof() {
     let result = std::process::Command::new(&node)
         .arg(script)
         .env("WEB_APP_PROOF_DIR", &directory)
+        .env("WEB_SETTINGS_EMAIL", "settings-browser@example.test")
+        .env("WEB_SETTINGS_PASSWORD", login_password)
         .status()
         .unwrap();
     let login = FsPath::new(env!("CARGO_MANIFEST_DIR")).join("../web/test/e2e/login-react.mjs");

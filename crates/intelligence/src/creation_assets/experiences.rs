@@ -167,15 +167,23 @@ pub async fn list_experiences(
     account: Uuid,
 ) -> Result<Vec<Experience>, AssetsError> {
     let mut tx = db.pool().begin().await?;
-    lock(&mut tx, "experience-gate").await?;
+    let items = list_experiences_in(&mut tx, account).await?;
+    tx.commit().await?;
+    Ok(items)
+}
+
+pub async fn list_experiences_in(
+    tx: &mut Transaction<'_, Postgres>,
+    account: Uuid,
+) -> Result<Vec<Experience>, AssetsError> {
+    lock(tx, "experience-gate").await?;
     let ids: Vec<Uuid> = sqlx::query_scalar("SELECT experience_ref FROM linggan_creation_experience WHERE account_ref=$1 ORDER BY created_at DESC,experience_ref LIMIT 200")
-        .bind(account).fetch_all(&mut *tx).await?;
+        .bind(account).fetch_all(&mut **tx).await?;
     let mut items = Vec::with_capacity(ids.len());
     for id in ids {
-        lock_subject(&mut tx, id).await?;
-        items.push(mask_former_person(snapshot(&mut tx, id).await?));
+        lock_subject(tx, id).await?;
+        items.push(mask_former_person(snapshot(tx, id).await?));
     }
-    tx.commit().await?;
     Ok(items)
 }
 
@@ -285,6 +293,17 @@ pub async fn create_experience(
     db: &Database,
     cmd: &ExperienceCreate,
 ) -> Result<ExperienceReceipt, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    let result = create_experience_in(&mut tx, cmd, None).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub async fn create_experience_in(
+    tx: &mut Transaction<'_, Postgres>,
+    cmd: &ExperienceCreate,
+    member: Option<Uuid>,
+) -> Result<ExperienceReceipt, AssetsError> {
     let title = cmd.title.trim();
     let body = cmd.body.trim();
     validate_payload(title, body, &cmd.tags, &cmd.origin)?;
@@ -299,15 +318,13 @@ pub async fn create_experience(
             &cmd.origin,
         ),
     )?;
-    let mut tx = db.pool().begin().await?;
-    if let Some(prior) = previous(&mut tx, cmd.request_id, "create", &hash).await? {
-        let receipt = replay_result(&mut tx, prior).await?;
-        tx.commit().await?;
+    if let Some(prior) = previous(tx, cmd.request_id, "create", &hash).await? {
+        let receipt = replay_result(tx, prior).await?;
         return Ok(receipt);
     }
-    lock(&mut tx, "experience-gate").await?;
-    lock(&mut tx, &format!("identity:{}", cmd.account_ref)).await?;
-    let identity = super::identity::latest_in(&mut tx, cmd.account_ref).await?;
+    lock(tx, "experience-gate").await?;
+    lock(tx, &format!("identity:{}", cmd.account_ref)).await?;
+    let identity = super::identity::latest_in(tx, cmd.account_ref).await?;
     if identity.is_none_or(|value| value.has_real_person != Some(true)) {
         return Err(AssetsError::Invalid("account_has_no_confirmed_person"));
     }
@@ -315,7 +332,7 @@ pub async fn create_experience(
         "SELECT subject_ref FROM linggan_creation_account_person WHERE account_ref=$1",
     )
     .bind(cmd.account_ref)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?
     .ok_or(AssetsError::Invalid("person_unavailable"))?;
     if subject != cmd.expected_person_ref {
@@ -324,16 +341,15 @@ pub async fn create_experience(
     let id = Uuid::new_v4();
     let sequence: i64 =
         sqlx::query_scalar("SELECT nextval('linggan_creation_experience_code_seq')")
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await?;
     let code = format!("JL-{sequence:04}");
-    sqlx::query("INSERT INTO linggan_creation_experience(experience_ref,code,account_ref,subject_ref,state,current_revision,created_by) VALUES($1,$2,$3,$4,'awaiting_subject',1,'local_machine')")
-        .bind(id).bind(code).bind(cmd.account_ref).bind(subject).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_creation_experience(experience_ref,code,account_ref,subject_ref,state,current_revision,created_by,created_by_member_ref) VALUES($1,$2,$3,$4,'awaiting_subject',1,'local_machine',$5)")
+        .bind(id).bind(code).bind(cmd.account_ref).bind(subject).bind(member).execute(&mut **tx).await?;
     sqlx::query("INSERT INTO linggan_creation_experience_revision(experience_ref,revision,title,body,tags,origin,saved_by) VALUES($1,1,$2,$3,$4,$5,'local_machine')")
-        .bind(id).bind(title).bind(body).bind(&cmd.tags).bind(&cmd.origin).execute(&mut *tx).await?;
-    let experience = snapshot(&mut tx, id).await?;
-    record(&mut tx, cmd.request_id, "create", &experience, &hash).await?;
-    tx.commit().await?;
+        .bind(id).bind(title).bind(body).bind(&cmd.tags).bind(&cmd.origin).execute(&mut **tx).await?;
+    let experience = snapshot(tx, id).await?;
+    record(tx, cmd.request_id, "create", &experience, &hash).await?;
     Ok(ExperienceReceipt {
         experience,
         replayed: false,

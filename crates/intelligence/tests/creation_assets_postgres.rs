@@ -18,6 +18,16 @@ use uuid::Uuid;
 
 const FILL: &str = "\u{3164}";
 
+fn without_migration(schema: &str, id: &str, migration: &str) -> String {
+    let ledger = format!(
+        "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('{id}','{}');\n",
+        linggan_intelligence::content_workbench_sources::text_hash(migration)
+    );
+    assert!(schema.contains(migration), "{id} migration is present");
+    assert!(schema.contains(&ledger), "{id} ledger entry is present");
+    schema.replace(migration, "").replace(&ledger, "")
+}
+
 #[tokio::test]
 #[ignore = "isolated PostgreSQL historical migration guard"]
 async fn erasure_migration_stops_on_historical_immutable_private_source_use() {
@@ -634,6 +644,11 @@ async fn title_seed_preserves_an_existing_same_name_skill() {
         .replace(ledger, "")
         .replace(links, "")
         .replace(link_ledger, "");
+    let schema = without_migration(
+        &schema,
+        "0238_creation_publication_member",
+        include_str!("../../../database/migrations/0238_creation_publication_member.sql"),
+    );
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let db = linggan_storage_postgres::testing::isolated_proof_schema(
         &url,
@@ -1295,6 +1310,9 @@ async fn upgrade_seeds_known_person_and_preserves_old_identity_request_replay() 
         .replace(&ledger, "")
         .replace(erasure, "")
         .replace(&erasure_ledger, "");
+    let authorship =
+        include_str!("../../../database/migrations/0237_creation_member_authorship.sql");
+    let before = without_migration(&before, "0237_creation_member_authorship", authorship);
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let db = linggan_storage_postgres::testing::isolated_proof_schema(
         &url,
@@ -1313,6 +1331,7 @@ async fn upgrade_seeds_known_person_and_preserves_old_identity_request_replay() 
         .bind(Uuid::new_v4()).bind(account).bind(cmd.request_id).execute(db.pool()).await.unwrap();
     sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
     sqlx::raw_sql(erasure).execute(db.pool()).await.unwrap();
+    sqlx::raw_sql(authorship).execute(db.pool()).await.unwrap();
     assert!(
         read_identity(&db, account)
             .await

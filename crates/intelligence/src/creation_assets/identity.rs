@@ -26,7 +26,7 @@ pub(super) fn from_row(row: &PgRow) -> Result<Identity, AssetsError> {
     })
 }
 
-pub(super) async fn latest_in(
+pub async fn latest_in(
     tx: &mut Transaction<'_, Postgres>,
     account: Uuid,
 ) -> Result<Option<Identity>, AssetsError> {
@@ -89,6 +89,18 @@ pub async fn put_identity(
     account: Uuid,
     cmd: &IdentityCommand,
 ) -> Result<IdentityReceipt, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    let result = put_identity_in(&mut tx, account, cmd, None).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub async fn put_identity_in(
+    tx: &mut Transaction<'_, Postgres>,
+    account: Uuid,
+    cmd: &IdentityCommand,
+    member: Option<Uuid>,
+) -> Result<IdentityReceipt, AssetsError> {
     let cmd = normalized(cmd)?;
     let mut meaning = serde_json::json!({
         "account": account, "expected": cmd.expected_revision, "relation": cmd.org_relation,
@@ -100,27 +112,25 @@ pub async fn put_identity(
         meaning["personChange"] = serde_json::to_value(change)?;
     }
     let sha = command_hash("identity", &meaning)?;
-    let mut tx = db.pool().begin().await?;
-    if let Claim::Replay = claim(&mut tx, cmd.request_id, "identity", &sha).await? {
-        let identity = by_request(&mut tx, cmd.request_id).await?;
-        tx.commit().await?;
+    if let Claim::Replay = claim(tx, cmd.request_id, "identity", &sha).await? {
+        let identity = by_request(tx, cmd.request_id).await?;
         return Ok(IdentityReceipt {
             identity,
             replayed: true,
         });
     }
-    lock(&mut tx, "experience-gate").await?;
-    lock(&mut tx, &format!("identity:{account}")).await?;
+    lock(tx, "experience-gate").await?;
+    lock(tx, &format!("identity:{account}")).await?;
     let known: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM linggan_ops_account WHERE account_ref=$1 AND ledger_state='in_ledger')",
+        "SELECT EXISTS(SELECT 1 FROM linggan_ops_account WHERE account_ref=$1 AND ledger_state IN ('in_ledger','native_active'))",
     )
     .bind(account)
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
     if !known {
         return Err(AssetsError::NotFound);
     }
-    let current = latest_in(&mut tx, account).await?;
+    let current = latest_in(tx, account).await?;
     if current.as_ref().map_or(0, |i| i.revision) != cmd.expected_revision {
         return Err(AssetsError::Stale);
     }
@@ -128,7 +138,7 @@ pub async fn put_identity(
         "SELECT subject_ref FROM linggan_creation_account_person WHERE account_ref=$1",
     )
     .bind(account)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?;
     if cmd.person_change.is_some() && cmd.has_real_person != Some(true) {
         return Err(AssetsError::Invalid("person_change"));
@@ -146,9 +156,9 @@ pub async fn put_identity(
             (Some(_), Some(PersonChange::Replacement)) | (None, _) => {
                 let subject = Uuid::new_v4();
                 sqlx::query("INSERT INTO linggan_creation_person_subject(subject_ref,account_ref) VALUES($1,$2)")
-                    .bind(subject).bind(account).execute(&mut *tx).await?;
+                    .bind(subject).bind(account).execute(&mut **tx).await?;
                 sqlx::query("INSERT INTO linggan_creation_account_person(account_ref,subject_ref) VALUES($1,$2) ON CONFLICT (account_ref) DO UPDATE SET subject_ref=EXCLUDED.subject_ref")
-                    .bind(account).bind(subject).execute(&mut *tx).await?;
+                    .bind(account).bind(subject).execute(&mut **tx).await?;
                 (
                     Some(subject),
                     if existing_subject.is_some() {
@@ -182,11 +192,11 @@ pub async fn put_identity(
         .and_then(|i| i.bio_checked_at.clone());
     let identity_ref = Uuid::new_v4();
     sqlx::query(
-        "INSERT INTO linggan_creation_account_identity(identity_ref,account_ref,revision_number,request_ref,org_relation,bio_discloses_relation,bio_checked_at,bio_checked_by,has_real_person,backing_person_role,can_provide_experience,saved_by)
+        "INSERT INTO linggan_creation_account_identity(identity_ref,account_ref,revision_number,request_ref,org_relation,bio_discloses_relation,bio_checked_at,bio_checked_by,has_real_person,backing_person_role,can_provide_experience,saved_by,saved_by_member_ref)
          VALUES($1,$2,$3,$4,$5,$6::boolean,
                 CASE WHEN $6::boolean IS NULL THEN NULL ELSE COALESCE($7::timestamptz,scope_001_now()) END,
                 CASE WHEN $6::boolean IS NULL THEN NULL ELSE 'local_machine' END,
-                $8,$9,$10,'local_machine')",
+                $8,$9,$10,'local_machine',$11)",
     )
     .bind(identity_ref)
     .bind(account)
@@ -198,14 +208,14 @@ pub async fn put_identity(
     .bind(cmd.has_real_person)
     .bind(&cmd.backing_person_role)
     .bind(cmd.can_provide_experience)
-    .execute(&mut *tx)
+    .bind(member)
+    .execute(&mut **tx)
     .await?;
     if let Some(subject) = subject {
         sqlx::query("INSERT INTO linggan_creation_person_assignment(identity_ref,account_ref,subject_ref,action,recorded_by) VALUES($1,$2,$3,$4,'local_machine')")
-            .bind(identity_ref).bind(account).bind(subject).bind(assignment).execute(&mut *tx).await?;
+            .bind(identity_ref).bind(account).bind(subject).bind(assignment).execute(&mut **tx).await?;
     }
-    let identity = by_request(&mut tx, cmd.request_id).await?;
-    tx.commit().await?;
+    let identity = by_request(tx, cmd.request_id).await?;
     Ok(IdentityReceipt {
         identity,
         replayed: false,
@@ -221,7 +231,7 @@ pub async fn list_accounts(
                 i.account_ref,i.revision_number,i.org_relation,i.bio_discloses_relation,i.bio_checked_at::text AS bio_checked_at,i.bio_checked_by,i.has_real_person,i.backing_person_role,i.can_provide_experience,EXISTS(SELECT 1 FROM linggan_creation_account_person p WHERE p.account_ref=i.account_ref) AS has_known_person,(SELECT a.subject_ref FROM linggan_creation_person_assignment a WHERE a.identity_ref=i.identity_ref) AS person_ref,i.saved_at::text AS saved_at,i.saved_by
          FROM linggan_ops_account a
          LEFT JOIN LATERAL (SELECT * FROM linggan_creation_account_identity WHERE account_ref=a.account_ref ORDER BY revision_number DESC LIMIT 1) i ON true
-         WHERE a.platform='xhs' AND a.ledger_state='in_ledger' AND a.status IN ('active','warming') AND ($1::uuid IS NULL OR a.domain_ref=$1)
+         WHERE a.platform='xhs' AND a.ledger_state IN ('in_ledger','native_active') AND a.status IN ('active','warming') AND ($1::uuid IS NULL OR a.domain_ref=$1)
          ORDER BY a.account_name,a.account_ref")
     .bind(domain)
     .fetch_all(db.pool())

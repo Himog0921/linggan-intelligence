@@ -51,6 +51,7 @@ const REACT_PAGES: &[&str] = &[
 const AUTHENTICATED_REACT_PAGES: &[&str] = &[
     "/settings/account",
     "/settings/team",
+    "/ops/creation",
     "/ops/overview",
     "/ops/content",
     "/ops/publications",
@@ -215,8 +216,7 @@ async fn entry(State(config): State<WebAppConfig>) -> Response {
 }
 
 /// Team and operations pages are served only after the same request has passed the local-origin
-/// guard and an active team session check. The creation workspace intentionally keeps its
-/// existing boundary until its own team migration is implemented.
+/// guard and an active team session check.
 async fn authenticated_entry(
     State(state): State<super::LocalWebState>,
     headers: HeaderMap,

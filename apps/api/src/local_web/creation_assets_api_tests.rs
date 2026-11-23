@@ -87,7 +87,7 @@ async fn creation_assets_http_comment_projection_and_copy_agree_on_grade() {
     };
     let db = proof("assets_http_comment_grade").await;
     let (account, _) = seed_accounts(&db).await;
-    let app = app_with_database(db.clone());
+    let app = super::creation_members_tests::admin_app(db.clone()).await;
     let (_, identity) = call(&app, Method::PUT, &format!("/ops/api/creation/accounts/{account}/identity"), Some(json!({"requestId":rid(),"expectedRevision":0,"orgRelation":"parent","bioDisclosesRelation":null,"hasRealPerson":true,"backingPersonRole":"合成角色","canProvideExperience":null}))).await;
     let (_, fact) = call(&app, Method::POST, "/ops/api/creation/persona-facts", Some(json!({"requestId":rid(),"accountRef":account,"expectedPersonRef":identity["identity"]["personRef"],"key":"年级","expectedVersion":0,"text":"三年级","source":"oral","conflictDecision":null}))).await;
     let fact_id = fact["fact"]["id"].as_str().unwrap();
@@ -191,7 +191,7 @@ async fn creation_assets_http_comment_projection_and_copy_agree_on_grade() {
 async fn creation_assets_http_persona_fact_conflict_and_withdrawal() {
     let db = proof("assets_http_persona").await;
     let (account, other) = seed_accounts(&db).await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let (_, identity) = call(&app, Method::PUT, &format!("/ops/api/creation/accounts/{account}/identity"), Some(json!({"requestId":rid(),"expectedRevision":0,"orgRelation":"parent","bioDisclosesRelation":null,"hasRealPerson":true,"backingPersonRole":"合成角色","canProvideExperience":null}))).await;
     let request = rid();
     let input = json!({"requestId":request,"accountRef":account,"expectedPersonRef":identity["identity"]["personRef"],"key":"年级","expectedVersion":0,"text":"三年级","source":"oral","conflictDecision":null});
@@ -267,7 +267,7 @@ async fn creation_assets_http_persona_fact_conflict_and_withdrawal() {
 async fn creation_assets_http_experience_uses_subject_confirmation_and_withdrawal() {
     let db = proof("assets_http_experience").await;
     let (account, other) = seed_accounts(&db).await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let identity = json!({"requestId":rid(),"expectedRevision":0,"orgRelation":"parent","bioDisclosesRelation":null,
         "hasRealPerson":true,"backingPersonRole":"妈妈","canProvideExperience":null});
     let (status, identity_result) = call(
@@ -345,7 +345,7 @@ async fn creation_assets_http_experience_uses_subject_confirmation_and_withdrawa
 async fn creation_assets_http_person_correction_and_replacement_require_explicit_choice() {
     let db = proof("assets_http_person").await;
     let (account, _) = seed_accounts(&db).await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let uri = format!("/ops/api/creation/accounts/{account}/identity");
     let mut input = json!({"requestId":rid(), "expectedRevision":0, "orgRelation":"parent",
         "bioDisclosesRelation":true,"hasRealPerson":true,"backingPersonRole":"妈妈","canProvideExperience":null});
@@ -388,7 +388,7 @@ async fn creation_assets_http_person_correction_and_replacement_require_explicit
 async fn creation_assets_http_identity_cards_and_sentences_follow_the_contract() {
     let db = proof("assets_http_library").await;
     let (xhs, douyin) = seed_accounts(&db).await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
 
     let (status, listed) = call(&app, Method::GET, "/ops/api/creation/accounts", None).await;
     assert_eq!(status, StatusCode::OK, "{listed}");
@@ -563,7 +563,7 @@ async fn creation_assets_http_identity_cards_and_sentences_follow_the_contract()
 async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
     let db = proof("assets_http_copy").await;
     let (xhs, _) = seed_accounts(&db).await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let (status, work) = call(
         &app,
         Method::POST,
@@ -699,7 +699,7 @@ async fn creation_assets_http_checks_and_copy_run_against_the_saved_revision() {
 #[ignore = "isolated PostgreSQL budget HTTP proof"]
 async fn creation_assets_http_creative_budget_is_revisioned() {
     let db = proof("assets_http_ai_budget").await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let (status, initial) = call(&app, Method::GET, "/ops/api/creation/ai-budget", None).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(initial["capCents"], 10000);

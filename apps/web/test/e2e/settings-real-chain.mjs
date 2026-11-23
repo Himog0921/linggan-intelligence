@@ -30,6 +30,18 @@ async function step(name, action) {
 async function goto(query = '?section=models') { await page.goto(`${origin}/settings/models${query}`); await page.locator('[data-ai-settings-page]').waitFor(); }
 async function receipt(text) { await page.getByRole('status').filter({ hasText: text }).waitFor(); }
 try {
+  await step('the administrator session opens the creation budget in AI settings', async () => {
+    const email = process.env.WEB_SETTINGS_EMAIL;
+    const password = process.env.WEB_SETTINGS_PASSWORD;
+    assert.ok(email && password, 'isolated settings fixture supplies administrator credentials');
+    const session = await context.request.post(origin + '/api/local/auth/login', {
+      headers: { Origin: origin }, data: { email, password },
+    });
+    assert.equal(session.status(), 200);
+    assert.equal((await session.json()).member.role, 'admin');
+    await goto('?view=capabilities');
+    await page.getByRole('button', { name: '保存月度上限' }).waitFor();
+  });
   await step('new capability-first AI settings use real data and shared AppShell at two viewports', async () => {
     for (const [width, height] of [[1440, 900], [390, 844]]) {
       await page.setViewportSize({ width, height });

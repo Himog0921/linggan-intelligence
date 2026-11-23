@@ -29,10 +29,11 @@ mod fixture;
 #[path = "../../../../crates/intelligence/tests/support/ai_writing_fixture.rs"]
 mod setup;
 
-async fn browser(node: &str, directory: &Path, phase: &str) -> std::process::ExitStatus {
+async fn browser(node: &str, directory: &Path, phase: &str, cookie: &str) -> std::process::ExitStatus {
     let node = node.to_owned();
     let directory = directory.to_owned();
     let phase = phase.to_owned();
+    let cookie = cookie.to_owned();
     tokio::task::spawn_blocking(move || {
         std::process::Command::new(node)
             .arg(
@@ -40,6 +41,7 @@ async fn browser(node: &str, directory: &Path, phase: &str) -> std::process::Exi
                     .join("../web/test/e2e/settings-trials-real-chain.mjs"),
             )
             .env("WEB_APP_PROOF_DIR", directory)
+            .env("WEB_SETTINGS_TRIAL_COOKIE", cookie)
             .arg(phase)
             .status()
             .unwrap()
@@ -134,7 +136,10 @@ async fn ai_settings_skill_trial_real_chain_browser_proof() {
         adapter,
         drain.clone(),
     ));
+    let email = "settings-trial-admin@example.test";
+    ops_auth_tests::active_member(db.pool(), email, "admin").await;
     let application = app_with_database(db.clone());
+    let cookie = ops_auth_tests::login_cookie(application.clone(), email).await;
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
@@ -144,10 +149,10 @@ async fn ai_settings_skill_trial_real_chain_browser_proof() {
     fs::create_dir_all(&package).unwrap();
     fs::write(package.join("SKILL.md"),"---\nname: writing-method\ndescription: Synthetic fixed writing method\n---\ncandidate-v2\n").unwrap();
     fs::write(directory.join("fixture.json"),json!({"origin":origin,"package":package,"previewRef":preview.preview_ref,"baselineConfigRef":enabled.task_config_ref,"firstVersionRef":first.version_ref}).to_string()).unwrap();
-    let first_phase = browser(&node, &directory, "trial").await;
+    let first_phase = browser(&node, &directory, "trial", &cookie).await;
     let refreshed_phase = if first_phase.success() {
         fixture::dossier::fixture::submit_package_at(&db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成替代版本","bodyText":"新版原文","authorId":"synthetic-author"}}),"2026-08-29T10:00:00Z").await;
-        Some(browser(&node, &directory, "refreshed-source").await)
+        Some(browser(&node, &directory, "refreshed-source", &cookie).await)
     } else {
         None
     };
@@ -156,7 +161,7 @@ async fn ai_settings_skill_trial_real_chain_browser_proof() {
         .is_some_and(|phase| phase.success())
     {
         fixture::restrict_comment(&db, restricted_work).await;
-        Some(browser(&node, &directory, "restricted-source").await)
+        Some(browser(&node, &directory, "restricted-source", &cookie).await)
     } else {
         None
     };
