@@ -183,9 +183,10 @@ async fn publications(
         Ok(business) => business,
         Err(error) => return read_error(error),
     };
-    let pending_views = match query.views.as_deref() {
-        None | Some("") => false,
-        Some("pending") => true,
+    let (pending_views, hit_views) = match query.views.as_deref() {
+        None | Some("") => (false, false),
+        Some("pending") => (true, false),
+        Some("hit") => (false, true),
         Some(_) => return read_error(OpsReadError::InvalidParameter("views")),
     };
     let filter = OpsPublicationFilter {
@@ -197,6 +198,7 @@ async fn publications(
         from: query.from,
         to: query.to,
         pending_views,
+        hit_views,
         page: query.page.unwrap_or(1),
     };
     json(read_ops_publications_scoped(database, business, filter, scope.as_deref(), Some(viewer)).await)

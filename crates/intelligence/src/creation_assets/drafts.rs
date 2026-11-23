@@ -481,6 +481,71 @@ async fn replay(
     ))
 }
 
+/// What a saved revision would copy: its sources requalified, every rule run, the text formatted.
+/// The copy command and the read-only preview both compute it here, so the rules and the text cannot differ
+/// between them; what each takes around it (the copy's own lock, the preview's gate) is theirs.
+struct CopyCandidate {
+    revision_id: Uuid,
+    document: WorkDocument,
+    report: CheckReport,
+    copy: CopyText,
+}
+
+async fn copy_candidate(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    revision: workbench::Revision,
+    work: Uuid,
+) -> Result<CopyCandidate, AssetsError> {
+    let ctx = load_context(tx, revision.document.account_ref).await?;
+    let revision_id = revision.id;
+    let document = revision.document.clone();
+    let subject = copy_subject(tx, domain, revision, &ctx).await?;
+    let mut report = check_manuscript(&subject, &ctx);
+    add_grade_warnings(tx, &document, &mut report).await?;
+    add_repeated_experience_warnings(tx, &document, Some(work), &mut report).await?;
+    if report.count(Level::Must) > 0 {
+        return Err(AssetsError::Blocked(report.findings));
+    }
+    let copy = format_copy(&subject, ctx.bridge_output(&subject))
+        .ok_or(AssetsError::Invalid("body_empty"))?;
+    Ok(CopyCandidate {
+        revision_id,
+        document,
+        report,
+        copy,
+    })
+}
+
+/// The text `prepare_copy` would hand to the clipboard for the saved current revision, without a
+/// receipt and without writing anything: the transaction is read-only, so an accidental write would
+/// fail rather than leave a trace. The gate lock comes before any read, as in `read_work`, so a
+/// withdrawal that is in flight finishes first and its experience cannot appear in the preview. It is
+/// one global lock held for a few short reads, the same cost every `read_work` already pays.
+pub async fn preview_copy(db: &Database, work: Uuid) -> Result<CopyPreview, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    sqlx::query("SET TRANSACTION READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    lock(&mut tx, "experience-gate").await?;
+    let (domain, revision) = workbench::read_revision_in(&mut tx, work, None)
+        .await
+        .map_err(workbench_error)?;
+    let candidate = copy_candidate(&mut tx, domain, revision, work).await?;
+    tx.commit().await?;
+    Ok(CopyPreview {
+        work_id: work,
+        revision_id: candidate.revision_id,
+        ruleset_version: candidate.report.ruleset_version.clone(),
+        title: candidate.copy.title,
+        body: candidate.copy.body,
+        tags: candidate.copy.tags,
+        text: candidate.copy.text,
+        warn_count: candidate.report.count(Level::Warn),
+        hint_count: candidate.report.count(Level::Hint),
+    })
+}
+
 /// Checks the saved current revision and, when nothing must still be fixed, returns the text for
 /// the clipboard and writes the receipt. `expected_revision` must be the current revision.
 pub async fn prepare_copy(
@@ -502,18 +567,12 @@ pub async fn prepare_copy(
     if revision.id != cmd.expected_revision {
         return Err(AssetsError::Stale);
     }
-    let ctx = load_context(&mut tx, revision.document.account_ref).await?;
-    let revision_id = revision.id;
-    let report_doc = revision.document.clone();
-    let subject = copy_subject(&mut tx, domain, revision, &ctx).await?;
-    let mut report = check_manuscript(&subject, &ctx);
-    add_grade_warnings(&mut tx, &report_doc, &mut report).await?;
-    add_repeated_experience_warnings(&mut tx, &report_doc, Some(work), &mut report).await?;
-    if report.count(Level::Must) > 0 {
-        return Err(AssetsError::Blocked(report.findings));
-    }
-    let copy = format_copy(&subject, ctx.bridge_output(&subject))
-        .ok_or(AssetsError::Invalid("body_empty"))?;
+    let CopyCandidate {
+        revision_id,
+        document: report_doc,
+        report,
+        copy,
+    } = copy_candidate(&mut tx, domain, revision, work).await?;
     let receipt = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO linggan_creation_copy_receipt(receipt_ref,work_ref,revision_ref,request_ref,ruleset_version,fact_cards,warn_rules,hint_rules,text_sha256,saved_by)

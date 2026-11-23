@@ -112,6 +112,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
         )
         .route("/ops/api/creation/works/{id}/copy", post(prepare_copy))
         .route(
+            "/ops/api/creation/works/{id}/copy-preview",
+            get(preview_copy),
+        )
+        .route(
             "/ops/api/creation/works/{id}/copy/{receipt}/confirm",
             post(confirm_copy),
         )
@@ -631,6 +635,10 @@ async fn prepare_copy(
     Json(command): Json<CopyCommand>,
 ) -> Response {
     reply(assets::prepare_copy(database!(state), id, &command).await)
+}
+/// The same text and rules as `prepare_copy`, read-only: nothing is recorded.
+async fn preview_copy(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
+    reply(assets::preview_copy(database!(state), id).await)
 }
 async fn confirm_copy(
     State(state): State<LocalWebState>,
