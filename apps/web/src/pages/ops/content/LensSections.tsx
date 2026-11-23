@@ -9,6 +9,7 @@ function Link({ children, label, onClick }: { children: ReactNode; label: string
   return <button type="button" className={css.link} aria-label={label} onClick={onClick}>{children}</button>;
 }
 export function Quality({ snapshot: { quality: q }, open, spot }: { snapshot: Snapshot; open: Open; spot: () => void }) {
+  const multipleBatches = new Set(q.agreement.map(a => a.run)).size > 1;
   const summary = q.agreement.find(a => !a.meetsThreshold) ?? q.agreement[0];
   return <section className={css.quality} aria-label="数据质量">
     <div><span>数据截至</span><strong>{q.latest ?? '未知'}</strong>{q.stale && <small>数据陈旧 · 距今 {q.days} 天</small>}</div>
@@ -16,7 +17,7 @@ export function Quality({ snapshot: { quality: q }, open, spot }: { snapshot: Sn
       <Link label="查看有阅读量的笔记" onClick={() => open({ metric: 'titledViews', label: '有阅读量' })}>{q.withViews}</Link> / <Link label="查看有标题的发布记录" onClick={() => open({ metric: 'titledPublications', label: '有标题的发布记录' })}>{q.titled}</Link> 篇
     </small><small>范围内 {q.publications} 篇，有标题 {q.titled} 篇，待标 {q.pending} 个标题</small></div>
     <div><span>两次机器标注一致率</span><details><summary>{summary ? (labels[summary.dimension as keyof typeof labels] ?? summary.dimension) + ' ' + percent(summary.value) + (summary.meetsThreshold ? '' : ' · 未达标') : '暂无复标结果'}</summary>{q.agreement.length ? q.agreement.map(a =>
-      <p key={a.run + a.dimension}>{labels[a.dimension as keyof typeof labels] ?? a.dimension} · {percent(a.value)} · κ {a.kappa?.toFixed(2) ?? '未知'} · {a.count} 条</p>) : <p>暂无复标结果</p>}</details></div>
+      <p key={a.run + a.dimension}>{labels[a.dimension as keyof typeof labels] ?? a.dimension} · {percent(a.value)} · κ {a.kappa?.toFixed(2) ?? '未知'} · {a.count} 条{multipleBatches && <small> · 批次 {a.run.slice(0, 8)}</small>}</p>) : <p>暂无复标结果</p>}</details></div>
     <div><span>人工抽看</span><Link label="查看人工抽看样本" onClick={spot}>查看抽看样本</Link><small>已裁定 {q.adjudicated} 个标题</small>{q.corrected !== null && <small>已改正 {q.corrected} 个标题</small>}</div>
     <div><span>分类体系</span><strong>v{q.taxonomy}</strong><small>指标 v{q.metric}</small></div>
   </section>;
