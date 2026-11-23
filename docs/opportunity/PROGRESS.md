@@ -699,3 +699,5 @@
 - `bash scripts/ci-preflight.sh origin/main` → exit 0，54 项检查通过；`impeccable detect --json` → `[]`；`npm run test -- src/pages/opportunity/OpportunityPage.test.tsx` → 1 文件、17 项通过。完整前端验证与独立审阅另行记录在 PR，不以该候选页面访问冒充部署或业务验收。
 - 独立规格与工程审阅基线 `1e5ccf05`、候选 `79557dec`：发现列表翻页入口过远、作者展开缺少组别与状态、暗底焦点对比不足；本次一起修正。候选页实测顶部翻至第 2 页的 3 个问题，键盘焦点实际颜色 `rgb(255, 255, 255)`，作者控件可读出所属协议、展开状态和受控列表。
 - 增量回归：`npm run test -- src/pages/opportunity/OpportunityPage.test.tsx` → exit 0、1 文件 18 项通过；`bash scripts/ci-preflight.sh origin/main` → exit 0、54 项通过。未执行迁移或触发真实采集及模型外发。
+- 完整前端验证：`npm run test -- --maxWorkers=2` → exit 0、173 文件 1812 项通过；`npm run build` → exit 0。默认并行首轮多个其他页面用例出现超时后被中止，原因未确定。
+- 远端 Delivery `45128452889` 的机会卡浏览器证明因仍查找已删除的“查看本页其他观察与不可比较项”按钮而失败；同步更新证明脚本，改为直接等待其他观察表格可见。复验结果以 PR 对应最新提交的 CI 为准。

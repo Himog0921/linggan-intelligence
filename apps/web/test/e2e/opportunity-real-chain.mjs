@@ -35,8 +35,8 @@ try {
     await page.goto(`${origin}/opportunity?domain=${domain}`, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: '机会首页', exact: true }).waitFor();
     await page.getByText('本页没有观察到上升的问题。').waitFor();
-    await page.getByText('查看本页其他观察与不可比较项').click();
     const table = page.getByRole('table', { name: '本页其他观察与不可比较项' });
+    await table.waitFor({ state: 'visible' });
     await table.getByRole('link', { name: 'synthetic P1' }).waitFor();
     for (const [name, expected] of [
       ['查看用户问题', `/corpus/comments?domain=${domain}&view=problems`],
