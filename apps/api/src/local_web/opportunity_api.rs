@@ -483,6 +483,32 @@ mod tests {
         assert_eq!(status, StatusCode::OK, "{result}");
         assert_eq!(result["items"].as_array().unwrap().len(), 1);
 
+        let comment_evidence = format!("{scoped}/evidence?kind=comments");
+        let mut unrelated_writer = db.pool().begin().await.unwrap();
+        sqlx::query("LOCK TABLE linggan_opportunity_creator_problem_density IN ROW EXCLUSIVE MODE")
+            .execute(&mut *unrelated_writer)
+            .await
+            .unwrap();
+        let (status, evidence) = call(app.clone(), "GET", &comment_evidence).await;
+        assert_eq!(status, StatusCode::OK, "{evidence}");
+        unrelated_writer.rollback().await.unwrap();
+
+        let mut writer = db.pool().begin().await.unwrap();
+        sqlx::query("LOCK TABLE linggan_material_comment_restriction IN ROW EXCLUSIVE MODE")
+            .execute(&mut *writer)
+            .await
+            .unwrap();
+        let (status, blocked) = call(app.clone(), "GET", &comment_evidence).await;
+        assert_eq!(status, StatusCode::SERVICE_UNAVAILABLE, "{blocked}");
+        assert_eq!(blocked["code"], "opportunity_card_sources_busy");
+        let ((status, evidence), _) =
+            tokio::join!(call(app.clone(), "GET", &comment_evidence), async {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                writer.rollback().await.unwrap();
+            });
+        assert_eq!(status, StatusCode::OK, "{evidence}");
+        assert_eq!(evidence["kind"], "comments");
+
         let historical = format!(
             "/api/local/opportunity/domains/{domain}/opportunities?period=2026-11-02&tier=significant&limit=1"
         );

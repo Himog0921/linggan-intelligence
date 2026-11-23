@@ -70,7 +70,8 @@ const SOURCE_TABLES: &[&str] = &[
     "observation_domain_target",
 ];
 
-/// Evidence reads never inspect model invocations; keep their writers out of the lock set.
+/// Evidence reads use stored cards and source voices. Card rebuild inputs that the
+/// reader never inspects should not serialize drill-down against background refreshes.
 pub(super) fn evidence_read_tables() -> Vec<&'static str> {
     SOURCE_TABLES
         .iter()
@@ -78,7 +79,9 @@ pub(super) fn evidence_read_tables() -> Vec<&'static str> {
         .filter(|table| {
             !matches!(
                 *table,
-                "linggan_model_invocation" | "linggan_opportunity_card_period_index"
+                "linggan_model_invocation"
+                    | "linggan_opportunity_card_period_index"
+                    | "linggan_opportunity_creator_problem_density"
             )
         })
         .collect()

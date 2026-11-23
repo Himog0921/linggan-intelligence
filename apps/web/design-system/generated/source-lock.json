@@ -1,5 +1,5 @@
 {
-  "fingerprint": "7f626e0d41d534feb9f008775e323814e0d01cafeb5090d30bbfdf685fa8d14d",
+  "fingerprint": "d857924bd69a51ecd0ba1ab5f0d73611a553c4659316ed1aa555261a80ccbaa8",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -323,7 +323,7 @@
     },
     {
       "path": "apps/web/src/pages/corpus/comments/CommentsView.tsx",
-      "sha256": "7f890d623c386ee0937cc22461291f25709a97f97dcee59cc23cd514b0870fcf"
+      "sha256": "ee830e4c2cc4d98babfe23c6d86225c0b678451bd4a247795ff9f5100969a824"
     },
     {
       "path": "apps/web/src/pages/corpus/comments/ObservationSeries.tsx",
