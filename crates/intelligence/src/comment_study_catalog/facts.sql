@@ -35,6 +35,10 @@ WITH observations AS MATERIALIZED (
     FROM observations
     ORDER BY content_public_ref, comment_external_id, parsed_observed_at DESC NULLS LAST,
              observations.created_at DESC, observations.material_ref DESC
+), work_authors AS MATERIALIZED (
+    SELECT work.content_public_ref, author.author_external_id
+    FROM (SELECT DISTINCT content_public_ref FROM latest) work
+    LEFT JOIN LATERAL linggan_material_content_author_at(work.content_public_ref, $2::timestamptz) author ON true
 ), history AS MATERIALIZED (
     SELECT request.request_ref, request.source_ref,
            CASE WHEN result.result IS NOT NULL THEN 'succeeded'
@@ -123,7 +127,7 @@ WITH observations AS MATERIALIZED (
     LEFT JOIN linggan_material_comment raw ON raw.material_ref = latest.material_ref
     LEFT JOIN linggan_comment_clean_cache cache
       ON cache.source_ref = latest.material_ref AND cache.cleaner_version = $3
-    LEFT JOIN LATERAL linggan_material_content_author_at(latest.content_public_ref, $2::timestamptz) author ON true
+    LEFT JOIN work_authors author ON author.content_public_ref = latest.content_public_ref
     LEFT JOIN last_attempt ON last_attempt.content_public_ref = latest.content_public_ref
       AND last_attempt.comment_external_id = latest.comment_external_id
     LEFT JOIN success ON success.content_public_ref = latest.content_public_ref

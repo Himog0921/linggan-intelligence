@@ -6,7 +6,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::{Postgres, Row, Transaction};
-use std::collections::{BTreeMap, BTreeSet};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    time::Duration,
+};
 use uuid::Uuid;
 
 // Each reader signs only the relations it actually reads (D-061).
@@ -870,6 +873,28 @@ pub async fn read_evidence_in_domain(
     read_evidence_scoped(database, requested, query, Some(domain)).await
 }
 
+/// A concurrent writer can outlast NOWAIT without making the source unavailable.
+async fn begin_evidence_snapshot<'a>(
+    database: &'a Database,
+    tables: &[&str],
+) -> Result<(Transaction<'a, Postgres>, String), OpportunityReadError> {
+    let mut delays = [50, 150, 350].into_iter();
+    loop {
+        let mut tx = begin(database).await?;
+        match snapshot::capture_for(&mut tx, tables).await {
+            Ok((captured, _)) => return Ok((tx, captured)),
+            Err(CardError::SourcesBusy) => {
+                tx.rollback().await?;
+                let Some(ms) = delays.next() else {
+                    return Err(CardError::SourcesBusy.into());
+                };
+                tokio::time::sleep(Duration::from_millis(ms)).await;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
 async fn read_evidence_scoped(
     database: &Database,
     requested: Uuid,
@@ -883,7 +908,6 @@ async fn read_evidence_scoped(
     }
     let scope = scope(scope_value)?;
     let prior = previous("opportunity-evidence", query.cursor.as_deref(), &scope)?;
-    let mut tx = begin(database).await?;
     let evidence_tables = snapshot::evidence_read_tables();
     // Creator evidence reads the stored card, but does not inspect pending changes.
     let creator_tables: Vec<_> = CARD_READ_TABLES
@@ -896,7 +920,7 @@ async fn read_evidence_scoped(
     } else {
         &evidence_tables
     };
-    let (captured, _) = snapshot::capture_for(&mut tx, tables).await?;
+    let (mut tx, captured) = begin_evidence_snapshot(database, tables).await?;
     snapshot::require_visible_restrictions(&mut tx).await?;
     let as_of = accepted_as_of(prior.as_ref(), captured)?;
     let problem = resolve(&mut tx, requested).await?;
