@@ -117,7 +117,7 @@ fn anonymous_path(method: &Method, path: &str) -> bool {
             ))
 }
 
-/// The public member surface is limited to the three Operations ledgers and account security.
+/// The public member surface includes the Operations ledgers, writing, and account security.
 /// Other Intelligence areas remain available to the administrator only.
 fn member_path(method: &Method, path: &str) -> bool {
     (method == Method::GET
@@ -127,6 +127,7 @@ fn member_path(method: &Method, path: &str) -> bool {
                 | "/ops/publications"
                 | "/ops/accounts"
                 | "/ops/daily"
+                | "/ops/creation"
                 | "/settings/account"
                 | "/api/local/auth/session"
                 | "/api/local/ops/businesses"
@@ -140,6 +141,7 @@ fn member_path(method: &Method, path: &str) -> bool {
         || (method == Method::GET && path.starts_with("/ops/covers/"))
         || (method == Method::POST && path == "/api/local/auth/password/change")
         || (method == Method::POST && path.starts_with("/api/local/ops/native/"))
+        || super::creation_members::public_member_path(method, path)
 }
 
 pub(super) async fn guard(

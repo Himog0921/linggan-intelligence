@@ -129,7 +129,7 @@ async fn content_workbench_http_withdrawal_reset_requires_discard() {
     assets::withdraw_experience(&db, id, Uuid::new_v4())
         .await
         .unwrap();
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let uri = format!("/ops/api/creation/works/{}", work.work_id);
     let (_, read) = call(app.clone(), &uri, None).await;
     let mut edited = read["revision"]["document"].clone();
@@ -166,7 +166,7 @@ async fn content_workbench_http_withdrawal_reset_requires_discard() {
 #[ignore = "isolated PostgreSQL proof; no shared database"]
 async fn content_workbench_http_routes_save_conflict_history_and_guard() {
     let db = proof("creation_http").await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let domain = dossier::DOMAIN;
     let request =
         json!({"requestId":Uuid::new_v4(),"domainRef":domain,"document":WorkDocument::default()});
@@ -271,7 +271,7 @@ async fn content_workbench_http_routes_save_conflict_history_and_guard() {
 #[ignore = "isolated PostgreSQL proof; no shared database"]
 async fn content_workbench_http_denies_unknown_fields_and_nonexistent_domain() {
     let db = proof("creation_http_contract").await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let document = WorkDocument::default();
     let request =
         json!({"requestId":Uuid::new_v4(),"domainRef":Uuid::new_v4(),"document":document});
@@ -286,7 +286,7 @@ async fn content_workbench_http_denies_unknown_fields_and_nonexistent_domain() {
 #[ignore = "isolated PostgreSQL proof; no shared database"]
 async fn content_workbench_http_idea_box_and_title_candidates_round_trip() {
     let db = proof("creation_http_idea_box").await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let idea = Uuid::new_v4();
     let mut anchor = WorkDocument::default();
     anchor.title = "独立的笔记标题".into();
@@ -354,7 +354,7 @@ async fn content_workbench_http_qualifies_new_page_source_and_rejects_withdrawal
     let command = json!({"domainRef":dossier::DOMAIN,"asOf":citation.as_of,"blockRef":citation.block_ref,
         "sourceKind":citation.source_kind,"sourceRef":citation.source_ref,"workRef":citation.work_ref,
         "field":citation.field,"sourceVersion":citation.source_version,"start":citation.start,"end":citation.end});
-    let app = app_with_database(db.clone());
+    let app = super::creation_members_tests::admin_app(db.clone()).await;
     let (status, answer) = call(
         app.clone(),
         "/ops/api/creation/sources/validate",
@@ -372,7 +372,7 @@ async fn content_workbench_http_qualifies_new_page_source_and_rejects_withdrawal
 #[ignore = "isolated PostgreSQL proof; no shared database"]
 async fn content_workbench_http_desk_positions_round_trip() {
     let db = proof("creation_http_desk_positions").await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let mut document = WorkDocument::default();
     document.title = "桌面上的稿件".into();
     let (status, created) = call(
@@ -453,7 +453,7 @@ async fn content_workbench_http_desk_positions_round_trip() {
 #[ignore = "isolated PostgreSQL proof; no shared database"]
 async fn content_workbench_http_desk_card_positions_round_trip() {
     let db = proof("creation_http_desk_card_positions").await;
-    let app = app_with_database(db);
+    let app = super::creation_members_tests::admin_app(db).await;
     let mut document = WorkDocument::default();
     document.title = "桌面上的稿件".into();
     let (status, created) = call(

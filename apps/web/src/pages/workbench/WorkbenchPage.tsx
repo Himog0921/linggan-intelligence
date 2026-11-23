@@ -17,6 +17,7 @@ import { CanvasBoard } from './CanvasBoard';
 import { RevisionCompare } from './RevisionCompare';
 import { TopicLibrary } from './TopicLibrary';
 import { CheckPanel } from './assets/CheckPanel';
+import { CreationPublicationButton } from './CreationPublicationButton';
 import { PublicationLinker, type PublicationPending } from './assets/PublicationLinker';
 import { SaveStructuralTemplate } from './assets/SaveStructuralTemplate';
 import { listTemplates, type CreateCommand as TemplateCreateCommand } from './assets/structuralTemplatesApi';
@@ -1213,7 +1214,14 @@ function WorkEditor({
   </>;
   const studioColumns = view === 'body' && !(aiComparison && ai?.suggestion) && !(compareVisible && compareBase && document.experienceGaps.length === 0);
   const footerVisible = (view === 'body' && !sourceInvalidated && !resetRequired && recheckStatus === 'ready') || templatePending || publicationPending;
-  const footerBody = <><div ref={setCopyContainer} className={styles.footerCopyMount} hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || editingLocked} /><SaveStructuralTemplate workId={initial.workId} domainRef={initial.domainRef} pending={templatePending} onPending={value => { setTemplatePending(value); onTemplatePending(initial.workId, value !== null); }} blocked={templateBlocked && templatePending !== null} onResetBlock={onResetTemplateBlock} saveCurrent={saveBeforeCopy} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} /><PublicationLinker workId={initial.workId} domainRef={initial.domainRef} pending={publicationPending} onPending={value => { setPublicationPending(value); onPublicationPending(initial.workId, value !== null); }} blocked={templateBlocked && publicationPending !== null} onResetBlock={onResetTemplateBlock} saveCurrent={saveBeforeCopy} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} /><ActionButton variant="quiet" disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} onClick={() => onView('cover')}>制作封面 →</ActionButton></>;
+  const publicationDisabled = editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready';
+  async function saveForPublication() {
+    const saved = await saveBeforeCopy();
+    const account = accounts.data?.find(item => item.ref === saved.document.accountRef && item.platform === 'xhs');
+    return { revisionId: saved.id, title: saved.document.title, account: account ? { ...account, platform: 'xhs' as const } : null };
+  }
+  const footerBody = <><div ref={setCopyContainer} className={styles.footerCopyMount} hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || editingLocked} /><SaveStructuralTemplate workId={initial.workId} domainRef={initial.domainRef} pending={templatePending} onPending={value => { setTemplatePending(value); onTemplatePending(initial.workId, value !== null); }} blocked={templateBlocked && templatePending !== null} onResetBlock={onResetTemplateBlock} saveCurrent={saveBeforeCopy} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} /><CreationPublicationButton workId={initial.workId} domainRef={initial.domainRef} disabled={publicationDisabled} saveCurrent={saveForPublication}
+    onRegistered={() => { void queryClient.invalidateQueries({ queryKey: ['creation-works', initial.domainRef] }); }} /><PublicationLinker workId={initial.workId} domainRef={initial.domainRef} pending={publicationPending} onPending={value => { setPublicationPending(value); onPublicationPending(initial.workId, value !== null); }} blocked={templateBlocked && publicationPending !== null} onResetBlock={onResetTemplateBlock} saveCurrent={saveBeforeCopy} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} /><ActionButton variant="quiet" disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} onClick={() => onView('cover')}>制作封面 →</ActionButton></>;
   const studioSurfaceReady = !sourceInvalidated && !resetRequired && recheckStatus === 'ready';
   const footerInColumns = footerVisible && studioColumns && studioSurfaceReady ? <div className="ed-foot">{footerBody}</div> : null;
   const footerOutside = footerVisible && !(studioColumns && studioSurfaceReady) ? <div className="gm-studio studio-foot-scope"><div className="ed-foot">{footerBody}</div></div> : null;

@@ -63,7 +63,7 @@ export function OpsFrame({
       href: '/ops/' + (restricted ? 'publications' : 'overview') + selectedDomain,
       children: dataPages,
     },
-    ...(!restricted ? [{
+    {
       id: 'creation',
       label: '创作',
       index: '02',
@@ -86,7 +86,7 @@ export function OpsFrame({
           onSelect: onCreationPageSelect ? () => onCreationPageSelect('works') : undefined,
         },
       ],
-    }] : []),
+    },
     ...(!restricted && manageTeam ? [{
       id: 'team-permissions',
       label: '团队与权限',

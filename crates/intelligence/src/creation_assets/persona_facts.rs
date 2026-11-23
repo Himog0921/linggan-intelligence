@@ -124,14 +124,22 @@ pub async fn list_persona_facts(
     account: Uuid,
 ) -> Result<Vec<PersonaFact>, AssetsError> {
     let mut tx = db.pool().begin().await?;
-    lock(&mut tx, "experience-gate").await?;
+    let items = list_persona_facts_in(&mut tx, account).await?;
+    tx.commit().await?;
+    Ok(items)
+}
+
+pub async fn list_persona_facts_in(
+    tx: &mut Transaction<'_, Postgres>,
+    account: Uuid,
+) -> Result<Vec<PersonaFact>, AssetsError> {
+    lock(tx, "experience-gate").await?;
     let ids: Vec<Uuid> = sqlx::query_scalar("SELECT fact_ref FROM linggan_creation_persona_fact WHERE account_ref=$1 ORDER BY created_at DESC,fact_ref LIMIT 200")
-        .bind(account).fetch_all(&mut *tx).await?;
+        .bind(account).fetch_all(&mut **tx).await?;
     let mut items = Vec::with_capacity(ids.len());
     for id in ids {
-        items.push(snapshot(&mut tx, id).await?);
+        items.push(snapshot(tx, id).await?);
     }
-    tx.commit().await?;
     Ok(items)
 }
 
@@ -166,6 +174,17 @@ pub async fn put_persona_fact(
     db: &Database,
     cmd: &PersonaFactPut,
 ) -> Result<PersonaFactReceipt, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    let result = put_persona_fact_in(&mut tx, cmd, None).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub async fn put_persona_fact_in(
+    tx: &mut Transaction<'_, Postgres>,
+    cmd: &PersonaFactPut,
+    member: Option<Uuid>,
+) -> Result<PersonaFactReceipt, AssetsError> {
     let key = cmd.key.trim();
     let text = cmd.text.trim();
     if key.is_empty()
@@ -195,14 +214,12 @@ pub async fn put_persona_fact(
             &cmd.conflict_decision,
         ),
     )?;
-    let mut tx = db.pool().begin().await?;
-    if let Some(receipt) = previous(&mut tx, cmd.request_id, "put", &hash).await? {
-        tx.commit().await?;
+    if let Some(receipt) = previous(tx, cmd.request_id, "put", &hash).await? {
         return Ok(receipt);
     }
-    lock(&mut tx, "experience-gate").await?;
-    lock(&mut tx, &format!("identity:{}", cmd.account_ref)).await?;
-    let identity = super::identity::latest_in(&mut tx, cmd.account_ref).await?;
+    lock(tx, "experience-gate").await?;
+    lock(tx, &format!("identity:{}", cmd.account_ref)).await?;
+    let identity = super::identity::latest_in(tx, cmd.account_ref).await?;
     if identity.is_none_or(|value| value.has_real_person != Some(true)) {
         return Err(AssetsError::Invalid("account_has_no_confirmed_person"));
     }
@@ -210,14 +227,14 @@ pub async fn put_persona_fact(
         "SELECT subject_ref FROM linggan_creation_account_person WHERE account_ref=$1",
     )
     .bind(cmd.account_ref)
-    .fetch_optional(&mut *tx)
+    .fetch_optional(&mut **tx)
     .await?
     .ok_or(AssetsError::Invalid("person_unavailable"))?;
     if subject != cmd.expected_person_ref {
         return Err(AssetsError::Stale);
     }
     let existing: Option<Uuid> = sqlx::query_scalar("SELECT fact_ref FROM linggan_creation_persona_fact WHERE subject_ref=$1 AND fact_key=$2 AND state='active'")
-        .bind(subject).bind(key).fetch_optional(&mut *tx).await?;
+        .bind(subject).bind(key).fetch_optional(&mut **tx).await?;
     let status = if text.is_empty() {
         "missing"
     } else if cmd.source == "inferred" {
@@ -226,13 +243,12 @@ pub async fn put_persona_fact(
         "new"
     };
     let id = if let Some(id) = existing {
-        let old = snapshot(&mut tx, id).await?;
+        let old = snapshot(tx, id).await?;
         if old.version != cmd.expected_version {
             return Err(AssetsError::Stale);
         }
         if old.text.as_deref() == Some(text) && old.source.as_deref() == Some(&cmd.source) {
-            record(&mut tx, cmd.request_id, "put", &hash, &old).await?;
-            tx.commit().await?;
+            record(tx, cmd.request_id, "put", &hash, &old).await?;
             return Ok(PersonaFactReceipt {
                 result_version: old.version,
                 fact: old,
@@ -251,24 +267,23 @@ pub async fn put_persona_fact(
             .ok_or(AssetsError::Invalid("persona_version"))?;
         let applied = cmd.conflict_decision.as_deref() != Some("keep_old");
         sqlx::query("INSERT INTO linggan_creation_persona_fact_revision(fact_ref,revision,text,source,status,applied) VALUES($1,$2,$3,$4,$5,$6)")
-            .bind(id).bind(revision).bind(text).bind(&cmd.source).bind(status).bind(applied).execute(&mut *tx).await?;
+            .bind(id).bind(revision).bind(text).bind(&cmd.source).bind(status).bind(applied).execute(&mut **tx).await?;
         sqlx::query("UPDATE linggan_creation_persona_fact SET version=$2,current_revision=CASE WHEN $3 THEN $2 ELSE current_revision END WHERE fact_ref=$1")
-            .bind(id).bind(revision).bind(applied).execute(&mut *tx).await?;
+            .bind(id).bind(revision).bind(applied).execute(&mut **tx).await?;
         id
     } else {
         if cmd.expected_version != 0 {
             return Err(AssetsError::Stale);
         }
         let id = Uuid::new_v4();
-        sqlx::query("INSERT INTO linggan_creation_persona_fact(fact_ref,account_ref,subject_ref,fact_key,version,current_revision,state) VALUES($1,$2,$3,$4,1,1,'active')")
-            .bind(id).bind(cmd.account_ref).bind(subject).bind(key).execute(&mut *tx).await?;
+        sqlx::query("INSERT INTO linggan_creation_persona_fact(fact_ref,account_ref,subject_ref,fact_key,version,current_revision,state,created_by_member_ref) VALUES($1,$2,$3,$4,1,1,'active',$5)")
+            .bind(id).bind(cmd.account_ref).bind(subject).bind(key).bind(member).execute(&mut **tx).await?;
         sqlx::query("INSERT INTO linggan_creation_persona_fact_revision(fact_ref,revision,text,source,status,applied) VALUES($1,1,$2,$3,$4,true)")
-            .bind(id).bind(text).bind(&cmd.source).bind(status).execute(&mut *tx).await?;
+            .bind(id).bind(text).bind(&cmd.source).bind(status).execute(&mut **tx).await?;
         id
     };
-    let fact = snapshot(&mut tx, id).await?;
-    record(&mut tx, cmd.request_id, "put", &hash, &fact).await?;
-    tx.commit().await?;
+    let fact = snapshot(tx, id).await?;
+    record(tx, cmd.request_id, "put", &hash, &fact).await?;
     Ok(PersonaFactReceipt {
         result_version: fact.version,
         fact,

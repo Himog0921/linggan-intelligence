@@ -27,6 +27,184 @@ use uuid::Uuid;
 #[path = "../../../../crates/intelligence/tests/support/ops_export_fixture.rs"]
 mod ops_export;
 
+#[tokio::test]
+#[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
+async fn draft_registration_is_atomic_and_later_views_use_the_same_record() {
+    use linggan_intelligence::content_workbench::{CreateRequest, WorkDocument, create_work_as_in};
+
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let schema = format!("ops_draft_link_{}", Uuid::new_v4().simple());
+    let database = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        &schema,
+        full_schema_fixture::FULL_MIGRATIONS,
+    )
+    .await
+    .unwrap();
+    let domain = Uuid::new_v4();
+    sqlx::query("INSERT INTO observation_domain (domain_ref,name) VALUES($1,'合成登记领域')")
+        .bind(domain)
+        .execute(database.pool())
+        .await
+        .unwrap();
+    let writer = member(
+        database.pool(),
+        "draft-writer@example.test",
+        "合成写手",
+        "operator",
+    )
+    .await;
+    let other = member(
+        database.pool(),
+        "draft-other@example.test",
+        "另一写手",
+        "operator",
+    )
+    .await;
+    let cookie = session(database.pool(), writer).await;
+    let app = app_with_database(database.clone());
+    let (status, account) = post(app.clone(), "/api/local/ops/native/accounts", Some(&cookie), json!({
+        "requestId": Uuid::new_v4(), "domainRef": domain, "platform": "xhs", "accountName": "合成发布账号"
+    })).await;
+    assert_eq!(status, StatusCode::CREATED, "{account}");
+    let account = uuid(&account["receipt"]["recordRef"]);
+    let mut tx = database.pool().begin().await.unwrap();
+    let mut drafts = Vec::new();
+    for owner in [writer, other] {
+        drafts.push(
+            create_work_as_in(
+                &mut tx,
+                &CreateRequest {
+                    request_id: Uuid::new_v4(),
+                    domain_ref: domain,
+                    document: WorkDocument {
+                        account_ref: Some(account),
+                        title: "合成发布稿".into(),
+                        ..Default::default()
+                    },
+                },
+                Some(owner),
+            )
+            .await
+            .unwrap(),
+        );
+    }
+    tx.commit().await.unwrap();
+    let draft = &drafts[0];
+    let path = "/api/local/ops/native/publications";
+    let body = |work, revision| {
+        json!({
+            "requestId": Uuid::new_v4(), "accountRef": account,
+            "publicationUrl": "https://www.xiaohongshu.com/explore/65a1b2c3d4e5f60718293a91",
+            "publishedOn": "2026-10-20", "title": "合成发布稿",
+            "creation": { "workId": work, "expectedRevision": revision }
+        })
+    };
+    for (work, revision, expected) in [
+        (
+            drafts[1].work_id,
+            drafts[1].revision.id,
+            StatusCode::NOT_FOUND,
+        ),
+        (draft.work_id, Uuid::new_v4(), StatusCode::CONFLICT),
+    ] {
+        assert_eq!(
+            post(app.clone(), path, Some(&cookie), body(work, revision))
+                .await
+                .0,
+            expected
+        );
+    }
+    let conflicting = body(draft.work_id, draft.revision.id);
+    let conflicting_id = uuid(&conflicting["requestId"]);
+    sqlx::query(
+        "INSERT INTO linggan_creation_assets_request(request_ref,kind,command_sha256) \
+         VALUES($1,'publication_unlink',repeat('a',64))",
+    )
+    .bind(conflicting_id)
+    .execute(database.pool())
+    .await
+    .unwrap();
+    let (status, rollback) = post(app.clone(), path, Some(&cookie), conflicting).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{rollback}");
+    assert_eq!(rollback["code"], "ops_native_request_conflict");
+    let rolled_back: (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM linggan_ops_publication), \
+                (SELECT count(*) FROM linggan_ops_native_write_request WHERE request_ref=$1)",
+    )
+    .bind(conflicting_id)
+    .fetch_one(database.pool())
+    .await
+    .unwrap();
+    assert_eq!(rolled_back, (0, 0));
+
+    let request = body(draft.work_id, draft.revision.id);
+    let (status, result) = post(app.clone(), path, Some(&cookie), request.clone()).await;
+    assert_eq!(status, StatusCode::CREATED, "{result}");
+    let publication = uuid(&result["receipt"]["recordRef"]);
+    let (status, replayed) = post(app.clone(), path, Some(&cookie), request).await;
+    assert_eq!(status, StatusCode::OK, "{replayed}");
+    assert_eq!(replayed["receipt"]["replayed"], true);
+    assert_eq!(uuid(&replayed["receipt"]["recordRef"]), publication);
+    let (status, duplicate) = post(
+        app.clone(),
+        path,
+        Some(&cookie),
+        body(draft.work_id, draft.revision.id),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{duplicate}");
+    assert_eq!(duplicate["receipt"]["outcome"], "unchanged");
+    assert_eq!(uuid(&duplicate["receipt"]["recordRef"]), publication);
+
+    let list = format!("/api/local/ops/publications?domain={domain}&publication_ref={publication}");
+    let (status, pending) = get(app.clone(), &list, Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK, "{pending}");
+    assert_eq!(pending["total"], 1);
+    assert_eq!(pending["items"][0]["views"]["state"], "pending");
+    assert_eq!(
+        uuid(&pending["items"][0]["creation"]["workId"]),
+        draft.work_id
+    );
+    assert_eq!(
+        uuid(&pending["items"][0]["creation"]["revisionId"]),
+        draft.revision.id
+    );
+
+    let view = format!("/api/local/ops/native/publications/{publication}/view-reports");
+    assert_eq!(
+        post(
+            app.clone(),
+            &view,
+            Some(&cookie),
+            json!({
+                "requestId": Uuid::new_v4(), "reportKind": "value", "viewCount": 1234,
+                "asOf": "2026-10-23T08:00:00+08:00"
+            })
+        )
+        .await
+        .0,
+        StatusCode::CREATED
+    );
+    let (status, filled) = get(app, &list, Some(&cookie)).await;
+    assert_eq!(status, StatusCode::OK, "{filled}");
+    assert_eq!(uuid(&filled["items"][0]["ref"]), publication);
+    assert_eq!(filled["items"][0]["views"]["value"], 1234);
+
+    let (saved_work, saved_revision, link_actor): (Uuid, Uuid, Uuid) = sqlx::query_as(
+        "SELECT work_ref, revision_ref, linked_by_member_ref FROM linggan_creation_publication_link WHERE publication_ref=$1"
+    ).bind(publication).fetch_one(database.pool()).await.unwrap();
+    assert_eq!(
+        (saved_work, saved_revision, link_actor),
+        (draft.work_id, draft.revision.id, writer)
+    );
+    let publication_count: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ops_publication")
+        .fetch_one(database.pool())
+        .await
+        .unwrap();
+    assert_eq!(publication_count, 1);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
 async fn operator_reads_own_records_and_lead_reads_only_current_group() {

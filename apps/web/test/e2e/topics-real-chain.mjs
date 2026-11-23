@@ -24,6 +24,14 @@ const context = await browser.newContext({
   reducedMotion: "reduce",
   acceptDownloads: true,
 });
+const sessionCookie = process.env.TOPIC_BROWSER_SESSION_COOKIE?.split(";")[0];
+assert.ok(sessionCookie?.startsWith("linggan_ops_session="), "isolated team session required");
+await context.addCookies([{
+  name: "linggan_ops_session",
+  value: sessionCookie.slice("linggan_ops_session=".length),
+  url: origin,
+  httpOnly: true,
+}]);
 const commandPaths = new Set([
   "/api/local/topic-map/commands",
   "/api/local/topic-map/alternatives/handoff",

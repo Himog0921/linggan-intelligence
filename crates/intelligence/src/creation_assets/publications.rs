@@ -1,4 +1,4 @@
-//! Explicit links to existing Operations publication records. No platform publication occurs here.
+//! Associates saved drafts with Operations publication records.
 use super::{
     AssetsError,
     requests::{Claim, claim, command_hash, lock},
@@ -24,7 +24,7 @@ async fn eligible_in(
     account: Uuid,
     domain: Uuid,
 ) -> Result<bool, AssetsError> {
-    let account_ok: Option<Uuid> = sqlx::query_scalar("SELECT account_ref FROM linggan_ops_account WHERE account_ref=$1 AND domain_ref=$2 AND ledger_state='in_ledger' AND platform='xhs' FOR SHARE")
+    let account_ok: Option<Uuid> = sqlx::query_scalar("SELECT account_ref FROM linggan_ops_account WHERE account_ref=$1 AND domain_ref=$2 AND ledger_state IN ('in_ledger','native_active') AND platform='xhs' FOR SHARE")
         .bind(account).bind(domain).fetch_optional(&mut **tx).await?;
     if account_ok.is_none() {
         return Ok(false);
@@ -42,7 +42,7 @@ pub async fn publication_candidates(
     let Some(account) = envelope.revision.document.account_ref else {
         return Ok(vec![]);
     };
-    let rows = sqlx::query("SELECT p.publication_ref,p.title,COALESCE(p.native_published_on,p.published_business_date)::text AS published_on,p.publication_url FROM linggan_ops_publication p JOIN linggan_ops_account a ON a.account_ref=p.account_ref WHERE p.account_ref=$1 AND a.domain_ref=$2 AND a.ledger_state='in_ledger' AND a.platform='xhs' AND p.platform='xhs' AND p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL AND (p.source_system<>'linggan_native' OR p.native_record_state='active') AND NOT EXISTS (SELECT 1 FROM linggan_creation_publication_link l WHERE l.publication_ref=p.publication_ref AND NOT EXISTS (SELECT 1 FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref)) ORDER BY COALESCE(p.native_published_on,p.published_business_date) DESC NULLS LAST,p.publication_ref LIMIT 100")
+    let rows = sqlx::query("SELECT p.publication_ref,p.title,COALESCE(p.native_published_on,p.published_business_date)::text AS published_on,p.publication_url FROM linggan_ops_publication p JOIN linggan_ops_account a ON a.account_ref=p.account_ref WHERE p.account_ref=$1 AND a.domain_ref=$2 AND a.ledger_state IN ('in_ledger','native_active') AND a.platform='xhs' AND p.platform='xhs' AND p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL AND (p.source_system<>'linggan_native' OR p.native_record_state='active') AND NOT EXISTS (SELECT 1 FROM linggan_creation_publication_link l WHERE l.publication_ref=p.publication_ref AND NOT EXISTS (SELECT 1 FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref)) ORDER BY COALESCE(p.native_published_on,p.published_business_date) DESC NULLS LAST,p.publication_ref LIMIT 100")
         .bind(account).bind(envelope.domain_ref).fetch_all(db.pool()).await?;
     rows.iter()
         .map(|row| {
@@ -127,14 +127,113 @@ pub async fn link_publication(
     })
 }
 
+/// Serializes native registration with edits and validates the author's saved account.
+pub async fn lock_native_publication_draft(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    expected_revision: Uuid,
+    owner: Option<Uuid>,
+    account: Uuid,
+    domain: Uuid,
+) -> Result<(), AssetsError> {
+    workbench::work_lock(tx, work.to_string())
+        .await
+        .map_err(work_error)?;
+    let (revision, assigned_account): (Uuid, Option<Uuid>) = sqlx::query_as(
+        "SELECT r.revision_ref, (r.document->>'accountRef')::uuid \
+         FROM linggan_creation_work w \
+         JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref \
+         WHERE w.work_ref=$1 AND w.domain_ref=$2 \
+           AND ($3::uuid IS NULL OR w.created_by_member_ref=$3)",
+    )
+    .bind(work)
+    .bind(domain)
+    .bind(owner)
+    .fetch_optional(&mut **tx)
+    .await?
+    .ok_or(AssetsError::NotFound)?;
+    if revision != expected_revision {
+        return Err(AssetsError::Stale);
+    }
+    if assigned_account != Some(account) {
+        return Err(AssetsError::Invalid("account"));
+    }
+    Ok(())
+}
+
+/// An active association from this draft already records the same account and canonical URL.
+pub async fn existing_native_publication_in(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    account: Uuid,
+    canonical_url: &str,
+) -> Result<Option<(Uuid, i64)>, AssetsError> {
+    Ok(sqlx::query_as(
+        "SELECT p.publication_ref, p.native_version FROM linggan_creation_publication_link l \
+         JOIN linggan_ops_publication p ON p.publication_ref=l.publication_ref \
+         WHERE l.work_ref=$1 AND p.account_ref=$2 AND p.canonical_url=$3 \
+           AND p.source_system='linggan_native' AND p.native_record_state='active' \
+           AND NOT EXISTS (SELECT 1 FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref) \
+         ORDER BY l.linked_at, l.link_ref LIMIT 1",
+    )
+    .bind(work)
+    .bind(account)
+    .bind(canonical_url)
+    .fetch_optional(&mut **tx)
+    .await?)
+}
+
+/// Writes the existing immutable association in the same transaction as the native record.
+pub async fn link_native_publication_in(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    cmd: &PublicationLinkCommand,
+    actor: Uuid,
+) -> Result<(), AssetsError> {
+    let sha = command_hash(
+        "publication_link",
+        &(work, cmd.expected_revision, cmd.publication_ref),
+    )?;
+    if !matches!(
+        claim(tx, cmd.request_id, "publication_link", &sha).await?,
+        Claim::Fresh
+    ) {
+        return Err(AssetsError::RequestConflict);
+    }
+    sqlx::query(
+        "INSERT INTO linggan_creation_publication_link \
+         (link_ref,request_ref,work_ref,revision_ref,publication_ref,linked_by,linked_by_member_ref) \
+         VALUES ($1,$2,$3,$4,$5,'member',$6)",
+    )
+    .bind(Uuid::new_v4())
+    .bind(cmd.request_id)
+    .bind(work)
+    .bind(cmd.expected_revision)
+    .bind(cmd.publication_ref)
+    .bind(actor)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
 /// Active links, including records whose Operations qualification later changed.
 pub async fn publication_links(
     db: &Database,
     work: Uuid,
 ) -> Result<Vec<PublicationLinkView>, AssetsError> {
     let _ = workbench::read_work(db, work).await.map_err(work_error)?;
-    let rows = sqlx::query("SELECT l.link_ref,l.revision_ref,l.publication_ref,p.title,COALESCE(p.native_published_on,p.published_business_date)::text AS published_on,COALESCE((p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL AND (p.source_system<>'linggan_native' OR p.native_record_state='active') AND p.platform='xhs' AND p.account_ref::text=r.document->>'accountRef' AND a.domain_ref=w.domain_ref AND a.ledger_state='in_ledger' AND a.platform='xhs'),false) AS available FROM linggan_creation_publication_link l JOIN linggan_ops_publication p ON p.publication_ref=l.publication_ref JOIN linggan_creation_revision r ON r.revision_ref=l.revision_ref JOIN linggan_creation_work w ON w.work_ref=l.work_ref LEFT JOIN linggan_ops_account a ON a.account_ref=p.account_ref WHERE l.work_ref=$1 AND NOT EXISTS(SELECT 1 FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref) ORDER BY l.linked_at DESC,l.link_ref DESC")
-        .bind(work).fetch_all(db.pool()).await?;
+    let mut tx = db.pool().begin().await?;
+    let links = publication_links_in(&mut tx, work).await?;
+    tx.commit().await?;
+    Ok(links)
+}
+
+pub async fn publication_links_in(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+) -> Result<Vec<PublicationLinkView>, AssetsError> {
+    let rows = sqlx::query("SELECT l.link_ref,l.revision_ref,l.publication_ref,p.title,COALESCE(p.native_published_on,p.published_business_date)::text AS published_on,COALESCE((p.merged_into_ref IS NULL AND p.missing_since_batch_ref IS NULL AND (p.source_system<>'linggan_native' OR p.native_record_state='active') AND p.platform='xhs' AND p.account_ref::text=r.document->>'accountRef' AND a.domain_ref=w.domain_ref AND a.ledger_state IN ('in_ledger','native_active') AND a.platform='xhs'),false) AS available FROM linggan_creation_publication_link l JOIN linggan_ops_publication p ON p.publication_ref=l.publication_ref JOIN linggan_creation_revision r ON r.revision_ref=l.revision_ref JOIN linggan_creation_work w ON w.work_ref=l.work_ref LEFT JOIN linggan_ops_account a ON a.account_ref=p.account_ref WHERE l.work_ref=$1 AND NOT EXISTS(SELECT 1 FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref) ORDER BY l.linked_at DESC,l.link_ref DESC")
+        .bind(work).fetch_all(&mut **tx).await?;
     rows.iter()
         .map(|row| {
             Ok(PublicationLinkView {
