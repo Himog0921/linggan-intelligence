@@ -39,12 +39,38 @@ function setup(search: string, custom?: (url: URL) => Response | Promise<Respons
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } });
   const router = createMemoryRouter([{ path: '/opportunity', element: <OpportunityPage /> }], { initialEntries: [`/opportunity?${search}`] });
   const view = render(<QueryClientProvider client={client}><OpportunityStatusContext.Provider value={{ state: 'enabled', retry: () => {} }}><RouterProvider router={router} /></OpportunityStatusContext.Provider></QueryClientProvider>);
-  return { ...view, client, calls };
+  return { ...view, client, calls, router };
 }
 
 afterEach(() => vi.unstubAllGlobals());
 
 describe('机会卡页面', () => {
+  it('未指定领域时选择实际可用的 ADHD 领域并保留其他参数', async () => {
+    const { router, calls } = setup(`problem=${PROBLEM}`, url => {
+      if (url.pathname !== '/api/local/corpus/shell') return undefined;
+      return reply({ domains: [{ domainRef: DOMAIN, name: 'ADHD', status: 'active', targetCount: 2, sampleCount: 3 }], selectedDomain: url.searchParams.get('domain'), collectionState: '观察中' });
+    });
+    await screen.findByRole('heading', { name: '合成的用户问题' });
+    expect(router.state.location.search).toContain(`domain=${DOMAIN}`);
+    expect(router.state.location.search).toContain(`problem=${PROBLEM}`);
+    expect(calls.some(url => url.pathname.endsWith('/card') && url.pathname.includes(DOMAIN))).toBe(true);
+  });
+  it('保留明确指定的其他领域', async () => {
+    const other = '00000000-0000-4000-8000-000000000002';
+    const { router, calls } = setup(`domain=${other}`, url => {
+      if (url.pathname === '/api/local/corpus/shell') return reply({ domains: [{ domainRef: DOMAIN, name: 'ADHD', status: 'active', targetCount: 2, sampleCount: 3 }, { domainRef: other, name: '其他领域', status: 'active', targetCount: 0, sampleCount: 0 }], selectedDomain: other, collectionState: '观察中' });
+      if (url.pathname.endsWith('/opportunities')) return reply({ domainRef: other, items: [], weeklyComparisons: [], page: { nextCursor: null, hasMore: false, asOf: fixture().asOf } });
+      return undefined;
+    });
+    expect(await screen.findByText('当前领域尚无可读取的机会卡。')).toBeVisible();
+    expect(router.state.location.search).toBe(`?domain=${other}`);
+    expect(calls.some(url => url.pathname.includes(`/domains/${other}/opportunities`))).toBe(true);
+  });
+  it('没有唯一的 ADHD 领域时要求选择，不猜测领域', async () => {
+    const { router } = setup('', url => url.pathname === '/api/local/corpus/shell' ? reply({ domains: [{ domainRef: DOMAIN, name: '其他领域', status: 'active', targetCount: 0, sampleCount: 0 }], selectedDomain: null, collectionState: '状态未知' }) : undefined);
+    expect(await screen.findByText('请先在页头选择观察领域。')).toBeVisible();
+    expect(new URLSearchParams(router.state.location.search).has('domain')).toBe(false);
+  });
   it('显示服务端返回的读模型过期提示', async () => {
     setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => {
       if (!url.pathname.endsWith('/card')) return undefined;
@@ -67,6 +93,42 @@ describe('机会卡页面', () => {
     expect(screen.getByRole('link', { name: /查看创作者/ })).toHaveAttribute('href', `/corpus/creators?domain=${DOMAIN}`);
     expect(screen.getByText(/提及人数反映讨论热度/)).toBeVisible();
     expect(calls.find(url => url.pathname.endsWith('/opportunities'))?.searchParams.get('includeWeeklyComparison')).toBe('true');
+  });
+  it('没有上升项时直接展示已有问题和不可比较原因', async () => {
+    setup(`domain=${DOMAIN}`, url => {
+      if (!url.pathname.endsWith('/opportunities')) return undefined;
+      const card = fixture();
+      return reply({ domainRef: DOMAIN, items: [card], weeklyComparisons: [{ problemId: PROBLEM, groups: [{ protocolVersion: 1, currentPeriodStart: '2026-11-09', previousPeriodStart: '2026-11-02', currentRatePer1k: null, previousRatePer1k: null, status: 'incomparable', reason: 'current_unavailable' }] }], page: { nextCursor: null, hasMore: false, asOf: card.asOf } });
+    });
+    expect(await screen.findByText('本页没有观察到上升的问题。')).toBeVisible();
+    expect(screen.getByText('本页 1 个问题；同一问题按采集协议分别展示。')).toBeVisible();
+    const table = screen.getByRole('table', { name: '本页其他观察与不可比较项' });
+    expect(within(table).getByRole('link', { name: '合成的用户问题' })).toBeVisible();
+    expect(table).toHaveTextContent('不可比较：本周提及率未知');
+  });
+  it('作者列表只预览前五项，展开与收起不改变组内顺序', async () => {
+    setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => {
+      if (!url.pathname.endsWith('/card')) return undefined;
+      const card = fixture();
+      const template = card.channel.groups[0].ranked[0];
+      card.channel.groups[0].ranked = Array.from({ length: 7 }, (_, i) => ({ ...template, creatorId: `ranked-${i}`, name: `排序作者 ${i + 1}` }));
+      card.channel.groups[0].insufficient = Array.from({ length: 7 }, (_, i) => ({ ...template, creatorId: `small-${i}`, name: `样本不足作者 ${i + 1}` }));
+      return reply(card);
+    });
+    await screen.findByRole('heading', { name: '合成的用户问题' });
+    expect(screen.getByText('排序作者 5')).toBeVisible();
+    expect(screen.queryByText('排序作者 6')).not.toBeInTheDocument();
+    expect(screen.getByText('样本不足作者 5')).toBeVisible();
+    expect(screen.queryByText('样本不足作者 6')).not.toBeInTheDocument();
+    const expand = screen.getAllByRole('button', { name: '查看全部 7 位作者' });
+    if (!expand[0] || !expand[1]) throw new Error('missing creator group controls');
+    await userEvent.click(expand[0]);
+    expect(screen.getByText('排序作者 7')).toBeVisible();
+    expect(screen.queryByText('样本不足作者 6')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: '收起作者' }));
+    expect(screen.queryByText('排序作者 7')).not.toBeInTheDocument();
+    await userEvent.click(expand[1]);
+    expect(screen.getByText('样本不足作者 7')).toBeVisible();
   });
   it('首页直接显示服务端返回的卡片过期提示', async () => {
     setup(`domain=${DOMAIN}`, url => {

@@ -26,10 +26,22 @@ function CreatorLine({ creator, flags }: { creator: Creator; flags: readonly str
   </li>;
 }
 
+const CREATOR_PREVIEW_LIMIT = 5;
+
+function CreatorList({ creators, flags, ordered }: { creators: Creator[]; flags: readonly string[]; ordered: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+  const visible = expanded ? creators : creators.slice(0, CREATOR_PREVIEW_LIMIT);
+  const items = visible.map(creator => <CreatorLine key={creator.creatorId} creator={creator} flags={flags} />);
+  return <>
+    {ordered ? <ol className={styles.creators}>{items}</ol> : <ul className={styles.creators}>{items}</ul>}
+    {creators.length > CREATOR_PREVIEW_LIMIT ? <button type="button" onClick={() => setExpanded(value => !value)}>{expanded ? '收起作者' : `查看全部 ${creators.length} 位作者`}</button> : null}
+  </>;
+}
+
 function ChannelGroup({ group, flags }: { group: CreatorGroup; flags: readonly string[] }) {
   return <section className={styles.protocol}><h3>{protocolLabel(group.protocolVersion)}</h3>
-    {group.ranked.length ? <ol className={styles.creators}>{group.ranked.map(creator => <CreatorLine key={creator.creatorId} creator={creator} flags={flags} />)}</ol> : <p className={styles.muted}>暂无可排序作者。</p>}
-    {group.insufficient.length ? <><h4>样本不足，暂不排序</h4><ul className={styles.creators}>{group.insufficient.map(creator => <CreatorLine key={creator.creatorId} creator={creator} flags={[...flags, 'insufficient_sample']} />)}</ul></> : null}
+    {group.ranked.length ? <CreatorList creators={group.ranked} flags={flags} ordered /> : <p className={styles.muted}>暂无可排序作者。</p>}
+    {group.insufficient.length ? <><h4>样本不足，暂不排序</h4><CreatorList creators={group.insufficient} flags={[...flags, 'insufficient_sample']} ordered={false} /></> : null}
   </section>;
 }
 

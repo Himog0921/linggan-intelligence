@@ -1,4 +1,4 @@
-import { Link, useSearchParams } from 'react-router';
+import { Link, Navigate, useSearchParams } from 'react-router';
 import { AppShell } from '../../app/AppShell';
 import { useOpportunityStatus } from '../../app/opportunityStatusContext';
 import { useCorpusShell } from '../../corpus/useCorpusShell';
@@ -22,11 +22,18 @@ function Workspace() {
   const requestedDomain = params.get('domain');
   const problem = params.get('problem');
   const shell = useCorpusShell(requestedDomain);
+  const defaultDomains = shell.data?.domains.filter(item => item.name === 'ADHD') ?? [];
+  const defaultDomain = defaultDomains.length === 1 ? defaultDomains[0] : undefined;
+  if (requestedDomain === null && defaultDomain) {
+    const next = new URLSearchParams(params);
+    next.set('domain', defaultDomain.domainRef);
+    return <Navigate replace to={`/opportunity?${next}`} />;
+  }
   const domain = shell.data?.selectedDomain ?? null;
   const selected = shell.data?.domains.find(item => item.domainRef === domain);
   const picker = shell.data ? <DomainPicker domains={shell.data.domains} selected={domain} action="/opportunity" /> : null;
   const home = domain ? `/opportunity?${new URLSearchParams({ domain })}` : '/opportunity';
-  const crumb = <ContextBreadcrumb items={[<Link key="home" to={home}>洞察</Link>, ...(picker ? [picker] : []), problem ? '机会卡' : '机会首页']} />;
+  const crumb = <ContextBreadcrumb items={[<Link className={styles.breadcrumbLink} key="home" to={home}>洞察</Link>, ...(picker ? [picker] : []), problem ? '机会卡' : '机会首页']} />;
   return <AppShell active="opportunity" boundaryLabel="本机服务状态" contextBar={{ breadcrumb: crumb, meta: selected?.name ?? '请选择领域' }}>
     <title>{problem ? '机会卡' : '机会首页'} · Linggan Intelligence</title>
     <div className="v7-shell">
