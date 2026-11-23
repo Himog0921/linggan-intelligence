@@ -537,6 +537,18 @@ try {
     assert.equal(await page.evaluate(()=>navigator.clipboard.readText()),current.revision.document.title.trim());
     await page.getByLabel('正文第 2 段').fill('本页版本：保留自己的新表达，再补一句。');await until(async()=>!(await footer.innerText()).includes('已复制（还没有发布）'),'edited draft is no longer marked copied');await save();
   });
+  await step('预览页“复制出去的文字”等于服务器的复制预览，且看预览不留复制回执',async()=>{
+    // The page asks the server what the saved revision would copy; it must show exactly that and must not record a copy.
+    const panel=page.getByRole('complementary',{name:'检查与复制'});
+    const before=(await creationJson(`/works/${workId}/copy-status`)).copied;
+    const server=await creationJson(`/works/${workId}/copy-preview`);
+    assert.equal(server.revisionId,(await envelope()).revision.id,'the preview is of the saved current revision');
+    await panel.getByRole('button',{name:'预览',exact:true}).click();
+    const box=panel.getByLabel(/^复制出去的文字/);await box.waitFor();
+    await until(async()=>await box.inputValue()===server.text,'the box shows the text the server would copy');
+    assert.deepEqual((await creationJson(`/works/${workId}/copy-status`)).copied,before,'looking at the preview records nothing');
+    await panel.getByRole('button',{name:/^检查/}).click();
+  });
   for(const [width,height] of [[1440,900],[1280,720]]){
     await step(`${width}×${height} 正文与图组可操作，无页面横向溢出`,async()=>{
       await page.setViewportSize({width,height});await stage('正文');
