@@ -179,7 +179,10 @@ async fn topics_and_workspace_real_chain_browser_proof() {
     fs::create_dir_all(&directory).unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let origin = format!("http://{}", listener.local_addr().unwrap());
+    let email = "topic-admin@example.test";
+    ops_auth_tests::active_member(db.pool(), email, "admin").await;
     let application = app_with_database(db.clone());
+    let cookie = ops_auth_tests::login_cookie(application.clone(), email).await;
     let server = tokio::spawn(async move { axum::serve(listener, application).await.unwrap() });
     fs::write(ProofPath::new(&directory).join("fixture.json"),json!({
         "origin":origin,"domain":domain,"modelConfigRef":config,"searchRound":search_round,"detailRound":detail_round,"domainTwo":second,"workRefs":works,"topicRef":first.topic_ref,"definitionRef":first.definition_ref,
@@ -193,6 +196,7 @@ async fn topics_and_workspace_real_chain_browser_proof() {
                 .join("../web/test/e2e/topics-real-chain.mjs"),
         )
         .env("WEB_APP_PROOF_DIR", &directory)
+        .env("TOPIC_BROWSER_SESSION_COOKIE", cookie)
         .status();
     server.abort();
     let _ = server.await;

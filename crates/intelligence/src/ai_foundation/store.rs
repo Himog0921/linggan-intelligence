@@ -48,11 +48,19 @@ impl<'a> Command<'a> {
         operation: &'static str,
         payload: &T,
     ) -> Result<Self, FoundationError> {
+        Self::begin_in(db.pool().begin().await?, command_ref, operation, payload).await
+    }
+
+    pub async fn begin_in<T: Serialize>(
+        mut tx: Transaction<'a, Postgres>,
+        command_ref: Uuid,
+        operation: &'static str,
+        payload: &T,
+    ) -> Result<Self, FoundationError> {
         let payload = serde_json::to_value(payload).map_err(|_| FoundationError::Invalid)?;
         if !payload.is_object() || payload.to_string().len() > 65536 {
             return Err(FoundationError::Invalid);
         }
-        let mut tx = db.pool().begin().await?;
         // Serializes duplicate command IDs even when they name different scope rows.
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 410132))")
             .bind(command_ref.to_string())

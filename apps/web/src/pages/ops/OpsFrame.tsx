@@ -26,6 +26,7 @@ export function OpsFrame({
   dataPageKey = 'overview',
   creationPageKey = 'today',
   onCreationPageSelect,
+  onNavigate,
   children,
 }: {
   section: 'data' | 'creation';
@@ -40,10 +41,14 @@ export function OpsFrame({
   dataPageKey?: string;
   creationPageKey?: 'today' | 'works';
   onCreationPageSelect?: (page: 'today' | 'works') => void;
+  onNavigate?: (href: string) => void;
   children: ReactNode;
 }) {
   const selectedDomain = domain && domain !== 'all' ? '?domain=' + encodeURIComponent(domain) : '';
   const lens = useLensStatus(!restricted);
+  function entryLink(href: string, onSelect?: () => void) {
+    return { href, onSelect: onSelect ?? (onNavigate ? () => onNavigate(href) : undefined) };
+  }
   const dataPages = DATA_PAGES.filter(item => {
     if (item.key === 'content') return !restricted && lens.isSuccess && lens.data.enabled;
     return item.key !== 'overview' || !restricted;
@@ -52,7 +57,7 @@ export function OpsFrame({
     label: item.label,
     code: item.code,
     icon: item.icon,
-    href: '/ops/' + item.key + selectedDomain,
+    ...entryLink('/ops/' + item.key + selectedDomain),
   }));
   const items: SidebarNavigationItem[] = [
     {
@@ -60,38 +65,37 @@ export function OpsFrame({
       label: '数据',
       index: '01',
       icon: 'overview',
-      href: '/ops/' + (restricted ? 'publications' : 'overview') + selectedDomain,
+      ...entryLink('/ops/' + (restricted ? 'publications' : 'overview') + selectedDomain),
       children: dataPages,
     },
-    ...(!restricted ? [{
+    {
       id: 'creation',
       label: '创作',
       index: '02',
       icon: 'creation',
-      href: '/ops/creation' + selectedDomain,
-      onSelect: onCreationPageSelect ? () => onCreationPageSelect('today') : undefined,
+      ...entryLink('/ops/creation' + selectedDomain, onCreationPageSelect ? () => onCreationPageSelect('today') : undefined),
       children: [
         {
           id: 'creation-today',
           label: '今日选题',
           code: 'TODAY',
-          href: '/ops/creation' + selectedDomain + (selectedDomain ? '&' : '?') + 'section=today',
-          onSelect: onCreationPageSelect ? () => onCreationPageSelect('today') : undefined,
+          ...entryLink('/ops/creation' + selectedDomain + (selectedDomain ? '&' : '?') + 'section=today',
+            onCreationPageSelect ? () => onCreationPageSelect('today') : undefined),
         },
         {
           id: 'creation-works',
           label: '我的创作',
           code: 'WORKS',
-          href: '/ops/creation' + selectedDomain + (selectedDomain ? '&' : '?') + 'section=works',
-          onSelect: onCreationPageSelect ? () => onCreationPageSelect('works') : undefined,
+          ...entryLink('/ops/creation' + selectedDomain + (selectedDomain ? '&' : '?') + 'section=works',
+            onCreationPageSelect ? () => onCreationPageSelect('works') : undefined),
         },
       ],
-    }] : []),
+    },
     ...(!restricted && manageTeam ? [{
       id: 'team-permissions',
       label: '团队与权限',
       icon: 'security',
-      href: '/settings/team',
+      ...entryLink('/settings/team'),
     }] : []),
   ];
   const activeId = section === 'data' ? 'data-' + dataPageKey : 'creation-' + creationPageKey;

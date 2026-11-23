@@ -7,7 +7,7 @@ use axum::{
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
 };
-use linggan_intelligence::ops_ledger::xhs_note_id;
+use linggan_intelligence::{creation_assets, ops_ledger::xhs_note_id};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
@@ -118,6 +118,15 @@ struct CreatePublicationBody {
     published_on: Option<String>,
     title: Option<String>,
     body: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    creation: Option<CreationPublicationBody>,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct CreationPublicationBody {
+    work_id: Uuid,
+    expected_revision: Uuid,
 }
 
 #[derive(Deserialize)]
@@ -1075,6 +1084,56 @@ async fn write_publication(
         )
         .await;
     }
+    if let Some(draft) = &publication.creation {
+        if let Err((code, status)) = validate_publication_draft(
+            &mut transaction,
+            &member,
+            draft,
+            publication.account_ref,
+            domain_ref,
+            &platform,
+        )
+        .await?
+        {
+            return rejected(
+                transaction,
+                publication.request_id,
+                "publication_create",
+                &member,
+                &payload,
+                Some(publication.account_ref),
+                None,
+                code,
+                status,
+            )
+            .await;
+        }
+        if let Some((record_ref, version)) = creation_assets::existing_native_publication_in(
+            &mut transaction,
+            draft.work_id,
+            publication.account_ref,
+            &publication.canonical_url,
+        )
+        .await
+        .map_err(|_| WriteError::Unavailable)?
+        {
+            let receipt = unchanged(
+                publication.request_id,
+                "publication_create",
+                &member,
+                &payload,
+                record_ref,
+                version,
+                "ops_native_draft_publication_exists",
+            );
+            insert_receipt(&mut transaction, &receipt).await?;
+            transaction
+                .commit()
+                .await
+                .map_err(|_| WriteError::Unavailable)?;
+            return Ok((StatusCode::OK, receipt.receipt));
+        }
+    }
     let publication_ref = Uuid::new_v4();
     sqlx::query(
         "INSERT INTO linggan_ops_publication \
@@ -1119,11 +1178,71 @@ async fn write_publication(
         &publication.body,
     )
     .await?;
+    if let Some(draft) = &publication.creation {
+        creation_assets::link_native_publication_in(
+            &mut transaction,
+            draft.work_id,
+            &creation_assets::PublicationLinkCommand {
+                request_id: publication.request_id,
+                expected_revision: draft.expected_revision,
+                publication_ref,
+            },
+            member.member_ref,
+        )
+        .await
+        .map_err(|error| match error {
+            creation_assets::AssetsError::RequestConflict => {
+                WriteError::Invalid("ops_native_request_conflict")
+            }
+            _ => WriteError::Unavailable,
+        })?;
+    }
     transaction
         .commit()
         .await
         .map_err(|_| WriteError::Unavailable)?;
     Ok((StatusCode::CREATED, receipt.receipt))
+}
+
+async fn validate_publication_draft(
+    transaction: &mut Transaction<'_, Postgres>,
+    member: &super::ops_auth::AuthenticatedMember,
+    draft: &CreationPublicationBody,
+    account_ref: Uuid,
+    domain_ref: Uuid,
+    platform: &str,
+) -> Result<Result<(), (&'static str, StatusCode)>, WriteError> {
+    if platform != "xhs" {
+        return Ok(Err((
+            "ops_native_draft_account_conflict",
+            StatusCode::CONFLICT,
+        )));
+    }
+    let owner = (member.role != "admin").then_some(member.member_ref);
+    match creation_assets::lock_native_publication_draft(
+        transaction,
+        draft.work_id,
+        draft.expected_revision,
+        owner,
+        account_ref,
+        domain_ref,
+    )
+    .await
+    {
+        Ok(()) => Ok(Ok(())),
+        Err(creation_assets::AssetsError::NotFound) => {
+            Ok(Err(("ops_native_draft_not_found", StatusCode::NOT_FOUND)))
+        }
+        Err(creation_assets::AssetsError::Stale) => Ok(Err((
+            "ops_native_draft_revision_conflict",
+            StatusCode::CONFLICT,
+        ))),
+        Err(creation_assets::AssetsError::Invalid(_)) => Ok(Err((
+            "ops_native_draft_account_conflict",
+            StatusCode::CONFLICT,
+        ))),
+        Err(_) => Err(WriteError::Unavailable),
+    }
 }
 
 /// A native registration's explicitly supplied text enters the same current-field model as an
@@ -2532,6 +2651,7 @@ struct PreparedPublication {
     published_on: Option<String>,
     title: Option<String>,
     body: Option<String>,
+    creation: Option<CreationPublicationBody>,
 }
 
 impl PreparedPublication {
@@ -2553,11 +2673,16 @@ impl PreparedPublication {
             published_on,
             title: optional(body.title, 1_000)?,
             body: optional(body.body, 100_000)?,
+            creation: body.creation,
         })
     }
 
     fn payload(&self) -> Value {
-        json!({ "accountRef": self.account_ref, "publicationUrl": self.publication_url, "canonicalUrl": self.canonical_url, "precision": self.precision, "publishedAt": self.published_at, "publishedOn": self.published_on, "title": self.title, "body": self.body })
+        let mut payload = json!({ "accountRef": self.account_ref, "publicationUrl": self.publication_url, "canonicalUrl": self.canonical_url, "precision": self.precision, "publishedAt": self.published_at, "publishedOn": self.published_on, "title": self.title, "body": self.body });
+        if let Some(draft) = &self.creation {
+            payload["creation"] = json!(draft);
+        }
+        payload
     }
 }
 

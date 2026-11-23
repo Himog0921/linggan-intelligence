@@ -130,8 +130,26 @@ async fn place_desk_card(
         Err(e) => error(e),
     }
 }
-async fn create(State(state): State<LocalWebState>, Json(r): Json<CreateRequest>) -> Response {
-    receipt(core::create_work(database!(state), &r).await)
+async fn create(
+    State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
+    Json(r): Json<CreateRequest>,
+) -> Response {
+    let db = database!(state);
+    let mut tx = match db.pool().begin().await {
+        Ok(tx) => tx,
+        Err(err) => return error(err.into()),
+    };
+    if let Err(response) = super::creation_members::require_active(&mut tx, &member).await {
+        return response;
+    }
+    let result = core::create_work_as_in(&mut tx, &r, Some(member.member_ref)).await;
+    if result.is_ok()
+        && let Err(err) = tx.commit().await
+    {
+        return error(err.into());
+    }
+    receipt(result)
 }
 async fn read(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
     reply(core::read_work(database!(state), id).await)

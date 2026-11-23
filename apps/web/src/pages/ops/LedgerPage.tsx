@@ -4,7 +4,7 @@ import { ActionButton } from '../../shared/ActionButton';
 import { FindField } from '../../shared/FindField';
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useSearchParams } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import * as api from "./api";
 import * as f from "./format";
 import {
@@ -158,6 +158,7 @@ export function LedgerPage({
   const assignedTo = kind === "accounts" && role === "admin" ? params.get("assign_to") || "" : "";
   const accountTask = Boolean(assignedTo || pendingFrom);
   const accountRef = kind === "publications" ? params.get("account_ref") : null;
+  const publicationRef = kind === "publications" ? params.get("publication_ref") : null;
   const [dates, setDates] = useState(false);
   const [cover, setCover] = useState<string | null>(null);
   const [coverFailed, setCoverFailed] = useState(false);
@@ -222,6 +223,7 @@ export function LedgerPage({
     "platform",
     "account",
     "account_ref",
+    "publication_ref",
     "from",
     "to",
     "views",
@@ -356,6 +358,7 @@ export function LedgerPage({
             </span>
           )}
           {accountRef && !scopedAccount ? <span>当前账号的发布</span> : null}
+          {publicationRef ? <ActionButton type="button" onClick={() => update({ publication_ref: "" })}>查看全部发布记录</ActionButton> : null}
           {kind === "publications" ? (
             <>
               <ActionButton type="button" disabled={!accounts.data?.items.length} title={!accounts.data?.items.length ? "当前业务没有可用账号" : undefined} onClick={() => setNewPublication(true)}>
@@ -490,6 +493,7 @@ export function LedgerPage({
                           platform: "",
                           account: "",
                           account_ref: "",
+                          publication_ref: "",
                           from: "",
                           to: "",
                           views: "",
@@ -565,6 +569,7 @@ export function LedgerPage({
           </p>
           {detail.publisher ? <p className={c("ops-note")}>原发布人 · {detail.publisher}</p> : null}
           {role === "admin" ? <HistoricalOwnerTag publication={detail} /> : null}
+          {detail.creation ? <p><Link to={`/ops/creation?${new URLSearchParams({ domain: detail.creation.domainRef, work: detail.creation.workId, view: "body" })}`}>查看关联稿件</Link></p> : null}
           <External href={detail.url} title="原发布链接"><IntelligenceIcon name="external" size={16}/> 查看原发布链接</External>
           <dl className={c('ops-detail-facts')}>
             <div><dt>阅读量</dt><dd>{detail.views.state === 'value' ? f.count(detail.views.value).text : detail.views.state === 'pending' ? '待补' : '选填，未知'}</dd></div>

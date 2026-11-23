@@ -81,6 +81,11 @@ function publication(r: R) {
     platform: platform(r),
     title: sn(r, "title"),
     body: sn(r, "body"),
+    creation: r.creation === undefined ? null : optional(r, "creation", draft => ({
+      workId: s(draft, "workId"),
+      domainRef: s(draft, "domainRef"),
+      revisionId: s(draft, "revisionId"),
+    })),
     url: s(r, "url"),
     account: optional(r, "account", (a) => ({
       name: s(a, "name"),
@@ -393,6 +398,7 @@ export async function transferNativeAccountResponsibility(
 export type NativePublicationCommand = {
   accountRef: string; publicationUrl: string; canonicalUrl: string | null;
   publishedOn: string | null; title: string | null; body: string | null;
+  creation?: { workId: string; expectedRevision: string };
 };
 export async function createNativePublication(command: NativePublicationCommand & { requestId: string }) {
   return nativeCommand("/api/local/ops/native/publications", { ...command, publishedAt: null }, command.requestId);
@@ -664,6 +670,10 @@ export type Ranking = ReturnType<typeof ranking>;
 export type TrendPoint = ReturnType<typeof trend>["points"][number];
 export type PeriodType = "week" | "month";
 export type Revision = ReturnType<typeof revision>;
+export function creationPublicationHref(domainRef: string, publicationRef: string) {
+  return `/ops/publications?${new URLSearchParams({ domain: domainRef, publication_ref: publicationRef })}`;
+}
+
 export function url(path: string, params: Record<string, string> = {}) {
   const query = new URLSearchParams(
     Object.entries(params).filter(([, v]) => v !== ""),

@@ -1,10 +1,12 @@
 import { IntelligenceIcon } from '../../../shared/IntelligenceIcon';
 import { useId, useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ApiError } from '../../../shared/api';
 import { RequestIdentities } from '../../../shared/requestIdentity';
+import { creationPublicationHref } from '../../ops/api';
 import type { Revision } from '../workbenchModel';
 import * as api from './assetsApi';
 import styles from './Assets.module.css';
@@ -80,7 +82,7 @@ export function PublicationLinker({ workId, domainRef, saveCurrent, disabled, pe
       <h2 id={`${uid}-title`}><IntelligenceIcon name="link" size={18}/> 关联运营发布记录</h2>{blocked ? <p role="alert">关联操作结果未确认，请先留在此稿并重试。 <button type="button" onClick={onResetBlock}>返回稿件</button></p> : null}
       <p>选择此账号已经登记的发布记录，并关联到当前保存版本。这个操作不会发布笔记。</p>
       {links.isError ? <p role="alert">已关联的发布记录读取失败。<ActionButton variant="quiet" onClick={() => void links.refetch()}>重试</ActionButton></p> : null}
-      {links.data?.length ? <section aria-label="已关联发布记录"><h3>已关联</h3>{links.data.map(item => <div key={item.linkRef}><p>{item.publishedOn ?? '日期未填'} · {item.title ?? '标题未填'}{!item.available ? ' · 记录当前不可用' : ''}{item.revisionId !== revision ? ' · 对应其他保存版本' : ''}</p><ActionButton variant="quiet" disabled={busy || !!pendingLink || !!pendingUnlink} onClick={() => void unlink(item.linkRef)}>撤销关联</ActionButton></div>)}</section> : null}
+      {links.data?.length ? <section aria-label="已关联发布记录"><h3>已关联</h3>{links.data.map(item => <div key={item.linkRef}><p>{item.publishedOn ?? '日期未填'} · {item.title ?? '标题未填'}{!item.available ? ' · 记录当前不可用' : ''}{item.revisionId !== revision ? ' · 对应其他保存版本' : ''}</p>{item.available ? <Link to={creationPublicationHref(domainRef, item.publicationRef)}>查看发布记录</Link> : null}<ActionButton variant="quiet" disabled={busy || !!pendingLink || !!pendingUnlink} onClick={() => void unlink(item.linkRef)}>撤销关联</ActionButton></div>)}</section> : null}
       {pendingUnlink ? <p>上一笔撤销结果未确认。<ActionButton variant="quiet" disabled={busy} onClick={() => void unlink(pendingUnlink!.linkRef)}>沿用原请求重试撤销</ActionButton></p> : null}
       {busy ? <p>正在处理…</p> : null}
       {candidates.isError && !pendingLink ? <p role="alert">发布记录读取失败。<ActionButton variant="quiet" onClick={() => void candidates.refetch()}>重试</ActionButton></p> : null}

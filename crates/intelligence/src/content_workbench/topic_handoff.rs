@@ -40,13 +40,21 @@ pub async fn handoff_angle(
     db: &Database,
     request: &HandoffRequest,
 ) -> Result<HandoffReceipt, WorkbenchError> {
+    handoff_angle_as_in(db.pool().begin().await?, request, None).await
+}
+
+pub async fn handoff_angle_as_in(
+    tx: sqlx::Transaction<'_, sqlx::Postgres>,
+    request: &HandoffRequest,
+    member: Option<Uuid>,
+) -> Result<HandoffReceipt, WorkbenchError> {
     if request.command_ref.is_nil()
         || request.domain_ref.is_nil()
         || request.alternative_ref.is_nil()
     {
         return Err(WorkbenchError::Invalid("handoff"));
     }
-    let mut command = Command::begin(db, request.command_ref, "topic_angle_handoff", request)
+    let mut command = Command::begin_in(tx, request.command_ref, "topic_angle_handoff", request)
         .await
         .map_err(command_error)?;
     if let Some(receipt) = command.replay().map_err(command_error)? {
@@ -120,13 +128,14 @@ pub async fn handoff_angle(
         materials: selections,
         ..Default::default()
     };
-    let created = super::store::create_work_in(
+    let created = super::store::create_work_as_in(
         &mut command.tx,
         &CreateRequest {
             request_id: request.command_ref,
             domain_ref: request.domain_ref,
             document,
         },
+        member,
     )
     .await?;
     sqlx::query("INSERT INTO linggan_topic_angle_handoff(alternative_ref,domain_ref,idea_ref,anchor_work_ref) VALUES($1,$2,$3,$4)")

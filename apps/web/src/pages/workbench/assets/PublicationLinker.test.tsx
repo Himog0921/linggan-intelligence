@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useState } from 'react';
+import { MemoryRouter } from 'react-router';
 import { PublicationLinker, type PublicationPending } from './PublicationLinker';
 import * as api from './assetsApi';
 import { newDocument } from '../workbenchModel';
@@ -13,7 +14,7 @@ function show() {
   const saveCurrent = vi.fn().mockResolvedValue({ id: revision, number: 1, savedAt: '2026-10-29', document: newDocument() });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   function Harness() { const [pending, setPending] = useState<PublicationPending | null>(null); return <PublicationLinker workId={work} domainRef={work} saveCurrent={saveCurrent} disabled={false} pending={pending} onPending={setPending} />; }
-  render(<QueryClientProvider client={client}><Harness /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><MemoryRouter><Harness /></MemoryRouter></QueryClientProvider>);
   return saveCurrent;
 }
 beforeEach(() => {
@@ -48,6 +49,7 @@ describe('publication link', () => {
     vi.mocked(api.unlinkPublication).mockResolvedValue({ linkRef: publication, replayed: false });
     vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
     show(); fireEvent.click(screen.getByRole('button', { name: '关联发布记录' }));
+    expect(await screen.findByRole('link', { name: '查看发布记录' })).toHaveAttribute('href', `/ops/publications?domain=${work}&publication_ref=${publication}`);
     fireEvent.click(await screen.findByRole('button', { name: '撤销关联' }));
     await screen.findByText('已撤销关联，运营发布记录仍保留。');
     expect(api.unlinkPublication).toHaveBeenCalledWith(work, publication, expect.any(String));
@@ -71,7 +73,7 @@ describe('publication link', () => {
 it('keeps the original request accessible when editing becomes locked', async () => {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const pending: PublicationPending = { kind: 'link', command: { requestId: 'synthetic-request', expectedRevision: revision, publicationRef: publication } };
-  render(<QueryClientProvider client={client}><PublicationLinker workId={work} domainRef={work} saveCurrent={vi.fn()} disabled pending={pending} onPending={() => {}} /></QueryClientProvider>);
+  render(<QueryClientProvider client={client}><MemoryRouter><PublicationLinker workId={work} domainRef={work} saveCurrent={vi.fn()} disabled pending={pending} onPending={() => {}} /></MemoryRouter></QueryClientProvider>);
   fireEvent.click(screen.getByRole('button', { name: '关联发布记录' }));
   expect(await screen.findByRole('button', { name: '重试关联' })).toBeEnabled();
 });

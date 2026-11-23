@@ -548,6 +548,8 @@ migrate() {
   apply_migration_once "0234_ops_content_lens" "$project_root/database/migrations/0234_ops_content_lens.sql"
   apply_migration_once "0235_ops_title_label" "$project_root/database/migrations/0235_ops_title_label.sql"
   apply_migration_once "0236_ops_lens_settled_primary" "$project_root/database/migrations/0236_ops_lens_settled_primary.sql"
+  apply_migration_once "0237_creation_member_authorship" "$project_root/database/migrations/0237_creation_member_authorship.sql"
+  apply_migration_once "0238_creation_publication_member" "$project_root/database/migrations/0238_creation_publication_member.sql"
 }
 
 case "$command_name" in

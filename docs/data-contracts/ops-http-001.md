@@ -55,7 +55,7 @@
 
 ### `GET /api/local/ops/publications`
 
-参数：`domain`、`operator`（发布人名，精确匹配）、`platform`（`xhs` / `douyin`）、`account`（账号名包含匹配）、`from` / `to`（业务日，含首尾）、`views=pending`、`page`（从 1 开始）。
+参数：`domain`、`operator`（发布人名，精确匹配）、`platform`（`xhs` / `douyin`）、`account`（账号名包含匹配）、`from` / `to`（业务日，含首尾）、`views=pending`、`publication_ref`（精确发布编号）、`page`（从 1 开始）。
 
 - 排序：发布时间从新到旧；`views=pending` 时只返回小红书、阅读量未填的主记录，按发布时间从旧到新，最该补的排在前面。
 - 每页 50 条。返回 `page`、`pageSize`、`total`、`totalPages`、`operators`（当前业务下全部发布人名，供页签使用）与 `items`。
@@ -65,6 +65,7 @@
 | 字段 | 含义 |
 |---|---|
 | `ref` | 发布登记编号 |
+| `creation` | 有效稿件关联的 `{ workId, domainRef, revisionId }`。只有可见此发布的稿件创建人或管理员可读取该关联。其他情况为 `null`。 |
 | `source` | `imported`（历史工作台迁入）或 `native`（运营台账原生登记）；来源不可由页面猜测。 |
 | `businessDate`、`publishedAt`、`dateState` | 业务日、原始发布时间、`as_recorded` / `suspect_year` |
 | `platform`、`title`、`body`、`url` | 原值；`url` 是发布链接 |

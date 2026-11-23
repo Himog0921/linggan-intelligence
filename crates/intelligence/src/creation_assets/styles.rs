@@ -147,6 +147,18 @@ pub async fn put_style(
     code: Option<&str>,
     cmd: &StyleCommand,
 ) -> Result<StyleReceipt, AssetsError> {
+    let mut tx = db.pool().begin().await?;
+    let result = put_style_in(&mut tx, code, cmd, None).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub async fn put_style_in(
+    tx: &mut Transaction<'_, Postgres>,
+    code: Option<&str>,
+    cmd: &StyleCommand,
+    member: Option<Uuid>,
+) -> Result<StyleReceipt, AssetsError> {
     let cmd = normalized(cmd)?;
     if code.is_none() != (cmd.expected_revision == 0) {
         return Err(AssetsError::Invalid("expected_revision"));
@@ -170,10 +182,8 @@ pub async fn put_style(
     } else {
         "style_revise"
     };
-    let mut tx = db.pool().begin().await?;
-    if let Claim::Replay = claim(&mut tx, cmd.request_id, kind, &sha).await? {
-        let style = by_request(&mut tx, cmd.request_id).await?;
-        tx.commit().await?;
+    if let Claim::Replay = claim(tx, cmd.request_id, kind, &sha).await? {
+        let style = by_request(tx, cmd.request_id).await?;
         return Ok(StyleReceipt {
             style,
             replayed: true,
@@ -185,7 +195,7 @@ pub async fn put_style(
                 "SELECT EXISTS(SELECT 1 FROM linggan_ops_account WHERE account_ref=$1)",
             )
             .bind(cmd.account_ref)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await?;
             if !known {
                 return Err(AssetsError::NotFound);
@@ -193,16 +203,14 @@ pub async fn put_style(
             let code: String = sqlx::query_scalar(
                 "SELECT 'FG-'||lpad(nextval('linggan_creation_style_code_seq')::text,4,'0')",
             )
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await?;
-            lock(&mut tx, &format!("style:{code}")).await?;
+            lock(tx, &format!("style:{code}")).await?;
             (code, 1)
         }
         Some(code) => {
-            lock(&mut tx, &format!("style:{code}")).await?;
-            let latest = latest_in(&mut tx, code)
-                .await?
-                .ok_or(AssetsError::NotFound)?;
+            lock(tx, &format!("style:{code}")).await?;
+            let latest = latest_in(tx, code).await?.ok_or(AssetsError::NotFound)?;
             if latest.revision != cmd.expected_revision {
                 return Err(AssetsError::Stale);
             }
@@ -213,8 +221,8 @@ pub async fn put_style(
         }
     };
     sqlx::query(
-        "INSERT INTO linggan_creation_style(style_ref,code,account_ref,revision_number,request_ref,name,source_note,structure,rhythm,wording,skip,saved_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'local_machine')",
+        "INSERT INTO linggan_creation_style(style_ref,code,account_ref,revision_number,request_ref,name,source_note,structure,rhythm,wording,skip,saved_by,saved_by_member_ref)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'local_machine',$12)",
     )
     .bind(Uuid::new_v4())
     .bind(&code)
@@ -227,10 +235,10 @@ pub async fn put_style(
     .bind(&cmd.rhythm)
     .bind(&cmd.wording)
     .bind(&cmd.skip)
-    .execute(&mut *tx)
+    .bind(member)
+    .execute(&mut **tx)
     .await?;
-    let style = by_request(&mut tx, cmd.request_id).await?;
-    tx.commit().await?;
+    let style = by_request(tx, cmd.request_id).await?;
     Ok(StyleReceipt {
         style,
         replayed: false,

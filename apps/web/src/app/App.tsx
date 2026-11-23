@@ -1,16 +1,19 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { lazy, Suspense } from 'react';
-import { createBrowserRouter } from 'react-router';
+import { createBrowserRouter, Link } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 import { ModelSettingsPage } from '../pages/settings/ModelSettingsPage';
 import { AccountSecurityPage } from '../pages/settings/AccountSecurityPage';
 import { TeamSettingsPage } from '../pages/settings/TeamSettingsPage';
 import { AcceptInvitationPage } from '../pages/login/AcceptInvitationPage';
+import { requestJson } from '../shared/api';
+import { decode, obj, str } from '../shared/decode';
 import { NotFoundPage } from './NotFoundPage';
 import { OpportunityStatusProvider } from './OpportunityStatus';
 import { OPS_PATHS, COLLECTION_PATHS, CREATORS_PATH, EVIDENCE_PATH, COMMENTS_PATH, OPPORTUNITY_PATH, INVITATION_ACCEPT_PATH, MODEL_SETTINGS_PATH, ACCOUNT_SETTINGS_PATH, TEAM_SETTINGS_PATH, WORKBENCH_PATH, TOPICS_PATH, OFFLINE_REVIEW_PATH } from './pages';
 
 const LoginPage = lazy(() => import('../pages/login/LoginPage').then(module => ({ default: module.LoginPage })));
+const MemberWorkbench = lazy(() => import('../pages/workbench/MemberWorkbench').then(module => ({ default: module.MemberWorkbench })));
 const WorkbenchPage = lazy(() => import('../pages/workbench/WorkbenchPage').then(module => ({ default: module.WorkbenchPage })));
 // 语料页按需加载：打开设置页或工作台时不下载创作者页的代码。
 const CreatorsPage = lazy(() => import('../pages/corpus/creators/CreatorsPage').then(module => ({ default: module.CreatorsPage })));
@@ -33,13 +36,27 @@ const queryClient = new QueryClient({
   },
 });
 
+function CreationEntry() {
+  const session = useQuery({
+    queryKey: ['auth', 'session'],
+    queryFn: ({ signal }) => requestJson('/api/local/auth/session', { signal }),
+  });
+  if (session.isPending) return <p role="status">正在核对团队身份…</p>;
+  if (session.isError) return <p role="alert">无法确认团队身份。<Link to="/login">去登录</Link></p>;
+  const member = decode(session.data, root => {
+    const identity = obj(root, 'member');
+    return { ref: str(identity, 'ref'), role: str(identity, 'role') };
+  });
+  return member.role === 'admin' ? <WorkbenchPage /> : <MemberWorkbench key={member.ref} memberRef={member.ref} />;
+}
+
 const router = createBrowserRouter([
   { path: '/login', element: <Suspense fallback={<p role="status">正在打开工作台入口…</p>}><LoginPage /></Suspense> },
   { path: INVITATION_ACCEPT_PATH, element: <AcceptInvitationPage /> },
   { path: MODEL_SETTINGS_PATH, element: <ModelSettingsPage /> },
   { path: ACCOUNT_SETTINGS_PATH, element: <AccountSecurityPage /> },
   { path: TEAM_SETTINGS_PATH, element: <TeamSettingsPage /> },
-  { path: WORKBENCH_PATH, element: <Suspense fallback={<p role="status">正在打开工作台…</p>}><WorkbenchPage /></Suspense> },
+  { path: WORKBENCH_PATH, element: <Suspense fallback={<p role="status">正在打开工作台…</p>}><CreationEntry /></Suspense> },
   { path: CREATORS_PATH, element: <Suspense fallback={<p role="status">正在打开创作者…</p>}><CreatorsPage /></Suspense> },
   { path: EVIDENCE_PATH, element: <Suspense fallback={<p role="status">正在打开证据库…</p>}><EvidencePage /></Suspense> },
   { path: COMMENTS_PATH, HydrateFallback: () => <p role="status">正在打开评论研究…</p>, lazy: async () => ({ Component: (await import('../pages/corpus/comments/CommentsPage')).CommentsPage }) },

@@ -723,12 +723,28 @@ async fn research_automation_change(
 
 async fn handoff_angle(
     State(state): State<LocalWebState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<linggan_intelligence::content_workbench::topic_handoff::HandoffRequest>,
 ) -> Response {
+    let member = match super::ops_auth::current_member(&state, &headers).await {
+        Ok(member) if member.role == "admin" => member,
+        Ok(_) => return StatusCode::FORBIDDEN.into_response(),
+        Err(response) => return response,
+    };
     let Some(db) = state.database.database() else {
         return crate::local_web::ai_settings::unavailable();
     };
-    match linggan_intelligence::content_workbench::topic_handoff::handoff_angle(db, &body).await {
+    let tx = match super::creation_members::transaction(db.pool(), &member).await {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    match linggan_intelligence::content_workbench::topic_handoff::handoff_angle_as_in(
+        tx,
+        &body,
+        Some(member.member_ref),
+    )
+    .await
+    {
         Ok(receipt) => Json(receipt).into_response(),
         Err(error) => crate::local_web::content_workbench_api::error(error),
     }

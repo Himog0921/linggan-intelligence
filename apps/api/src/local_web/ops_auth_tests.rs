@@ -388,8 +388,7 @@ async fn administrator_roster_exposes_lifecycle_and_current_responsibility_witho
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 #[ignore = "isolated PostgreSQL; scripts/test-web-app-postgres.sh"]
-async fn ops_ledger_routes_require_an_active_team_session_without_claiming_the_creation_workspace()
-{
+async fn ops_ledger_and_creation_routes_require_an_active_team_session() {
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let schema = format!("ops_auth_bound_{}", Uuid::new_v4().simple());
     let database = linggan_storage_postgres::testing::isolated_proof_schema(
@@ -462,37 +461,24 @@ async fn ops_ledger_routes_require_an_active_team_session_without_claiming_the_c
         assert_eq!(foreign.status(), StatusCode::FORBIDDEN, "{method} {path}");
     }
 
-    let creation = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/ops/creation")
-                .header(header::HOST, "127.0.0.1:3000")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert!(matches!(
-        creation.status(),
-        StatusCode::OK | StatusCode::SERVICE_UNAVAILABLE
-    ));
-    let creation_api = app
-        .clone()
-        .oneshot(
-            Request::builder()
-                .uri("/ops/api/creation/works")
-                .header(header::HOST, "127.0.0.1:3000")
-                .body(Body::empty())
-                .unwrap(),
-        )
-        .await
-        .unwrap();
-    assert_ne!(
-        creation_api.status(),
-        StatusCode::UNAUTHORIZED,
-        "the creation API must retain its existing boundary"
-    );
+    for path in [
+        "/ops/creation",
+        "/ops/api/creation/works",
+        "/api/local/ops/creation/domains",
+    ] {
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri(path)
+                    .header(header::HOST, "127.0.0.1:3000")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED, "{path}");
+    }
     let producer = app
         .clone()
         .oneshot(
@@ -976,17 +962,39 @@ async fn admin_invites_once_reinvite_revokes_old_link_and_acceptance_activates_m
         1,
         "the raw invitation token never becomes a stored credential"
     );
-    let revoke_path = format!("/api/local/auth/invitations/{}/revoke", first["invitation"]["ref"].as_str().unwrap());
+    let revoke_path = format!(
+        "/api/local/auth/invitations/{}/revoke",
+        first["invitation"]["ref"].as_str().unwrap()
+    );
     let forbidden = session_request(&revoke_path, &operator_cookie, "POST");
-    assert_eq!(app.clone().oneshot(forbidden).await.unwrap().status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        app.clone().oneshot(forbidden).await.unwrap().status(),
+        StatusCode::FORBIDDEN
+    );
     let revoke = session_request(&revoke_path, &admin_cookie, "POST");
-    assert_eq!(app.clone().oneshot(revoke).await.unwrap().status(), StatusCode::OK);
-    let (status, roster) = json_response(app.clone().oneshot(session_request(
-        "/api/local/auth/members", &admin_cookie, "GET",
-    )).await.unwrap()).await;
+    assert_eq!(
+        app.clone().oneshot(revoke).await.unwrap().status(),
+        StatusCode::OK
+    );
+    let (status, roster) = json_response(
+        app.clone()
+            .oneshot(session_request(
+                "/api/local/auth/members",
+                &admin_cookie,
+                "GET",
+            ))
+            .await
+            .unwrap(),
+    )
+    .await;
     assert_eq!(status, StatusCode::OK);
-    assert!(roster["members"].as_array().unwrap().iter().any(|row|
-        row["email"] == "new@example.test" && row["invitationState"] == "revoked"));
+    assert!(
+        roster["members"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["email"] == "new@example.test" && row["invitationState"] == "revoked")
+    );
     let second = authenticated_json_request(
         "/api/local/auth/invitations",
         r#"{"email":"new@example.test","displayName":"新成员（更新）","role":"lead"}"#,
@@ -1242,7 +1250,7 @@ async fn json_response(response: Response) -> (StatusCode, Value) {
     (status, serde_json::from_slice(&body).unwrap())
 }
 
-async fn login_cookie(app: Router, email: &str) -> String {
+pub(super) async fn login_cookie(app: Router, email: &str) -> String {
     let request = json_request(
         "/api/local/auth/login",
         format!(r#"{{"email":"{email}","password":"synthetic-password-only"}}"#),
@@ -1255,7 +1263,7 @@ async fn login_cookie(app: Router, email: &str) -> String {
         .to_owned()
 }
 
-async fn active_member(pool: &sqlx::PgPool, email: &str, role: &str) -> Uuid {
+pub(super) async fn active_member(pool: &sqlx::PgPool, email: &str, role: &str) -> Uuid {
     let password_hash = Argon2::default()
         .hash_password(
             b"synthetic-password-only",
@@ -1299,7 +1307,7 @@ async fn fresh_session(pool: &sqlx::PgPool, member_ref: Uuid) -> String {
     .await
 }
 
-async fn stored_session(
+pub(super) async fn stored_session(
     pool: &sqlx::PgPool,
     member_ref: Uuid,
     token: &str,

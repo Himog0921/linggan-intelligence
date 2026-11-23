@@ -33,6 +33,9 @@ mod content_workbench_browser_tests;
 mod content_workbench_sources_api;
 mod corpus_shell_api;
 mod creation_assets_api;
+mod creation_members;
+#[cfg(test)]
+mod creation_members_tests;
 #[cfg(test)]
 mod creation_assets_api_tests;
 mod creator_lifecycle_api;
@@ -422,10 +425,19 @@ fn router_with_public_access(
         .merge(web_app::routes())
         .merge(web_app::authenticated_routes())
         .merge(ops::routes())
-        .merge(content_workbench_api::routes())
-        .merge(content_workbench_sources_api::routes())
-        .merge(content_workbench_ai_api::routes())
-        .merge(creation_assets_api::routes())
+        .merge(creation_members::routes(&state))
+        .merge(
+            Router::new()
+                .merge(content_workbench_api::routes())
+                .merge(content_workbench_sources_api::routes())
+                .merge(content_workbench_ai_api::routes())
+                .merge(creation_assets_api::routes())
+                .route_layer(axum::middleware::from_fn_with_state(
+                    state.clone(),
+                    creation_members::admin_guard,
+                ))
+                .layer(axum::middleware::from_fn(comment_study::local_comment_study_guard)),
+        )
         .route("/corpus", get(corpus_entry))
         .route("/collection", get(collection_entry))
         .layer(axum::middleware::from_fn_with_state(

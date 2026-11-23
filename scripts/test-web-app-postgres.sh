@@ -215,6 +215,10 @@ run_proof "$proof_dir/ops" \
   -- --ignored --nocapture --test-threads=1
 printf '%s\n' 'WEB-REACT-001 E operations five-page real-chain proof passed (isolated database only)'
 
+run_proof "$proof_dir/ops" cargo test -p linggan-api --bins --locked -- --ignored --nocapture --test-threads=1 \
+  creation_members_share_reads_and_keep_writes_and_assets_scoped \
+  draft_registration_is_atomic_and_later_views_use_the_same_record
+
 # 阶段 F：完整主题图谱 + 独立 Workspace；本机真实 UI 对照另存 private，不上传 CI。
 mkdir -p "$proof_dir/topics"
 run_proof "$proof_dir/topics" cargo test -p linggan-api --bins --locked local_web::topic_workspace_tests -- --ignored --nocapture --test-threads=1

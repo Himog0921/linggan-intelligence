@@ -422,7 +422,7 @@ pub(crate) async fn prepare(
         }
     }
     if let Some(account) = doc.account_ref {
-        let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ops_account WHERE account_ref=$1 AND domain_ref=$2 AND ledger_state='in_ledger')").bind(account).bind(domain).fetch_one(&mut **tx).await?;
+        let valid:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ops_account WHERE account_ref=$1 AND domain_ref=$2 AND ledger_state IN ('in_ledger','native_active'))").bind(account).bind(domain).fetch_one(&mut **tx).await?;
         if !valid {
             return Err(WorkbenchError::Invalid("accountRef"));
         }
