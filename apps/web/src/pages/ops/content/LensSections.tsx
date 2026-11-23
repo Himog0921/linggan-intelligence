@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from 'react';
-import { Tabs } from '../ui';
+import { Tag, Tabs } from '../ui';
 import { dims, labels, percent, type Dimension, type Drill, type EffectDimension, type Rate, type Snapshot } from './api';
 import css from './Lens.module.css';
 
@@ -73,7 +73,7 @@ export function Effects({ snapshot, open }: { snapshot: Snapshot; open: Open }) 
   const [dim, setDim] = useState<EffectDimension>('offer');
   const effect = snapshot.effect[dim];
   const labelFor = (k: string) => snapshot.structure[dim].find(v => v.key === k)?.name ?? k;
-  return <section className={css.section}><h2 className={css.heading}>发布效果</h2>
+  return <section className={css.section}><header className={css.heading}><h2>发布效果</h2><Tag>待验证的选题线索</Tag></header>
     <Tabs label="效果维度" values={dimTabs.filter(([v]) => v !== 'situation')} current={dim} onSelect={v => setDim(v as EffectDimension)} compact />
     {!effect.available ? <p role="status">{labels[dim]}的复标一致率不足，暂不展示该维度的效果。</p> :
       <div className={css.effectTable}><table className={css.effects}><thead><tr><th>{labels[dim]}</th><th>过千率</th><th>评论活跃率</th><th>千次阅读评论数</th><th>阅读量中位数</th><th>爆款篇数</th><th>账号内阅读偏差</th></tr></thead>
