@@ -8,6 +8,7 @@ import { StructuralTemplateLibrary } from './StructuralTemplateLibrary';
 import * as api from './structuralTemplatesApi';
 import { ApiError } from '../../../shared/api';
 import { newDocument } from '../workbenchModel';
+import { chooseOption } from '../../../test/selectField';
 vi.mock('./structuralTemplatesApi', async original => ({ ...(await original<typeof import('./structuralTemplatesApi')>()), createTemplate: vi.fn(), listTemplates: vi.fn(), reviewTemplate: vi.fn(), templateHistory: vi.fn(), reviseTemplate: vi.fn() }));
 const work = '00000000-0000-4000-8000-000000000001';
 const revision = '00000000-0000-4000-8000-000000000002';
@@ -54,7 +55,7 @@ it('filters samples and retries a version edit with the same request', async () 
   vi.mocked(api.listTemplates).mockResolvedValue([template, { ...template, code: 'YB-0002', status: 'ok' }]);
   vi.mocked(api.reviseTemplate).mockRejectedValueOnce(new Error('network')).mockResolvedValueOnce({ template: { ...template, revision: 2 }, replayed: true });
   wrap(<StructuralTemplateLibrary domainRef={work} onPendingChange={() => {}} />);
-  fireEvent.change(screen.getByLabelText('样板状态'), { target: { value: 'review' } });
+  chooseOption('样板状态', '待审核');
   fireEvent.click(await screen.findByRole('button', { name: /YB-0001/ }));
   expect(screen.queryByRole('button', { name: /YB-0002/ })).not.toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: '编辑结构' }));

@@ -7,6 +7,7 @@ import type { AccountView, FactCard, FactCardView, Identity, Sentence } from './
 import { AssetsLibrary } from './AssetsLibrary';
 import * as stylesApi from './stylesApi';
 import * as templatesApi from './structuralTemplatesApi';
+import { chooseOption } from '../../../test/selectField';
 
 vi.mock('./assetsApi', async importOriginal => {
   const original = await importOriginal<typeof import('./assetsApi')>();
@@ -249,7 +250,7 @@ describe('衔接句', () => {
     open('衔接句');
     fireEvent.click((await screen.findAllByRole('button', { name: '加入（待审）' }))[0]!);
     const form = await screen.findByRole('form', { name: '新增衔接句' });
-    fireEvent.change(within(form).getByLabelText('适合哪种身份'), { target: { value: 'coach' } });
+    chooseOption('适合哪种身份', '陪跑老师');
     fireEvent.change(within(form).getByLabelText(/这句话/), { target: { value: ' 我是陪跑老师 ' } });
     expect(within(form).getByRole('button', { name: '加入句库（待审）' })).toBeDisabled();
     expect(await within(form).findByText(/这句有 80 个字/)).toBeInTheDocument();

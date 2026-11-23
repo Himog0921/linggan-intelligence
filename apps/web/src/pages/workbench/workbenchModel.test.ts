@@ -1,6 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { newDocument, parseWorkDocument, parseSaveReceipt, parseSourceList, parseAiStatus, scalarRange, WorkbenchContractError } from './workbenchModel';
+import { GROUPS, newDocument, parseWorkDocument, parseSaveReceipt, parseSourceList, parseAiStatus, scalarRange, WorkbenchContractError, type CanvasGroup } from './workbenchModel';
+import { groupLabel } from './deskCards';
 const id = '00000000-0000-4000-8000-000000000001';
+describe('what a material card is for', () => {
+  // Names as the server stores them (CanvasGroup in content_workbench/types.rs).
+  const SERVER_ROLES: CanvasGroup[] = ['inbox', 'opening', 'resonance', 'experience', 'argument', 'example', 'ending', 'title_reference', 'reference_only', 'counterexample'];
+  const card = (group: string) => ({ id: id, excerptId: null, group, note: '', expression: '', expressionRevision: 1 });
+  it('decodes every role the server can store, in the order saved', () => {
+    const document = parseWorkDocument({ ...newDocument(), canvas: SERVER_ROLES.map(card) });
+    expect(document.canvas.map(item => item.group)).toEqual(SERVER_ROLES);
+  });
+  it('still reads drafts saved before the sample roles existed', () => {
+    const older = ['inbox', 'opening', 'argument', 'example', 'ending'];
+    expect(parseWorkDocument({ ...newDocument(), canvas: older.map(card) }).canvas).toHaveLength(5);
+  });
+  it('refuses a role it does not know instead of guessing', () => {
+    for (const bad of ['bogus', 'Resonance', 'title-reference', '']) {
+      expect(() => parseWorkDocument({ ...newDocument(), canvas: [card(bad)] })).toThrow(WorkbenchContractError);
+    }
+  });
+  it('lists each role once, with one label each, and every picker and card chip uses that list', () => {
+    expect(GROUPS.map(item => item.id)).toEqual(SERVER_ROLES);
+    expect(new Set(GROUPS.map(item => item.label)).size).toBe(GROUPS.length);
+    expect(GROUPS.map(item => item.label)).toEqual(['待分', '开头', '共鸣', '经历', '观点', '例子', '结尾', '标题参考', '只做参考', '反例']);
+    for (const item of GROUPS) expect(groupLabel[item.id]).toBe(item.label);
+  });
+});
+
 describe('closed workbench boundary', () => {
   it('preserves topic angle provenance through serialization and accepts legacy documents', () => {
     const legacy = Object.fromEntries(Object.entries(newDocument()).filter(([key]) => key !== 'topicAngleRefs'));

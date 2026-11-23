@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 import { ManuscriptEditor } from './ManuscriptEditor';
 import { newDocument, type WorkDocument } from './workbenchModel';
+import { chooseOption, selectedText } from '../../test/selectField';
 
 const first = '00000000-0000-4000-8000-000000000001';
 const experience = '00000000-0000-4000-8000-000000000002';
@@ -64,7 +65,9 @@ describe('段落步骤', () => {  it('names a labelled paragraph by its step and
 
   it('labels a paragraph from the picker and drops the label with the paragraph', () => {
     render(<Editor initial={{ ...newDocument(), paragraphs: [{ id: first, text: '一段' }] }} />);
-    fireEvent.change(screen.getByLabelText('第 1 段的步骤'), { target: { value: 'ending' } });
+    expect(selectedText('第 1 段的步骤')).toBe('标步骤');
+    chooseOption('第 1 段的步骤', '收尾');
+    expect(selectedText('第 1 段的步骤')).toBe('收尾');
     const label = screen.getByLabelText('正文第 1 段').parentElement!.parentElement!.querySelector('.para-label')!;
     expect(label.textContent).toBe('收尾');
     fireEvent.click(within(screen.getByLabelText('正文第 1 段').parentElement!).getByRole('button', { name: '删除这一段' }));

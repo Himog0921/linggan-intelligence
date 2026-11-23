@@ -8,6 +8,8 @@ import type { PersonaFact } from './assetsModel';
 import { identitySummary } from './assetsText';
 import { IdentityForm } from './IdentityForm';
 import styles from './Assets.module.css';
+import { SelectField } from '../../../shared/SelectField';
+import { FieldLabel } from '../FieldLabel';
 
 type Operation = 'save' | 'confirm' | 'withdraw';
 function PersonaForm({ accountRef, personRef, current: observed, checking, onSaved, onDirty, onPending, onReload }: {
@@ -117,7 +119,7 @@ function PersonaForm({ accountRef, personRef, current: observed, checking, onSav
     <label>事实名称<input value={key} disabled={!!initial || locked} maxLength={40} onChange={event => setKey(event.target.value)} placeholder="例如：年级" /></label>
     <label><input type="checkbox" checked={missing} disabled={locked} onChange={event => setMissing(event.target.checked)} /> 缺，待补充</label>
     <label>事实内容<input value={text} disabled={locked || missing} maxLength={500} onChange={event => setText(event.target.value)} /></label>
-    <label>来源<select value={source} disabled={locked} onChange={event => setSource(event.target.value)}><option value="manual">人工记录</option><option value="oral">本人口述</option><option value="manuscript">稿件</option><option value="inferred">系统推断</option></select></label>
+    <FieldLabel>来源<SelectField label="来源" value={source} disabled={locked} options={[{ value: 'manual', label: '人工记录' }, { value: 'oral', label: '本人口述' }, { value: 'manuscript', label: '稿件' }, { value: 'inferred', label: '系统推断' }]} onChange={setSource} /></FieldLabel>
     {conflict ? <fieldset className={styles.choice} disabled={locked}><legend>新旧事实不一致</legend><p>旧内容：{initial?.text}</p>
       <label><input type="radio" name="persona-conflict" checked={decision === 'keep_old'} onChange={() => setDecision('keep_old')} /> 保留原来的</label>
       <label><input type="radio" name="persona-conflict" checked={decision === 'use_new'} onChange={() => setDecision('use_new')} /> 以新的为准</label>
@@ -126,7 +128,7 @@ function PersonaForm({ accountRef, personRef, current: observed, checking, onSav
     <ActionButton type="submit" variant="primary" disabled={locked || (!!initial && !dirty) || (!initial && !capturePerson) || !key.trim() || (!missing && !text.trim()) || (conflict && !decision)}>保存事实</ActionButton>
     {initial?.status !== 'confirmed' && initial?.status !== 'missing' && initial ? <fieldset className={styles.choice} disabled={locked}><legend>本人确认</legend>
       <label><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} /> 本人已确认当前事实</label>
-      <label>确认方式<select value={method} onChange={event => setMethod(event.target.value)}><option value="subject_present">本人当面确认</option><option value="subject_statement">本人明确表示同意</option></select></label>
+      <FieldLabel>确认方式<SelectField label="确认方式" value={method} options={[{ value: 'subject_present', label: '本人当面确认' }, { value: 'subject_statement', label: '本人明确表示同意' }]} onChange={setMethod} /></FieldLabel>
       <ActionButton disabled={!confirmed || dirty} onClick={() => void run('confirm')}>登记本人确认</ActionButton>
       {dirty ? <p className={styles.hint}>请先保存更改，再确认保存后的事实。</p> : null}</fieldset> : initial?.status === 'confirmed' ? <p>本人已确认 · 修改后需要再次确认。</p> : null}
     {initial ? <><details><summary>查看事实历史</summary>

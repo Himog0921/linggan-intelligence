@@ -3,7 +3,7 @@ import { ApiError, requestJson } from '../../../shared/api';
 import type { BridgeGroup, WorkDocument } from '../workbenchModel';
 import { newDocument } from '../workbenchModel';
 import {
-  decodeAccounts, decodeCandidates, decodeCheckReport, decodeCopiedMark, decodeCopyReady, decodeCopyStatus,
+  decodeAccounts, decodeCandidates, decodeCheckReport, decodeCopiedMark, decodeCopyPreview, decodeCopyReady, decodeCopyStatus,
   decodeFactCardReceipt, decodeFactCards, decodeIdentityReceipt, decodeSentenceCheck, decodeSentenceReceipt, decodeExperiences, decodeExperienceReceipt, decodeExperienceRequest, decodeExperienceCancellation,
   decodePersonaFacts, decodePersonaReceipt, decodePersonaHistory, decodePersonaRequest,
   decodePublicationCandidates, decodePublicationLink, decodePublicationLinks, decodePublicationUnlink,
@@ -148,6 +148,10 @@ export async function checkDraft(document: WorkDocument, signal?: AbortSignal, w
 }
 export async function prepareCopy(workId: string, command: { requestId: string; expectedRevision: string }) {
   return decodeCopyReady(await send('POST', `/works/${id(workId)}/copy`, command));
+}
+/** What copying the saved revision would give, from the server's own copy rules. Reads only: no receipt is written. */
+export async function copyPreview(workId: string, signal?: AbortSignal) {
+  return decodeCopyPreview(await requestJson(`${base}/works/${id(workId)}/copy-preview`, { signal }));
 }
 export async function confirmCopy(workId: string, receiptRef: string, command: { requestId: string }) {
   return decodeCopiedMark(await send('POST', `/works/${id(workId)}/copy/${id(receiptRef)}/confirm`, command));

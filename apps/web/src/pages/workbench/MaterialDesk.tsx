@@ -2,8 +2,10 @@ import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import * as api from './workbenchApi';
-import type { CanvasBlock, CanvasGroup, Citation, SourceItem, WorkDocument, WorkSummary } from './workbenchModel';
+import { GROUPS, type CanvasBlock, type CanvasGroup, type Citation, type SourceItem, type WorkDocument, type WorkSummary } from './workbenchModel';
+import { cardsOf, kindDot, kindLabel, softRole, type Card } from './deskCards';
 import styles from './WorkbenchPage.module.css';
+import { SelectField } from '../../shared/SelectField';
 
 const CARD_W = 208;
 const CARD_COL = 232;
@@ -19,43 +21,15 @@ const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2;
 const SHELF_LIMIT = 40;
 
-const kindLabel: Record<string, string> = {
-  note: '原笔记', comment: '评论', ocr: '图片文字', transcript: '口播', frame_text: '画面文字', ops_publication: '发布记录',
-};
-const kindDot: Record<string, string> = {
-  note: 'warn', comment: 'info', ocr: 'ok', transcript: 'ok', frame_text: 'ok', ops_publication: 'info',
-};
-const groupLabel: Record<string, string> = { inbox: '待分', opening: '开头', argument: '论证', example: '例子', ending: '结尾' };
-const rolePicks: { id: CanvasGroup; label: string }[] = [
-  { id: 'inbox', label: '待分' },
-  { id: 'opening', label: '开头' },
-  { id: 'argument', label: '论证' },
-  { id: 'example', label: '例子' },
-  { id: 'ending', label: '结尾' },
-];
 const shelfFilters = [
   { id: '', label: '全部' },
   { id: 'note', label: '原笔记' },
   { id: 'comment', label: '评论' },
+  { id: 'ops_publication', label: '我方发布' },
   { id: 'transcript', label: '口播' },
   { id: 'ocr', label: '图片文字' },
 ] as const;
 
-interface Card {
-  id: string;
-  note: boolean;
-  kind: string;
-  dot: string;
-  text: string;
-  expression: string;
-  group: CanvasGroup;
-  role: string;
-  memo: string;
-  excerptId: string | null;
-  meta: string;
-  x: number;
-  y: number;
-}
 interface Frame {
   work: WorkSummary;
   x: number;
@@ -92,43 +66,6 @@ interface Props {
   onCreateFramePending?: boolean;
 }
 
-function cardsOf(document: WorkDocument | undefined): Card[] {
-  if (!document) return [];
-  return document.canvas.map((block: CanvasBlock) => {
-    const excerpt = block.excerptId ? document.excerpts.find(item => item.id === block.excerptId) : undefined;
-    const role = groupLabel[block.group] ?? '待分';
-    if (excerpt) return {
-      id: block.id,
-      note: false,
-      kind: kindLabel[excerpt.citation.sourceKind] ?? '材料',
-      dot: kindDot[excerpt.citation.sourceKind] ?? 'info',
-      text: excerpt.selectedText ?? '来源已受限或不可用',
-      expression: '',
-      group: block.group,
-      role,
-      memo: block.note.trim(),
-      excerptId: excerpt.id,
-      meta: `${kindLabel[excerpt.citation.sourceKind] ?? '来源'} · 采集于 ${new Date(excerpt.citation.asOf).toLocaleDateString('zh-CN')}`,
-      x: 0,
-      y: 0,
-    };
-    return {
-      id: block.id,
-      note: true,
-      kind: '便签',
-      dot: 'warn',
-      text: block.expression.trim() || block.note.trim() || '（空便签）',
-      expression: block.expression,
-      group: block.group,
-      role,
-      memo: block.note.trim(),
-      excerptId: null,
-      meta: '便签',
-      x: 0,
-      y: 0,
-    };
-  });
-}
 
 function layout(
   works: WorkSummary[],
@@ -253,6 +190,9 @@ export function MaterialDesk({
     gcTime: 0,
   });
   const [shelfOpen, setShelfOpen] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
+  // Opening the shelf puts the cursor in the search field, as in the demo.
+  useEffect(() => { if (shelfOpen) searchInput.current?.focus({ preventScroll: true }); }, [shelfOpen]);
   const [shelfScope, setShelfScope] = useState<'selected' | 'all'>(() => currentDocument.materials.length ? 'selected' : 'all');
   const [query, setQuery] = useState('');
   const [filter, setFilter] = useState<string>('');
@@ -561,7 +501,7 @@ export function MaterialDesk({
       </div>
       <div className="find">
         <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5" /><path d="m13 13 4 4" /></svg>
-        <input aria-label="搜索材料" placeholder="搜爆款、评论、经历、跨行业标题" value={query} onChange={event => setQuery(event.target.value)} autoComplete="off" />
+        <input ref={searchInput} aria-label="搜索材料" placeholder="搜原笔记、评论、我方发布" value={query} onChange={event => setQuery(event.target.value)} autoComplete="off" />
       </div>
       <div className="d-filters" role="group" aria-label="材料类型">
         {shelfFilters.map(item => <button key={item.id || 'all'} type="button" aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{item.label}</button>)}
@@ -604,7 +544,7 @@ export function MaterialDesk({
         {frames.map(frame => {
           const editable = frame.work.workId === currentWorkId;
           return <article key={frame.work.workId}
-            className={`frame${frame.work.workId === currentWorkId ? ' hot' : ''}${frame.work.workId === focus ? ' focused-frame' : ''}`}
+            className={`frame${frame.work.workId === currentWorkId ? ' sel' : ''}${frame.work.workId === focus ? ' focused-frame' : ''}`}
             style={{ left: frame.x, top: frame.y, width: frame.w, height: frame.h }} aria-label={`选题框：${frame.title}`}>
             <header className="frame-head" onPointerDown={event => beginFrameDrag(event, frame)}
               onPointerMove={moveFrame} onPointerUp={event => void endFrame(event)} onPointerCancel={event => void endFrame(event)}
@@ -653,7 +593,7 @@ export function MaterialDesk({
                 ? <Editable className="txt" value={card.text} editable={editable} label="便签内容" onCommit={next => onUpdateCard(card.id, { expression: next })} />
                 : <p className="q paper">{card.text}</p>}
               <div className="mcard-foot">
-                <button type="button" className={`role-chip${card.role === '待分' ? ' soft' : ''}`} aria-label="修改材料用途" onClick={event => { event.stopPropagation(); openCard(card, 'role', event); }}>{card.role}</button>
+                <button type="button" className={`role-chip${softRole(card.group) ? ' soft' : ''}`} aria-label="修改材料用途" onClick={event => { event.stopPropagation(); openCard(card, 'role', event); }}>{card.role}</button>
                 <button type="button" className="mnote" aria-label="编辑材料思路" title={card.memo || '点一下，写思路'} onClick={event => { event.stopPropagation(); openCard(card, 'memo', event); }}>{card.memo || <span className="muted">点一下，写思路</span>}</button>
               </div>
             </div>)}
@@ -694,7 +634,7 @@ export function MaterialDesk({
         <div className="insp-body">
           <p className="editor-caption">{editorCard.text}</p>
           <div className="role-picks" role="group" aria-label="材料用途">
-            {rolePicks.map(item => <button key={item.id} type="button" aria-pressed={editorCard.group === item.id} onClick={() => onUpdateCard(editorCard.id, { group: item.id })}>{item.label}</button>)}
+            {GROUPS.map(item => <button key={item.id} type="button" aria-pressed={editorCard.group === item.id} onClick={() => onUpdateCard(editorCard.id, { group: item.id })}>{item.label}</button>)}
           </div>
         </div>
       </section> : null}
@@ -712,18 +652,13 @@ export function MaterialDesk({
             <p className="editor-caption">改完自动保存到这篇稿件。</p>
             <label className="lbl" htmlFor="desk-frame-title">选题</label>
             <input id="desk-frame-title" className="input" value={settingsFrame.title} onChange={event => onRenameTitle(event.target.value)} />
-            <label className="lbl" htmlFor="desk-frame-account">给哪个账号写</label>
-            <select id="desk-frame-account" className="input" value={currentDocument.accountRef ?? ''} onChange={event => onPickAccount(event.target.value || null)}>
-              <option value="">不指定</option>
-              {accounts.map(account => <option key={account.ref} value={account.ref}>{account.name}</option>)}
-            </select>
+            <p className="lbl">给哪个账号写</p>
+            <SelectField label="给哪个账号写" value={currentDocument.accountRef ?? ''} options={[{ value: '', label: '不指定' }, ...accounts.map(account => ({ value: account.ref, label: account.name }))]} onChange={value => onPickAccount(value || null)} />
             <p className="lbl">材料 · {settingsFrame.cards.length} 张 · 每张写清用途和思路</p>
             {settingsFrame.cards.length ? settingsFrame.cards.map((card, index) => <div className="mrow" key={card.id}>
               <div className="mrow-top"><span className={`dot ${card.dot}`} /><span className="aux">{card.kind}</span><span className="mrow-text">{card.text}</span></div>
               <div className="mrow-edit">
-                <select className="input sm" aria-label={`材料 ${index + 1} 用途`} value={card.group} onChange={event => onUpdateCard(card.id, { group: event.target.value as CanvasGroup })}>
-                  {rolePicks.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
-                </select>
+                <SelectField compact label={`材料 ${index + 1} 用途`} value={card.group} options={GROUPS.map(item => ({ value: item.id, label: item.label }))} onChange={value => onUpdateCard(card.id, { group: value as CanvasGroup })} />
                 <input className="input sm" aria-label={`材料 ${index + 1} 思路`} placeholder="写给 AI 的一句思路" value={card.memo} onChange={event => onUpdateCard(card.id, { note: event.target.value })} />
               </div>
             </div>) : <p className="aux">还没有材料。从左边点“找材料”，选“放进框”。</p>}

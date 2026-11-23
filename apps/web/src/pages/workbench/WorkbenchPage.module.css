@@ -20,21 +20,21 @@
 }
 .studioBleed {max-width:none;overflow:hidden;padding:0;}
 .workspace * {box-sizing:border-box;}
-.workspace :where(button:not([data-action-button]):not([data-find] button)),.workspace input:not([data-find] input),.workspace textarea,.workspace select,.dialog button:not([data-action-button]),.dialog input,.dialog textarea,.dialog select {font:inherit;color:inherit;}
-.workspace :where(button:not([data-action-button]):not([data-find] button)),.dialog button:not([data-action-button]) {cursor:pointer;border:1px solid var(--lgi-border);border-radius:var(--lgi-radius-none);background:var(--lgi-canvas);padding:var(--lgi-space-2) var(--lgi-space-3);min-height:var(--lgi-space-10);}
-.workspace :where(button:not([data-action-button]):not([data-find] button)):disabled,.dialog button:not([data-action-button]):disabled {cursor:default;color:var(--lgi-muted);background:var(--lgi-canvas-low);}
-.workspace :where(button:not([data-action-button]):not([data-find] button)):hover:not(:disabled),.dialog button:not([data-action-button]):hover:not(:disabled) {background:var(--lgi-canvas-low);}
-.workspace :where(button:not([data-action-button]):not([data-find] button)):focus-visible,.workspace a:focus-visible,.dialog :focus-visible:not([data-action-button]) {outline:2px solid var(--lgi-focus);outline-offset:2px;}
-.workspace input:not([data-find] input),.workspace textarea,.workspace select,.dialog input,.dialog textarea,.dialog select {border:1px solid var(--lgi-border);border-radius:var(--lgi-radius-none);background:var(--lgi-canvas);padding:var(--lgi-space-2) var(--lgi-space-3);min-width:0;max-width:100%;}
-.workspace textarea,.dialog textarea {resize:vertical;min-height:var(--lgi-space-24);line-height:var(--lgi-lh-longform);}
-.workspace label,.dialog label {display:grid;gap:var(--lgi-space-2);color:var(--lgi-body);}
-.workspace small,.dialog small {font-size:var(--lgi-text-data);color:var(--lgi-muted);}
-.workspace h1,.workspace h2,.workspace h3,.dialog h2,.dialog h3 {margin:0;font-size:var(--lgi-text-section);line-height:var(--lgi-lh-heading);font-weight:var(--lgi-weight-semibold);}
-.workspace p,.dialog p {margin:var(--lgi-space-2) 0;}
-.workspace blockquote,.dialog blockquote {margin:var(--lgi-space-3) 0;font-family:var(--lgi-font-evidence);white-space:pre-wrap;overflow-wrap:anywhere;}
-.workspace pre,.dialog pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--lgi-text-data);max-height:50vh;overflow:auto;}
-.workspace .primary:not([data-action-button]),.dialog .primary:not([data-action-button]) {background:var(--lgi-signal-ink);color:var(--lgi-on-dark);border-color:var(--lgi-signal-ink);}
-.workspace .primary:not([data-action-button]):hover:not(:disabled),.dialog .primary:not([data-action-button]):hover:not(:disabled) {background:var(--lgi-signal-hover);}
+.workspace :where(button:not([data-action-button]):not([data-find] button):not(:global(.gm-studio) button)),.workspace input:not(:global(.gm-studio) input):not([data-find] input),.workspace textarea:not(:global(.gm-studio) textarea),.workspace select:not(:global(.gm-studio) select),.dialog button:not([data-action-button]),.dialog input,.dialog textarea,.dialog select {font:inherit;color:inherit;}
+.workspace :where(button:not([data-action-button]):not([data-find] button):not(:global(.gm-studio) button)),.dialog button:not([data-action-button]) {cursor:pointer;border:1px solid var(--lgi-border);border-radius:var(--lgi-radius-none);background:var(--lgi-canvas);padding:var(--lgi-space-2) var(--lgi-space-3);min-height:var(--lgi-space-10);}
+.workspace :where(button:not([data-action-button]):not([data-find] button):not(:global(.gm-studio) button)):disabled,.dialog button:not([data-action-button]):disabled {cursor:default;color:var(--lgi-muted);background:var(--lgi-canvas-low);}
+.workspace :where(button:not([data-action-button]):not([data-find] button):not(:global(.gm-studio) button)):hover:not(:disabled),.dialog button:not([data-action-button]):hover:not(:disabled) {background:var(--lgi-canvas-low);}
+.workspace :where(button:not([data-action-button]):not([data-find] button):not(:global(.gm-studio) button)):focus-visible,.workspace a:not(:global(.gm-studio) a):focus-visible,.dialog :focus-visible:not([data-action-button]) {outline:2px solid var(--lgi-focus);outline-offset:2px;}
+.workspace input:not(:global(.gm-studio) input):not([data-find] input),.workspace textarea:not(:global(.gm-studio) textarea),.workspace select:not(:global(.gm-studio) select),.dialog input,.dialog textarea,.dialog select {border:1px solid var(--lgi-border);border-radius:var(--lgi-radius-none);background:var(--lgi-canvas);padding:var(--lgi-space-2) var(--lgi-space-3);min-width:0;max-width:100%;}
+.workspace textarea:not(:global(.gm-studio) textarea),.dialog textarea {resize:vertical;min-height:var(--lgi-space-24);line-height:var(--lgi-lh-longform);}
+.workspace label:not(:global(.gm-studio) label),.dialog label {display:grid;gap:var(--lgi-space-2);color:var(--lgi-body);}
+.workspace small:not(:global(.gm-studio) small),.dialog small {font-size:var(--lgi-text-data);color:var(--lgi-muted);}
+.workspace h1:not(:global(.gm-studio) h1),.workspace h2:not(:global(.gm-studio) h2),.workspace h3:not(:global(.gm-studio) h3),.dialog h2,.dialog h3 {margin:0;font-size:var(--lgi-text-section);line-height:var(--lgi-lh-heading);font-weight:var(--lgi-weight-semibold);}
+.workspace p:not(:global(.gm-studio) p),.dialog p {margin:var(--lgi-space-2) 0;}
+.workspace blockquote:not(:global(.gm-studio) blockquote),.dialog blockquote {margin:var(--lgi-space-3) 0;font-family:var(--lgi-font-evidence);white-space:pre-wrap;overflow-wrap:anywhere;}
+.workspace pre:not(:global(.gm-studio) pre),.dialog pre {white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--lgi-text-data);max-height:50vh;overflow:auto;}
+.workspace .primary:not([data-action-button]):not(:global(.gm-studio) *),.dialog .primary:not([data-action-button]) {background:var(--lgi-signal-ink);color:var(--lgi-on-dark);border-color:var(--lgi-signal-ink);}
+.workspace .primary:not([data-action-button]):not(:global(.gm-studio) *):hover:not(:disabled),.dialog .primary:not([data-action-button]):hover:not(:disabled) {background:var(--lgi-signal-hover);}
 .opsNav {display:flex;gap:var(--lgi-space-4);align-items:center;border-bottom:1px solid var(--lgi-border);padding:var(--lgi-space-2) 0;overflow:auto;white-space:nowrap;}
 .opsNav a {color:var(--lgi-muted);text-decoration:none;font-size:var(--lgi-text-data);}
 .opsNav button:not([data-action-button]) {border:0;background:none;padding:var(--lgi-space-2) 0;}

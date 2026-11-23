@@ -16,17 +16,19 @@ import { ManuscriptEditor } from './ManuscriptEditor';
 import { CanvasBoard } from './CanvasBoard';
 import { RevisionCompare } from './RevisionCompare';
 import { TopicLibrary } from './TopicLibrary';
-import { CheckPanel } from './assets/CheckPanel';
+import { CheckPanel, type PanelView } from './assets/CheckPanel';
 import { CreationPublicationButton } from './CreationPublicationButton';
 import { PublicationLinker, type PublicationPending } from './assets/PublicationLinker';
+import { PublicationCard } from './assets/PublicationCard';
 import { SaveStructuralTemplate } from './assets/SaveStructuralTemplate';
 import { listTemplates, type CreateCommand as TemplateCreateCommand } from './assets/structuralTemplatesApi';
 import { listStyles } from './assets/stylesApi';
-import { AssetsLibrary } from './assets/AssetsLibrary';
+import { AssetsLibrary, type AssetKind } from './assets/AssetsLibrary';
 import { MaterialDesk } from './MaterialDesk';
 import { newImagePage } from './imagePageFactory';
 import { ImagePages } from './ImagePages';
 import styles from './WorkbenchPage.module.css';
+import { SelectField } from '../../shared/SelectField';
 type View = 'desk' | 'canvas' | 'body' | 'cover' | 'inner' | 'export';
 const VIEWS: readonly { id: View; label: string }[] = [{id:'desk',label:'选题与材料'},{id:'canvas',label:'创作画布'},{id:'body',label:'正文'},{id:'cover',label:'封面'},{id:'inner',label:'内页'},{id:'export',label:'预览与导出'}];
 function targetLocation(target: UseTarget, document: WorkDocument): {
@@ -121,6 +123,7 @@ export function WorkbenchPage() {
   const sectionParam = params.get('section');
   const section: 'today' | 'works' = work || sectionParam === 'works' ? 'works' : 'today';
   const [assetsOpen, setAssetsOpen] = useState(sectionParam === 'assets');
+  const [assetsKind, setAssetsKind] = useState<AssetKind>('persona');
   const [assetClosePrompt, setAssetClosePrompt] = useState(false);
   const view = viewValue(params.get('view'));
   const [title, setTitle] = useState('');
@@ -238,6 +241,9 @@ export function WorkbenchPage() {
       setCreating(false);
     }
   }
+  function openAssets(kind: AssetKind = 'persona') {
+    setAssetsKind(kind); setAssetsAnchor(assetsRoute); setAssetsOpen(true);
+  }
   function closeAssets() {
     if (assetPending || assetDirty) { setAssetClosePrompt(true); return; }
     setAssetsOpen(false);
@@ -258,7 +264,7 @@ export function WorkbenchPage() {
       <ActionButton variant="primary" onClick={() => setParams({ domain, work, view: 'body' })}><svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="m10 4-6 6 6 6M4 10h13" /></svg>返回写稿</ActionButton>
     </> : <>
       {works.data ? <span>待完成 <b>{works.data.filter(item => !item.publishedRevisionId).length}</b> · 已发布 <b>{works.data.filter(item => item.publishedRevisionId).length}</b></span> : null}
-      <ActionButton variant="outline" disabled={!domain || !validDomain} onClick={() => { setAssetsAnchor(assetsRoute); setAssetsOpen(true); }}>资产库</ActionButton>
+      <ActionButton variant="outline" disabled={!domain || !validDomain} onClick={() => openAssets()}>资产库</ActionButton>
     </>}>
 <main className={`${styles.workspace}${work && view !== 'cover' && view !== 'inner' && view !== 'export' ? ` ${styles.studioBleed}` : ''}`} aria-label="运营创作">
     {blocker.state === 'blocked' ? assetDirty && !assetPending && !anyTemplatePending && !anyPublicationPending && !anyTitlePending && !anyWritingPending ? <p role="alert" className={styles.error}>当前内容有未保存编辑。 <button type="button" onClick={() => blocker.reset()}>继续编辑</button> <button type="button" onClick={() => { setAssetDirty(false); setAssetReset(value => value + 1); blocker.proceed(); }}>丢弃编辑并离开</button></p> : <p role="alert" className={styles.error}>操作结果尚未确认，请先留在当前页面并沿用原请求重试。 <button type="button" onClick={() => blocker.reset()}>返回当前页面</button></p> : null}
@@ -276,7 +282,7 @@ export function WorkbenchPage() {
 <input aria-label="新选题标题" placeholder="新选题标题" value={title} disabled={creating || createUnknown} onChange={e => setTitle(e.target.value)} />
 <ActionButton type="submit" variant="primary" busy={creating} disabled={!title.trim() || creating}>{creating ? '建立中…' : createUnknown ? '核实原请求并重试' : '建立选题'}</ActionButton>
 </form>} /></section>}{openWorks.map(w => <div hidden={w.workId !== work || w.domainRef !== domain} key={w.workId}>
-<WorkEditor onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenAnchor={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} onNewDraft={() => void createWork('新选题')} onOpenDraftWriting={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} onSwitchWork={id => setParams({ domain: w.domainRef, work: id, view: 'desk' })} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
+<WorkEditor onWritingPending={markWritingPending} onTitlePending={markTitlePending} onPublicationPending={markPublicationPending} templateBlocked={blocker.state === 'blocked'} onResetTemplateBlock={() => { if (blocker.state === 'blocked') blocker.reset(); }} onTemplatePending={markTemplatePending} initial={w} ideas={ideas.data ?? []} ideaState={ideas.status} onOpenAnchor={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} drafts={works.data ?? []} draftsStatus={works.isError ? 'error' : works.isPending ? 'loading' : 'ready'} onOpenDraft={open} onNewDraft={() => void createWork('新选题')} onOpenDraftWriting={id => setParams({ domain: w.domainRef, work: id, view: 'body' })} onSwitchWork={id => setParams({ domain: w.domainRef, work: id, view: 'desk' })} onOpenAssets={openAssets} active={w.workId === work && w.domainRef === domain} view={viewValue(params.get('view'))} onView={view => setParams({
           domain: w.domainRef,
           work: w.workId,
           view
@@ -285,7 +291,7 @@ export function WorkbenchPage() {
     </main>
     {assetsOpen && domain ? <div className={`gm-studio ${styles.assetLayer}`}><div className="back asset-back" onMouseDown={event => { if (event.target === event.currentTarget) closeAssets(); }}>
       <section className="assets-modal" role="dialog" aria-modal="true" aria-labelledby="asset-modal-title">
-        <AssetsLibrary key={`${domain}:${assetReset}`} domainRef={domain} onPendingChange={setAssetPending} onDirtyChange={setAssetDirty} onClose={closeAssets} />
+        <AssetsLibrary key={`${domain}:${assetReset}:${assetsKind}`} domainRef={domain} initialKind={assetsKind} onPendingChange={setAssetPending} onDirtyChange={setAssetDirty} onClose={closeAssets} />
         {assetClosePrompt ? <div className={styles.assetClosePrompt} role="alert">
           <span>{assetPending ? '操作结果尚未确认，请稍候再关闭。' : '资产库里有未保存的编辑。'}</span>
           <button type="button" onClick={() => setAssetClosePrompt(false)}>继续编辑</button>
@@ -313,6 +319,7 @@ function WorkEditor({
   onOpenDraftWriting,
   onNewDraft,
   onSwitchWork,
+  onOpenAssets,
   active,
   view,
   onView
@@ -328,6 +335,7 @@ function WorkEditor({
   onOpenDraftWriting: (id: string) => void;
   onNewDraft: () => void;
   onSwitchWork: (id: string) => void;
+  onOpenAssets: (kind: AssetKind) => void;
   active: boolean;
   view: View;
   onView: (v: View) => void;
@@ -360,6 +368,7 @@ function WorkEditor({
   const [sourceInvalidated, setSourceInvalidated] = useState<WorkEnvelope | null>(null);
   const [sourceResetSequence, setSourceResetSequence] = useState(0);
   const [sourceRefreshSequence, setSourceRefreshSequence] = useState(0);
+  const [rightTab, setRightTab] = useState<PanelView>('checks');
   const [titleResult, setTitleResult] = useState<TitleStatus | null>(null);
   const [titleAcceptedRevision, setTitleAcceptedRevision] = useState<string | null>(null);
   const [titleCheckedSequence, setTitleCheckedSequence] = useState(-1);
@@ -1164,6 +1173,13 @@ function WorkEditor({
       textHash: ''
     });
   }
+  /** Opens the "放入作品" dialog for a desk card; the canvas and the writing sidebar both start placement here. */
+  function openPlacement(card: CanvasBlock) {
+    setPlacement(card);
+    setBodyTarget(document.uses.flatMap(use => use.canvasId === card.id && use.target.kind === 'paragraph' ? [use.target.paragraphId] : [])[0] ?? 'new');
+    setWantBody(true); setWantPage(false);
+    setPageTarget(document.pages.find(page => page.kind !== 'cover')?.id ?? '');
+  }
   function compose(value: boolean) {
     composition.current = value;
     setComposing(value);
@@ -1193,19 +1209,23 @@ function WorkEditor({
   </div> : null;
   const bodyTools = <details className={styles.writeTools} data-state={saveState}>
 <summary aria-label={`写稿工具，${saveStateText}`}><span aria-hidden="true">⋯</span></summary>
-<div className={styles.writeToolsPanel}>
-<div className={styles.steps}><button aria-pressed={!compareVisible} onClick={() => setCompareVisible(false)}>沉浸编辑</button><button disabled={document.experienceGaps.length > 0} title={document.experienceGaps.length ? '请先填好或删除经历位' : undefined} aria-pressed={compareVisible} onClick={() => {setCompareVisible(true);if(!compareBase){setCompareBase(live.current);setComparisonDrafts(null);}}}>改稿对照</button></div>
-<div className={styles.row}>
+<div className={`${styles.writeToolsPanel} tools-menu`}>
+<div className="tm-sec"><span className="tm-label">视图</span>
+<div className="seg" role="group" aria-label="写稿视图"><button type="button" aria-pressed={!compareVisible} onClick={() => setCompareVisible(false)}>沉浸编辑</button><button type="button" disabled={document.experienceGaps.length > 0} title={document.experienceGaps.length ? '请先填好或删除经历位' : undefined} aria-pressed={compareVisible} onClick={() => {setCompareVisible(true);if(!compareBase){setCompareBase(live.current);setComparisonDrafts(null);}}}>改稿对照</button></div>
+</div>
+<div className="tm-sec"><span className="tm-label">编辑</span>
+<div className="tm-row">
 <ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={undoHistory}>撤销</ActionButton>
 <ActionButton variant="quiet" disabled={!undoState.canRedo || busy} onClick={redoHistory}>重做</ActionButton>
-<span>{Array.from(document.paragraphs.map(p => p.text).join('\n\n')).length} 字</span>
+<span className="aux tm-count">{Array.from(document.paragraphs.map(p => p.text).join('\n\n')).length} 字</span>
 </div>
-<div className={styles.row}>
-<ActionButton variant="outline" onClick={() => void openAi('draft')}>按材料起草</ActionButton>
-<ActionButton variant="outline" disabled={!selection} onClick={() => void openAi('rewrite_selection')}>改写选段</ActionButton>
-<ActionButton variant="outline" onClick={() => void openAi('page_copy')}>图组文案</ActionButton>
 </div>
-{saveAction}
+<div className="tm-sec"><span className="tm-label">AI 写作</span>
+<button type="button" className="tm-item" onClick={() => void openAi('draft')}>按材料起草</button>
+<button type="button" className="tm-item" disabled={!selection} onClick={() => void openAi('rewrite_selection')}>改写选段</button>
+<button type="button" className="tm-item" onClick={() => void openAi('page_copy')}>图组文案</button>
+</div>
+<div className="tm-foot"><span className="aux" role="status">{saveStateText}</span>{saveAction}</div>
 </div>
 </details>;
   const commandContents = <>
@@ -1225,6 +1245,21 @@ function WorkEditor({
   const studioSurfaceReady = !sourceInvalidated && !resetRequired && recheckStatus === 'ready';
   const footerInColumns = footerVisible && studioColumns && studioSurfaceReady ? <div className="ed-foot">{footerBody}</div> : null;
   const footerOutside = footerVisible && !(studioColumns && studioSurfaceReady) ? <div className="gm-studio studio-foot-scope"><div className="ed-foot">{footerBody}</div></div> : null;
+  /** Title candidates are shown only for a source-checked result of the current revision; the editor and the sidebar share this. */
+  const titleSuggestion = active && recheckStatus === 'ready' && !sourceInvalidated && !resetRequired && titleCheckedSequence === sourceRefreshSequence && titleResult?.sourceQualification === 'readable' ? titleResult.suggestion : null;
+  const titleChoiceLocked = titleBusy || busy || dirty || (titleAcceptedRevision ?? titleResult?.inputRevision) !== revision.id;
+  const titleGenerating = !!titleResult && ['queued', 'running', 'cancel_requested'].includes(titleResult.state);
+  const canGenerateTitles = !(titleBusy || editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || !!titleRequest);
+  const titleTools = {
+    generate: () => void generateTitles(),
+    canGenerate: canGenerateTitles,
+    running: titleGenerating,
+    message: titleResult?.state === 'failed' ? api.aiFailureText(titleResult.failureCode) : titleMessage,
+    cover: titleSuggestion ? titleSuggestion.coverTitles.map((text, index) => ({ text, risk: !!titleResult?.titleWarnings?.cover[index], chosen: text === (document.pages.find(page => page.kind === 'cover')?.title ?? '') })) : null,
+    note: titleSuggestion ? titleSuggestion.noteTitles.map((text, index) => ({ text, risk: !!titleResult?.titleWarnings?.note[index], chosen: text === document.title })) : null,
+    choiceLocked: titleChoiceLocked,
+    choose: (kind: 'cover' | 'note', index: number) => void chooseTitle(kind, index),
+  };
   return <div className={styles.editorWorkspace} data-view={view}>
     {aiUnknown && !preview ? <div className={styles.warning} role="alert">上次生成请求尚未确认。 <ActionButton variant="outline" disabled={aiBusy} onClick={() => void executeAi()}>核实上次生成</ActionButton></div> : null}
     {view === 'body' || view === 'desk' ? null : <div className={styles.commandRow}>{commandContents}</div>}
@@ -1241,15 +1276,15 @@ function WorkEditor({
     {recheckStatus === 'checking' ? <p role="status">正在核验稿件来源…</p> : recheckStatus === 'failed' ? <p role="alert">暂时无法核验稿件来源。未保存的编辑仍在本页。<ActionButton variant="quiet" onClick={() => setRecheckAttempt(value => value + 1)}>重新核验</ActionButton></p> : null}
     <fieldset hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} className={styles.editingSurface}>
     {view === 'desk' ? <div className="gm-studio"><MaterialDesk domain={initial.domainRef} works={drafts} currentWorkId={initial.workId} currentDocument={document} accounts={accounts.data ?? []} sourceFocus={sourceFocus} onClearSourceFocus={() => setSourceFocus(null)} onOpenWork={onOpenDraftWriting} onSwitchWork={onSwitchWork} onCreateFrame={createFrame} onCreateFramePending={creatingFrame} onAddNote={addDeskNote} onPlaceMaterial={placeMaterial} onUpdateCard={updateCanvas} onRemoveCard={id => edit({ ...live.current, canvas: live.current.canvas.filter(block => block.id !== id) })} onRenameTitle={next => edit({ ...live.current, title: next })} onPickAccount={ref => edit({ ...live.current, accountRef: ref })} /></div> : null}
-    {view === 'canvas' ? <CanvasBoard onCompose={compose} document={document} busy={busy} onChange={edit} onUpdate={updateCanvas} onLocate={citation=>{setSourceFocus(citation);onView('desk');}} onMaterials={()=>onView('desk')} onUse={target=>{const location=targetLocation(target,document);return {label:location.label,open:()=>onView(location.view)};}} onPlace={card=>{setPlacement(card);setBodyTarget(document.uses.flatMap(use=>use.canvasId===card.id&&use.target.kind==='paragraph'?[use.target.paragraphId]:[])[0]??'new');setWantBody(true);setWantPage(false);setPageTarget(document.pages.find(page=>page.kind!=='cover')?.id??'');}} /> : null}
+    {view === 'canvas' ? <CanvasBoard onCompose={compose} document={document} busy={busy} onChange={edit} onUpdate={updateCanvas} onLocate={citation=>{setSourceFocus(citation);onView('desk');}} onMaterials={()=>onView('desk')} onUse={target=>{const location=targetLocation(target,document);return {label:location.label,open:()=>onView(location.view)};}} onPlace={openPlacement} /> : null}
     {view === 'body' ? <div className={styles.bodyWorkspace}>
 {compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}
 {aiComparison&&ai?.suggestion&&ai.staleBase?<div className={styles.warning}><p>本次采用已改变原底稿，其余改稿仍保留在右侧，不能继续直接采用。</p><ActionButton variant="outline" onClick={()=>void copyUnadoptedAi()}>复制未采用改稿</ActionButton>{aiCopyFallback?<label>未采用改稿，可手动复制<textarea readOnly value={unadoptedAiText()}/></label>:null}</div>:null}
 {aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase && document.experienceGaps.length === 0 ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className="gm-studio"><div className="workbench"><div className="write"><DraftRail drafts={drafts} ideas={ideas} status={draftsStatus} currentId={initial.workId} onOpen={onOpenDraft} onNewDraft={onNewDraft} onOpenDesk={() => onView('desk')} /><ManuscriptEditor footer={footerInColumns} noteTitleActions={<div ref={setTitleContainer} className={styles.titleCopyMount} hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || editingLocked} />} coverActions={<>
-  <ActionButton variant="quiet" disabled={titleBusy || editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || !!titleRequest} onClick={() => void generateTitles()}>换一批</ActionButton>
-  <a href="/settings/models?section=skills&amp;task=creation_title">标题 skill ↗</a></>}
-  coverCandidates={active && recheckStatus === 'ready' && !sourceInvalidated && !resetRequired && titleCheckedSequence === sourceRefreshSequence && titleResult?.sourceQualification === 'readable' && titleResult.suggestion ? titleResult.suggestion.coverTitles.map((value,index)=><button type="button" key={`${index}:${value}`} className={`cand${titleResult.titleWarnings?.cover[index] ? ` ${styles.titleRisk}` : ''}`} aria-pressed={value === (document.pages.find(page => page.kind === 'cover')?.title ?? '')} disabled={titleBusy || busy || dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id} onClick={() => void chooseTitle('cover',index)}>{value} <span className="count" aria-hidden="true">{Array.from(value).length}</span></button>) : null}
-  noteCandidates={active && recheckStatus === 'ready' && !sourceInvalidated && !resetRequired && titleCheckedSequence === sourceRefreshSequence && titleResult?.sourceQualification === 'readable' && titleResult.suggestion ? titleResult.suggestion.noteTitles.map((value,index)=><button type="button" key={`${index}:${value}`} className={`cand${titleResult.titleWarnings?.note[index] ? ` ${styles.titleRisk}` : ''}`} aria-pressed={value === document.title} disabled={titleBusy || busy || dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id} onClick={() => void chooseTitle('note',index)}>{value}{titleResult.titleWarnings?.note[index] ? ' · 疗效承诺提醒' : ''}</button>) : null}
+  <ActionButton variant="quiet" disabled={!canGenerateTitles} onClick={() => void generateTitles()}>换一批</ActionButton>
+  <button type="button" className="btn quiet sub" onClick={() => setRightTab('titles')}>找标题</button></>}
+  coverCandidates={titleSuggestion ? titleSuggestion.coverTitles.map((value,index)=><button type="button" key={`${index}:${value}`} className={`cand${titleResult?.titleWarnings?.cover[index] ? ` ${styles.titleRisk}` : ''}`} aria-pressed={value === (document.pages.find(page => page.kind === 'cover')?.title ?? '')} disabled={titleChoiceLocked} onClick={() => void chooseTitle('cover',index)}>{value} <span className="count" aria-hidden="true">{Array.from(value).length}</span></button>) : null}
+  noteCandidates={titleSuggestion ? titleSuggestion.noteTitles.map((value,index)=><button type="button" key={`${index}:${value}`} className={`cand${titleResult?.titleWarnings?.note[index] ? ` ${styles.titleRisk}` : ''}`} aria-pressed={value === document.title} disabled={titleChoiceLocked} onClick={() => void chooseTitle('note',index)}>{value}{titleResult?.titleWarnings?.note[index] ? ' · 疗效承诺提醒' : ''}</button>) : null}
   titleNotes={<section aria-label="自动标题候选">
   {templateBlocked && (titleRequest || titleBusy || (titleAdoptIndex && hasPending)) ? <p role="alert">标题请求尚未完成，请先留在本页。 <button type="button" onClick={onResetTemplateBlock}>返回标题</button></p> : null}
   {titleRequest && !titleResult ? <ActionButton variant="outline" disabled={titleBusy} onClick={() => void sendTitle(titleRequest)}>沿用原请求重试</ActionButton> : null}
@@ -1258,7 +1293,7 @@ function WorkEditor({
   {titleMessage ? <p role="alert">{titleMessage}{titleResult ? <button type="button" onClick={() => { setTitleCheckedSequence(-1); setTitleStatusRetry(value => value + 1); }}>重新核验</button> : null}</p> : null}
   {titleResult?.suggestion && (dirty || (titleAcceptedRevision ?? titleResult.inputRevision) !== revision.id) ? <p>稿件已变化，请重新生成。</p> : null}
   {titleAdoptIndex && hasPending ? <p>标题采用结果尚未确认，请沿用原请求核对。</p> : null}
-</section>} draftInputs={draftInputs} onDraftInputs={setDraftInputs} ideas={ideas} ideaState={ideaState} onOpenAnchor={onOpenAnchor} workId={initial.workId} onCover={() => onView('cover')} tools={bodyTools} accountChip={accountChip} edMeta={edMeta} related={relatedNotice} accountName={accounts.isError ? '账号读取失败' : accounts.data?.find(item => item.ref === document.accountRef)?.name} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} /><CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} onOpenSource={source => { setSourceFocus(source); onView('desk'); }} copyContainer={copyContainer} titleContainer={titleContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div></div></div>}
+</section>} draftInputs={draftInputs} onDraftInputs={setDraftInputs} ideas={ideas} ideaState={ideaState} onOpenAnchor={onOpenAnchor} workId={initial.workId} onCover={() => onView('cover')} onOpenDesk={() => onView('desk')} publication={drafts.find(item => item.workId === initial.workId)?.publishedRevisionId ? <PublicationCard workId={initial.workId} domainRef={initial.domainRef} accountRef={document.accountRef} /> : undefined} tools={bodyTools} accountChip={accountChip} edMeta={edMeta} related={relatedNotice} accountName={accounts.isError ? '账号读取失败' : accounts.data?.find(item => item.ref === document.accountRef)?.name} document={document} edit={edit} compose={compose} isComposing={()=>composition.current} textSelection={textSelection} tagsDraft={tagsDraft} onTagsChange={changeTags} /><CheckPanel workId={initial.workId} domainRef={initial.domainRef} document={document} revision={revision} saveState={saveState} composing={composing} locked={editingLocked} active={active} pendingConfirmation={pendingConfirmation} setPendingConfirmation={setPendingConfirmation} confirmationIdentities={confirmationIdentities} tagsDraft={tagsDraft} onTagsChange={changeTags} edit={edit} saveCurrent={saveBeforeCopy} onGoCover={() => onView('cover')} onOpenSource={source => { setSourceFocus(source); onView('desk'); }} onGoDesk={() => onView('desk')} onPlaceCard={blockId => { const block = document.canvas.find(item => item.id === blockId); if (block) openPlacement(block); }} onOpenAssets={onOpenAssets} titleTools={titleTools} view={rightTab} onViewChange={setRightTab} copyContainer={copyContainer} titleContainer={titleContainer} sensitiveVisible={active && recheckStatus === 'ready' && !resetRequired} withdrawalInvalidated={resetRequired} /></div></div></div>}
 </div> : null}
     <div hidden={!['cover','inner','export'].includes(view)}>
 <ImagePages step={view === 'inner' ? 'inner' : view === 'export' ? 'export' : 'cover'} onStepChange={onView} onOpenSource={excerptId => { const excerpt=document.excerpts.find(item=>item.id===excerptId);if(excerpt){setSourceFocus(excerpt.citation);onView('desk');} }} document={document} workId={initial.workId} currentRevisionId={dirty ? undefined : revision.id} sourceRevision={revision} onReadRevision={id => api.readRevision(initial.workId, id)} sourceCheckGeneration={() => recheckGeneration.current} sourceResetSequence={sourceResetSequence} onQualifySources={async citations => { const checked = await Promise.all(citations.map(async citation => { return api.qualifyCitation(initial.domainRef, citation); })); return checked.every(Boolean); }} onChange={edit} onUploadAsset={async file => {
@@ -1354,12 +1389,10 @@ function WorkEditor({
 <div className={styles.placement}>
 <label>
 <input type="checkbox" checked={wantBody} onChange={e => setWantBody(e.target.checked)} /> 正文</label>
-<select aria-label="放入正文位置" value={bodyTarget} onChange={e => setBodyTarget(e.target.value)}>
-<option value="new">新增一段</option>{document.paragraphs.map((p, i) => <option key={p.id} value={p.id}>第 {i + 1} 段 · {p.text || '空段落'}</option>)}</select>
+<SelectField label="放入正文位置" value={bodyTarget} options={[{ value: 'new', label: '新增一段' }, ...document.paragraphs.map((p, i) => ({ value: p.id, label: `第 ${i + 1} 段 · ${Array.from(p.text || '空段落').slice(0, 24).join('')}` }))]} onChange={setBodyTarget} />
 <label>
 <input type="checkbox" checked={wantPage} onChange={e => setWantPage(e.target.checked)} /> 指定内页</label>
-<select aria-label="放入图页位置" value={pageTarget} onChange={e => setPageTarget(e.target.value)}>
-<option value="">选择内页</option>{document.pages.filter(p => p.kind !== 'cover').map((p, i) => <option key={p.id} value={p.id}>{i + 1} · {p.title || '未命名内页'}</option>)}</select>
+<SelectField label="放入图页位置" value={pageTarget} options={[{ value: '', label: '选择内页' }, ...document.pages.filter(p => p.kind !== 'cover').map((p, i) => ({ value: p.id, label: `${i + 1} · ${p.title || '未命名内页'}` }))]} onChange={setPageTarget} />
 </div><div className={styles.row}><ActionButton disabled={busy||document.pages.length>=30} onClick={()=>createPlacementPage('opinion')}>新建内页</ActionButton><ActionButton variant="quiet" disabled={busy||document.pages.length>=30} onClick={()=>createPlacementPage('steps')}>新建步骤页</ActionButton></div><p>原文摘录与我的表达保持独立；放入后手改文字会保留。</p>
 <ActionButton variant="primary" busy={busy} disabled={busy || !wantBody && (!wantPage || !pageTarget)} onClick={() => void place()}>确认放入</ActionButton>
 </Modal> : null}

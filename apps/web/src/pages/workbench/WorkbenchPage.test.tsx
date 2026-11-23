@@ -12,6 +12,7 @@ import { ApiError } from '../../shared/api';
 import { WorkbenchPage } from './WorkbenchPage';
 import * as api from './workbenchApi';
 import { newDocument, type AiStatus, type SaveReceipt, type WorkEnvelope } from './workbenchModel';
+import { chooseOption, selectedText } from '../../test/selectField';
 Object.defineProperty(globalThis.crypto, 'subtle', { value: webcrypto.subtle, configurable: true });
 vi.mock('./workbenchApi');
 vi.mock('./ImagePages', () => ({
@@ -521,11 +522,7 @@ describe('pending command and version protection', () => {
     fireEvent.click(await screen.findByRole('button', {
       name: '放入正文 / 指定图页 →'
     }));
-    fireEvent.change(screen.getByLabelText('放入正文位置'), {
-      target: {
-        value: paragraph
-      }
-    });
+    chooseOption('放入正文位置', /^第 1 段 · /);
     fireEvent.click(screen.getByRole('button', {
       name: '确认放入'
     }));
@@ -872,10 +869,10 @@ it('creates an inner page in the placement dialog and flushes its stable identit
  vi.mocked(api.save).mockImplementation(async(_id,request)=>{order.push('save');stored=request.document;return {requestId:request.requestId,workId:work,outcome:'accepted',replayed:false,revision:{id:savedId,number:2,savedAt:'now',document:stored}};});
  vi.mocked(api.place).mockImplementation(async(_id,request)=>{order.push('place');return {requestId:request.requestId,workId:work,outcome:'accepted',replayed:false,revision:{id:crypto.randomUUID(),number:3,savedAt:'now',document:stored}};});
  show('canvas');fireEvent.click(await screen.findByRole('button',{name:'放入正文 / 指定图页 →'}));fireEvent.click(screen.getByRole('button',{name:'新建内页'}));
- const target=screen.getByLabelText('放入图页位置') as HTMLSelectElement;const pageId=target.value;expect(pageId).not.toBe('');expect(screen.getByRole('dialog',{name:'放入作品'})).toBeInTheDocument();
+ expect(selectedText('放入图页位置')).not.toBe('选择内页');expect(screen.getByRole('dialog',{name:'放入作品'})).toBeInTheDocument();
  fireEvent.click(screen.getByRole('button',{name:'确认放入'}));await waitFor(()=>expect(api.place).toHaveBeenCalledTimes(1));
- expect(order).toEqual(['save','place']);expect(stored.pages.find(page=>page.id===pageId)?.kind).toBe('opinion');expect(stored.excerpts[0]?.citation.sourceVersion).toBe('source1');
- const request=vi.mocked(api.place).mock.calls[0]![1];expect(request.expectedRevision).toBe(savedId);expect(request.targets).toHaveLength(2);expect(request.targets.some(target=>target.kind==='pageBlock'&&target.pageId===pageId)).toBe(true);expect(request.targets.some(target=>target.kind==='paragraph')).toBe(true);
+ expect(order).toEqual(['save','place']);expect(stored.excerpts[0]?.citation.sourceVersion).toBe('source1');
+ const request=vi.mocked(api.place).mock.calls[0]![1];const pageId=request.targets.flatMap(target=>target.kind==='pageBlock'?[target.pageId]:[])[0]!;expect(stored.pages.find(page=>page.id===pageId)?.kind).toBe('opinion');expect(request.expectedRevision).toBe(savedId);expect(request.targets).toHaveLength(2);expect(request.targets.some(target=>target.kind==='pageBlock'&&target.pageId===pageId)).toBe(true);expect(request.targets.some(target=>target.kind==='paragraph')).toBe(true);
 });
 
 it('retains both AI edits after partial adoption and keeps the unadopted draft available after returning and reopening',async()=>{
@@ -1209,6 +1206,26 @@ it('changes a material role from the desk and removes the card', async () => {
   await waitFor(() => expect(screen.queryByRole('group', { name: /^原笔记：一段原笔记/ })).not.toBeInTheDocument());
 });
 
+it('offers every use a material can have, in the sample\'s words, and keeps the one chosen', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  vi.mocked(api.readWork).mockResolvedValue(deskEnvelope());
+  show('desk');
+  const card = await screen.findByRole('group', { name: /^原笔记：一段原笔记/ });
+  fireEvent.click(within(card).getByRole('button', { name: '修改材料用途' }));
+  const picks = await screen.findByRole('group', { name: '材料用途' });
+  expect(within(picks).getAllByRole('button').map(button => button.textContent)).toEqual(['待分', '开头', '共鸣', '经历', '观点', '例子', '结尾', '标题参考', '只做参考', '反例']);
+  fireEvent.click(within(picks).getByRole('button', { name: '共鸣' }));
+  await waitFor(() => expect(screen.getByRole('button', { name: '修改材料用途' })).toHaveTextContent('共鸣'));
+  expect(within(screen.getByRole('group', { name: '材料用途' })).getByRole('button', { name: '共鸣' })).toHaveAttribute('aria-pressed', 'true');
+  expect(within(screen.getByRole('group', { name: '材料用途' })).getByRole('button', { name: '待分' })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByRole('button', { name: '修改材料用途' })).not.toHaveClass('soft');
+  for (const grey of ['反例', '只做参考', '待分']) {
+    fireEvent.click(within(screen.getByRole('group', { name: '材料用途' })).getByRole('button', { name: grey }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '修改材料用途' })).toHaveTextContent(grey));
+    expect(screen.getByRole('button', { name: '修改材料用途' })).toHaveClass('soft');
+  }
+});
+
 it('writes material memo from the desk and shows every material in frame settings', async () => {
   vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
   vi.mocked(api.readWork).mockResolvedValue(deskEnvelope());
@@ -1464,4 +1481,26 @@ it('resolves handed-off materials into the existing shelf and validates before a
   expect(api.anchor).toHaveBeenCalledWith(expect.objectContaining({ sourceRef: work, blockRef: 'body', start: 0, end: 4 }));
   fireEvent.click(screen.getByRole('button', { name: '全部材料' }));
   await waitFor(() => expect(api.sources).toHaveBeenCalled());
+});
+
+it('marks the current frame as selected (not as a drag target) and puts the cursor in the search field when the shelf opens', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '合成选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  show('desk');
+  fireEvent.click(await screen.findByRole('button', { name: '找材料' }));
+  const frame = document.querySelector('.desk .frame');
+  expect(frame).toHaveClass('sel');
+  expect(frame).not.toHaveClass('hot');
+  expect(screen.getByLabelText('搜索材料')).toHaveFocus();
+});
+
+it('offers our own publications as a material type and asks the sources for exactly that kind', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '合成选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  show('desk');
+  fireEvent.click(await screen.findByRole('button', { name: '找材料' }));
+  const types = within(await screen.findByRole('group', { name: '材料类型' }));
+  expect(types.getAllByRole('button').map(button => button.textContent)).toEqual(['全部', '原笔记', '评论', '我方发布', '口播', '图片文字']);
+  fireEvent.click(screen.getByRole('button', { name: '全部材料' }));
+  fireEvent.click(types.getByRole('button', { name: '我方发布' }));
+  await waitFor(() => expect(api.sources).toHaveBeenCalledWith(expect.objectContaining({ domainRef: domain, kind: 'ops_publication' }), expect.any(AbortSignal)));
+  expect(screen.getByPlaceholderText('搜原笔记、评论、我方发布')).toBeVisible();
 });

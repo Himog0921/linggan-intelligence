@@ -4,6 +4,8 @@ import type { WorkDocument } from '../workbenchModel';
 import type { BridgeState, Sentence } from './assetsModel';
 import { bridgeFromSentence, bridgeStateText, groupLabel, nextSentence, withBridge } from './assetsText';
 import styles from './Assets.module.css';
+import { SelectField } from '../../../shared/SelectField';
+import { FieldLabel } from '../FieldLabel';
 
 /**
  * The bridge slot of one draft. It says which of the five states the account is in and, when a
@@ -33,13 +35,9 @@ export function BridgeSlot({ state, document, usable, disabled, textRef, onChang
           <textarea ref={textRef} aria-label="本篇的衔接句" rows={3} value={used.text} disabled={disabled} maxLength={500}
             onChange={event => onChange(withBridge(document, { sentence: { ...used, text: event.target.value, edited: true } }))} />
         </label>
-        <label>放在哪一段之后
-          <select aria-label="衔接句的位置" value={bridge?.afterParagraph ?? ''} disabled={disabled}
-            onChange={event => onChange(withBridge(document, { afterParagraph: event.target.value || null }))}>
-            <option value="">默认：最后一段之前</option>
-            {document.paragraphs.map((paragraph, index) => <option key={paragraph.id} value={paragraph.id}>第 {index + 1} 段之后</option>)}
-          </select>
-        </label>
+        <FieldLabel>放在哪一段之后
+          <SelectField label="衔接句的位置" value={bridge?.afterParagraph ?? ''} disabled={disabled} options={[{ value: '', label: '默认：最后一段之前' }, ...document.paragraphs.map((paragraph, index) => ({ value: paragraph.id, label: `第 ${index + 1} 段之后` }))]} onChange={value => onChange(withBridge(document, { afterParagraph: value || null }))} />
+        </FieldLabel>
         <div className={styles.actions}>
           <ActionButton variant="outline" disabled={disabled || !alternative} onClick={() => {
             const next = nextSentence(usable ?? [], used.sentenceCode);
