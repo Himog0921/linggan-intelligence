@@ -135,7 +135,7 @@ export function MemberWorkbench({ memberRef }: { memberRef: string }) {
   </OpsFrame>;
 }
 
-function MemberDraft({ draft, accounts, refresh }: { draft: Draft; accounts: Workspace['accounts']; refresh: () => void }) {
+export function MemberDraft({ draft, accounts, refresh }: { draft: Draft; accounts: Workspace['accounts']; refresh: () => void }) {
   const [title, setTitle] = useState(draft.document.title);
   const [body, setBody] = useState(draft.document.paragraphs.map(item => item.text).join('\n\n'));
   const [tags, setTags] = useState(draft.document.tags.join(' '));
@@ -148,10 +148,12 @@ function MemberDraft({ draft, accounts, refresh }: { draft: Draft; accounts: Wor
   const pending = useRef<(Submission & { expectedRevision: string }) | null>(null);
   const inFlight = useRef(false);
   const writableAccounts = accounts.filter(option => option.canPublish);
+  const savedAccount = writableAccounts.find(option => option.ref === draft.document.accountRef);
+  const readyToPublish = draft.ownership === 'mine' && (draft.editable || !!savedAccount);
   const form = `member-draft-${draft.workId}`;
   const snapshot = JSON.stringify([title, body, tags, account]);
-  const savedSnapshot = useRef(snapshot);
-  const dirty = draft.editable && snapshot !== savedSnapshot.current;
+  const [savedSnapshot, setSavedSnapshot] = useState(snapshot);
+  const dirty = draft.editable && snapshot !== savedSnapshot;
   const blocker = useBlocker(dirty || busy || unknown);
   useBeforeUnload(useCallback((event: BeforeUnloadEvent) => {
     if (dirty || busy || unknown) event.preventDefault();
@@ -175,7 +177,7 @@ function MemberDraft({ draft, accounts, refresh }: { draft: Draft; accounts: Wor
       pending.current = null;
       setUnknown(false);
       setRevision(receipt.revision.id);
-      savedSnapshot.current = snapshot;
+      setSavedSnapshot(snapshot);
       setFailed(false);
       setMessage('稿件已保存。');
       refresh();
@@ -193,6 +195,11 @@ function MemberDraft({ draft, accounts, refresh }: { draft: Draft; accounts: Wor
       setBusy(false);
     }
   }
+  async function revisionForPublication() {
+    if (draft.editable) return saveCurrent();
+    return { revisionId: draft.revisionId, title: draft.document.title, account: savedAccount ?? null };
+  }
+
   return <article>
     <h1>{draft.editable ? '编辑稿件' : draft.document.title || '未命名稿件'}</h1>
     {draft.ownership === 'unknown' ? <p>创建人未知</p> : null}
@@ -213,17 +220,17 @@ function MemberDraft({ draft, accounts, refresh }: { draft: Draft; accounts: Wor
           </select></label>
         </fieldset>
       </form>
-      <div className={styles.row}>
-        <ActionButton form={form} type="submit" variant="primary" busy={busy} disabled={busy || !title.trim()}>{unknown ? '沿用原请求重试' : '保存稿件'}</ActionButton>
-        <CreationPublicationButton workId={draft.workId} domainRef={draft.domainRef}
-          disabled={busy || unknown || !title.trim() || !writableAccounts.some(option => option.ref === account)}
-          saveCurrent={saveCurrent} onRegistered={refresh} />
-      </div>
     </> : <>
       {draft.restricted ? <p role="status">稿件含有访问受限的内容，已隐藏相关片段。</p> : null}
       {draft.document.paragraphs.map(paragraph => paragraph.text && <p key={paragraph.id}>{paragraph.text}</p>)}
       {draft.document.tags.length ? <p>{draft.document.tags.join(' · ')}</p> : null}
     </>}
+    {draft.editable || readyToPublish ? <div className={styles.row}>
+      {draft.editable ? <ActionButton form={form} type="submit" variant="primary" busy={busy} disabled={busy || !title.trim()}>{unknown ? '沿用原请求重试' : '保存稿件'}</ActionButton> : null}
+      {readyToPublish ? <CreationPublicationButton workId={draft.workId} domainRef={draft.domainRef}
+        disabled={draft.editable && (busy || unknown || !title.trim() || !writableAccounts.some(option => option.ref === account))}
+        saveCurrent={revisionForPublication} onRegistered={refresh} /> : null}
+    </div> : null}
     {message ? <p role={failed ? 'alert' : 'status'}>{message}</p> : null}
     {draft.publications.map(link => <p key={link.linkRef}>{link.available ?
       <Link to={creationPublicationHref(draft.domainRef, link.publicationRef)}>{link.publishedOn ? `发布记录（${link.publishedOn}）` : '查看已关联发布记录'}</Link> :

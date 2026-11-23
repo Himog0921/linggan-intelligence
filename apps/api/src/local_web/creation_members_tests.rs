@@ -278,11 +278,18 @@ async fn creation_members_share_reads_and_keep_writes_and_assets_scoped() {
         StatusCode::OK
     );
 
-    sqlx::query("UPDATE linggan_ops_session SET revoked_at=scope_001_now() WHERE member_ref=$1")
-        .bind(writer)
-        .execute(db.pool())
+    assert_eq!(
+        request(
+            &app,
+            Method::POST,
+            "/api/local/auth/logout",
+            Some(&writer_cookie),
+            None
+        )
         .await
-        .unwrap();
+        .0,
+        StatusCode::NO_CONTENT
+    );
     assert_eq!(
         request(&app, Method::GET, &work_path, Some(&writer_cookie), None)
             .await

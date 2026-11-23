@@ -80,6 +80,7 @@ async fn draft_registration_is_atomic_and_later_views_use_the_same_record() {
                     document: WorkDocument {
                         account_ref: Some(account),
                         title: "合成发布稿".into(),
+                        outline: vec!["已保存的结构化提纲".into()],
                         ..Default::default()
                     },
                 },
