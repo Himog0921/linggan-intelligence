@@ -1,5 +1,7 @@
 .main { min-width: 0; padding: var(--lgi-space-8); color: var(--lgi-ink); font: var(--lgi-text-body)/var(--lgi-lh-body) var(--lgi-font-ui); }
 .standalone { padding: var(--lgi-space-8); font-family: var(--lgi-font-ui); }
+.breadcrumbLink { color: inherit; text-underline-offset: 3px; }
+:global([data-theme='linggan-intelligence']) a.breadcrumbLink:focus-visible { outline: 2px solid var(--lgi-on-dark); outline-offset: 2px; }
 .main h1 { margin: var(--lgi-space-2) 0; font-size: var(--lgi-type-page-size); line-height: var(--lgi-type-page-leading); font-weight: var(--lgi-type-page-weight); }
 .main h2 { margin: 0 0 var(--lgi-space-2); font-size: var(--lgi-type-section-size); line-height: var(--lgi-type-section-leading); }
 .main h3 { margin: var(--lgi-space-4) 0 var(--lgi-space-2); font-size: var(--lgi-text-body); }
@@ -32,8 +34,8 @@
 .metricValue { font-family: var(--lgi-font-data); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .flags { display: flex; flex-wrap: wrap; gap: var(--lgi-space-1) var(--lgi-space-2); padding: 0; margin: var(--lgi-space-2) 0; list-style: none; }
 .flags li { padding: 0 var(--lgi-space-2); background: var(--lgi-canvas-sunken); color: var(--lgi-muted); font-size: var(--lgi-text-label); }
-.other { margin-top: var(--lgi-space-4); }
-.other summary, .section summary { cursor: pointer; font-weight: var(--lgi-weight-semibold); }
+.other { margin-top: var(--lgi-space-6); }
+.section summary { cursor: pointer; font-weight: var(--lgi-weight-semibold); }
 .pagination { display: flex; gap: var(--lgi-space-2); margin-top: var(--lgi-space-4); }
 .limitation { margin-top: var(--lgi-space-6) !important; color: var(--lgi-muted); max-width: 80ch; }
 .protocolMetrics { margin: var(--lgi-space-6) 0; }
