@@ -3,7 +3,8 @@ import type { DossierBlock, DossierIssue, Speaker } from '../corpus/evidence/dos
 /** Closed HTTP projection of CONTENT-WORKBENCH-001. Unicode ranges are scalar offsets. */
 export type SourceKind = 'note' | 'comment' | 'ocr' | 'transcript' | 'frame_text' | 'ops_publication';
 export type SourceField = 'title' | 'body' | 'tags' | 'ocr' | 'transcript' | 'frame_text' | 'comment_body';
-export type CanvasGroup = 'inbox' | 'opening' | 'argument' | 'example' | 'ending';
+/** What a material card is for in this draft; `inbox` is "not decided yet". Matches the server's CanvasGroup. */
+export type CanvasGroup = 'inbox' | 'opening' | 'resonance' | 'experience' | 'argument' | 'example' | 'ending' | 'title_reference' | 'reference_only' | 'counterexample';
 export type PageKind = 'cover' | 'opinion' | 'voice' | 'steps';
 export type Palette = 'cream' | 'sage' | 'ink';
 export interface OcrLocation {
@@ -486,7 +487,7 @@ const excerpt = shape<Excerpt>({
 const canvas = shape<CanvasBlock>({
   id: uuid,
   excerptId: nullable(uuid),
-  group: choice('inbox', 'opening', 'argument', 'example', 'ending'),
+  group: choice('inbox', 'opening', 'resonance', 'experience', 'argument', 'example', 'ending', 'title_reference', 'reference_only', 'counterexample'),
   note: str,
   expression: str,
   expressionRevision: integer
@@ -923,25 +924,22 @@ export function scalarRange(text: string, start: number, end: number): {
     text: text.slice(start, end)
   };
 }
-export const GROUPS: readonly {
-  id: CanvasGroup;
-  label: string;
-}[] = [{
-  id: 'inbox',
-  label: '待整理'
-}, {
-  id: 'opening',
-  label: '开头'
-}, {
-  id: 'argument',
-  label: '论点'
-}, {
-  id: 'example',
-  label: '例子'
-}, {
-  id: 'ending',
-  label: '结尾'
-}];
+/**
+ * The one list of what a card can be used for, in the order the pickers show them. Labels follow the sample
+ * (待分 is "not decided yet"; 观点 is `argument`); 例子 and 结尾 are older values that stay.
+ */
+export const GROUPS: readonly { id: CanvasGroup; label: string }[] = [
+  { id: 'inbox', label: '待分' },
+  { id: 'opening', label: '开头' },
+  { id: 'resonance', label: '共鸣' },
+  { id: 'experience', label: '经历' },
+  { id: 'argument', label: '观点' },
+  { id: 'example', label: '例子' },
+  { id: 'ending', label: '结尾' },
+  { id: 'title_reference', label: '标题参考' },
+  { id: 'reference_only', label: '只做参考' },
+  { id: 'counterexample', label: '反例' },
+];
 export const SOURCE_LABELS: Record<SourceKind, string> = {
   note: '原笔记',
   comment: '匿名原声',

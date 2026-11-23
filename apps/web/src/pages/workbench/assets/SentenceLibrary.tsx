@@ -8,6 +8,7 @@ import * as api from './assetsApi';
 import { blockedFindings, type Finding, type ReviewAction, type Sentence, type SentenceStatus } from './assetsModel';
 import { groupLabel, levelLabel, sentenceStatusLabel } from './assetsText';
 import styles from './Assets.module.css';
+import { SelectField } from '../../../shared/SelectField';
 
 const GROUPS: readonly BridgeGroup[] = ['parent', 'coach'];
 const STATUS_TONE: Record<SentenceStatus, string> = { review: 'info', ok: 'ok', fix: 'warn', off: 'unk' };
@@ -76,9 +77,7 @@ function SentenceEditor({ sentence, initialGroup = 'parent', onSaved, onClose }:
   return <form className={styles.form} aria-label={sentence ? `改写 ${sentence.code}` : '新增衔接句'} onSubmit={event => { event.preventDefault(); void save(); }}>
     <h3>{sentence ? `${sentence.code} · 第 ${sentence.revision} 版` : '新增一句衔接句'}</h3>
     <label>适合哪种身份
-      <select value={group} disabled={busy} onChange={event => setGroup(event.target.value as BridgeGroup)}>
-        {GROUPS.map(value => <option key={value} value={value}>{groupLabel[value]}</option>)}
-      </select>
+      <SelectField label="适合哪种身份" value={group} disabled={busy} options={GROUPS.map(value => ({ value, label: groupLabel[value] }))} onChange={value => setGroup(value as BridgeGroup)} />
     </label>
     <label>这句话
       <textarea rows={3} value={text} maxLength={500} disabled={busy} onChange={event => setText(event.target.value)} />

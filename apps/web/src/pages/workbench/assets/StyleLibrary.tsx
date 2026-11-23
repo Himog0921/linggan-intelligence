@@ -5,6 +5,7 @@ import { RequestIdentities } from '../../../shared/requestIdentity';
 import * as api from './stylesApi';
 import { listAccounts, assetsErrorText } from './assetsApi';
 import styles from './Assets.module.css';
+import { SelectField } from '../../../shared/SelectField';
 
 const lines = (value: string) => value.split('\n').map(line => line.trim()).filter(Boolean);
 type Form = { accountRef: string; name: string; sourceNote: string; structure: string; rhythm: string; wording: string; skip: string };
@@ -89,10 +90,7 @@ export function StyleLibrary({ domainRef, onPendingChange, onDirtyChange = () =>
     {query.isSuccess && !items.length ? <p className="lib-empty">还没有风格。新增一条，写稿页就会显示这个账号在用的风格。</p> : null}
     {form ? <section aria-label={current ? `修改 ${current.code}` : '新增风格'}>
       <h3>{current ? `${current.code} 第 ${current.revision} 版 → 新版本` : '新增风格'}</h3>
-      <label className="lbl">账号<select aria-label="风格所属账号" value={form.accountRef} disabled={!!current || busy} onChange={event => change({ accountRef: event.target.value })}>
-        <option value="">选择账号</option>
-        {accounts.data?.map(item => <option key={item.accountRef} value={item.accountRef}>{item.accountName}</option>)}
-      </select></label>
+      <label className="lbl">账号<SelectField label="风格所属账号" value={form.accountRef} disabled={!!current || busy} options={[{ value: '', label: '选择账号' }, ...(accounts.data ?? []).map(item => ({ value: item.accountRef, label: item.accountName }))]} onChange={value => change({ accountRef: value })} /></label>
       <label className="lbl">名称<input className="input" aria-label="风格名称" maxLength={80} placeholder="例如：她本人的原声" value={form.name} onChange={event => change({ name: event.target.value })} /></label>
       <label className="lbl">依据<input className="input" aria-label="风格依据" maxLength={200} placeholder="例如：她自己的稿子 1 篇（越多越准）" value={form.sourceNote} onChange={event => change({ sourceNote: event.target.value })} /></label>
       <label className="lbl">结构<textarea className="input" aria-label="风格结构" rows={3} placeholder="一行一条" value={form.structure} onChange={event => change({ structure: event.target.value })} /></label>

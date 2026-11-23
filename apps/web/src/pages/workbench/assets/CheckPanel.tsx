@@ -8,12 +8,17 @@ import { ModalDialog } from '../../../corpus/ModalDialog';
 import type { Citation, Revision, WorkDocument } from '../workbenchModel';
 import { readWork } from '../workbenchApi';
 import * as api from './assetsApi';
-import { blockedFindings, type Finding, type Fix, type Level, type Location } from './assetsModel';
-import { applyRange, bridgeFromSentence, countByLevel, identityCommand, nextSentence, withBridge, withoutTag } from './assetsText';
+import { blockedFindings, type Experience, type Finding, type Fix, type Level, type Location, type Sentence } from './assetsModel';
+import { applyRange, bridgeFromSentence, countByLevel, identityCommand, insertExperience, nextSentence, withBridge, withCoverTitle, withoutTag } from './assetsText';
 import { BridgeSlot } from './BridgeSlot';
 import { IdentityForm } from './IdentityForm';
+import { MaterialsTab } from './MaterialsTab';
+import { PreviewTab } from './PreviewTab';
+import { TitlesTab, type TitleTools } from './TitlesTab';
 import styles from './Assets.module.css';
+import { SelectField } from '../../../shared/SelectField';
 
+export type PanelView = 'checks' | 'materials' | 'titles' | 'preview';
 type SaveState = 'saved' | 'dirty' | 'saving' | 'failed' | 'unknown' | 'conflict';
 const CHECK_DELAY_MS = 450;
 
@@ -43,13 +48,19 @@ function useSettled(document: WorkDocument, hold: boolean) {
  * shows what they found, applies the fixes the server offered through the normal save, and only
  * copies the saved revision once nothing is left in 必改.
  */
-export function CheckPanel({ workId, domainRef, document, revision, saveState, composing, locked, active, pendingConfirmation, setPendingConfirmation, confirmationIdentities, tagsDraft, onTagsChange, edit, saveCurrent, onGoCover, onOpenSource, copyContainer, titleContainer, sensitiveVisible = true, withdrawalInvalidated = false }: {
+export function CheckPanel({ workId, domainRef, document, revision, saveState, composing, locked, active, pendingConfirmation, setPendingConfirmation, confirmationIdentities, tagsDraft, onTagsChange, edit, saveCurrent, onGoCover, onOpenSource, view, onViewChange, onGoDesk = () => undefined, onPlaceCard = () => undefined, onOpenAssets = () => undefined, titleTools, copyContainer, titleContainer, sensitiveVisible = true, withdrawalInvalidated = false }: {
   workId: string; domainRef: string; document: WorkDocument; revision: Revision; saveState: SaveState; composing: boolean; locked: boolean; active: boolean;
   pendingConfirmation: string | null; setPendingConfirmation: (receipt: string | null) => void; confirmationIdentities: RequestIdentities;
   tagsDraft: string; onTagsChange: (value: string) => void; edit: (next: WorkDocument) => void; saveCurrent: () => Promise<Revision>; onGoCover: () => void;
   copyContainer?: HTMLElement | null;
   titleContainer?: HTMLElement | null;
   onOpenSource?: (source: Citation) => void;
+  /** Which sidebar tab is showing, when the page wants to drive it (e.g. 找标题 in the editor). */
+  view?: PanelView; onViewChange?: (view: PanelView) => void;
+  /** Sidebar shortcuts: open the desk, open the placement dialog for a desk card, open the asset library on a tab. */
+  onGoDesk?: () => void; onPlaceCard?: (blockId: string) => void; onOpenAssets?: (kind: 'experience' | 'persona') => void;
+  /** Title generation as the page runs it; absent where the page has none (tests, read-only views). */
+  titleTools?: TitleTools;
   sensitiveVisible?: boolean; withdrawalInvalidated?: boolean;
 }) {
   const uid = useId();
@@ -58,7 +69,9 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
   const [notice, setNotice] = useState('');
   const [copying, setCopying] = useState(false);
   const [manual, setManual] = useState<{ text: string; receiptRef: string } | null>(null);
-  const [panelView, setPanelView] = useState<'checks' | 'materials' | 'titles' | 'preview'>('checks');
+  const [ownView, setOwnView] = useState<PanelView>('checks');
+  const panelView = view ?? ownView;
+  const setPanelView = (next: PanelView) => { setOwnView(next); onViewChange?.(next); };
   const access = useRef({ permitted: active && sensitiveVisible && !withdrawalInvalidated, generation: 0 });
   const permitted = active && sensitiveVisible && !withdrawalInvalidated;
   useLayoutEffect(() => {
@@ -68,7 +81,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
   const [identityOpen, setIdentityOpen] = useState(false);
   const [bioConfirm, setBioConfirm] = useState(false);
   const [busy, setBusy] = useState(false);
-  const accountSelect = useRef<HTMLSelectElement>(null);
+  const accountSelect = useRef<HTMLSpanElement>(null);
   const bridgeText = useRef<HTMLTextAreaElement>(null);
   const slotTop = useRef<HTMLDivElement>(null);
   const settings = useRef<HTMLDetailsElement>(null);
@@ -163,6 +176,17 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     if (next) edit(withBridge(document, { skip: false, sentence: bridgeFromSentence(next) }));
     else setNotice('这个身份还没有审核通过的衔接句，先去资产库的“衔接句”里添加并审核。');
   }
+  /** Puts one of our own past titles into the draft through the ordinary edit; the checks then look at it like any other text. */
+  function adoptOwnTitle(kind: 'cover' | 'note', text: string) {
+    edit(kind === 'cover' ? withCoverTitle(document, text) : { ...document, title: text });
+  }
+  function chooseBridge(sentence: Sentence) {
+    edit(withBridge(document, { skip: false, sentence: bridgeFromSentence(sentence) }));
+  }
+  function insertFromLibrary(experience: Experience) {
+    const next = insertExperience(document, experience);
+    if (next) edit(next);
+  }
   async function fix(finding: Finding, action: Fix) {
     if (!fixable) return;
     setNotice('');
@@ -171,7 +195,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
         case 'skipBridge': skipChosen.current = true; return edit(withBridge(document, { skip: true }));
         case 'autoPickBridge': return await pick(false);
         case 'swapBridge': return await pick(true);
-        case 'chooseAccount': if (settings.current) settings.current.open = true; return accountSelect.current?.focus();
+        case 'chooseAccount': if (settings.current) settings.current.open = true; return accountSelect.current?.querySelector('button')?.focus();
         case 'openIdentity': return setIdentityOpen(true);
         case 'confirmBioWritten': return setBioConfirm(true);
         case 'editByHand': return locate(finding.location);
@@ -349,12 +373,7 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     </section>
     <details ref={settings}><summary>账号与衔接设置 · {bridgeSummary}</summary><div ref={slotTop}>
       <label>所属账号
-        <select ref={accountSelect} aria-label="所属账号" disabled={locked || accounts.isPending}
-          value={document.accountRef ?? ''} onChange={event => edit({ ...document, accountRef: event.target.value || null })}>
-          <option value="">还没选</option>
-          {document.accountRef && !account && !accounts.isPending ? <option value={document.accountRef}>当前账号（不在可写稿的小红书账号里）</option> : null}
-          {(accounts.data ?? []).map(item => <option key={item.accountRef} value={item.accountRef}>{item.accountName}</option>)}
-        </select>
+        <span ref={accountSelect}><SelectField label="所属账号" disabled={locked || accounts.isPending} value={document.accountRef ?? ''} options={[{ value: '', label: '还没选' }, ...(document.accountRef && !account && !accounts.isPending ? [{ value: document.accountRef, label: '当前账号（不在可写稿的小红书账号里）' }] : []), ...(accounts.data ?? []).map(item => ({ value: item.accountRef, label: item.accountName }))]} onChange={value => edit({ ...document, accountRef: value || null })} /></span>
       </label>
       {accounts.isError ? <p role="alert" className={styles.problem}>账号读取失败，可以<ActionButton variant="quiet" onClick={() => void accounts.refetch()}>重试</ActionButton></p> : null}
       {account ? <p className={styles.hint}>{account.identity ? '' : '这个号的身份还没有填写。'}<ActionButton variant="quiet" disabled={locked} onClick={() => setIdentityOpen(true)}>编辑账号身份</ActionButton></p> : null}
@@ -365,23 +384,17 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
     </details>
     </div>
     <section className="r-body" hidden={panelView !== 'materials'} aria-label="稿件素材">
-      <h3>这篇的材料与出处</h3>
-      {document.excerpts.length ? document.excerpts.map(item => <div className={styles.sourceItem} key={item.id}><p>{item.selectedText ?? '来源已受限或不可用'}</p>{onOpenSource ? <ActionButton variant="quiet" onClick={() => onOpenSource(item.citation)}>回到原文 ↗</ActionButton> : null}</div>) : <p className={styles.hint}>还没有加入材料。可以从材料桌选择。</p>}
+      <MaterialsTab document={document} domainRef={domainRef} account={account} bridgeState={state} bridgeItems={usable.data?.items ?? null} bridgeFailed={usable.isError}
+        enabled={permitted && panelView === 'materials'} locked={locked || composing} onUseBridge={chooseBridge} onInsertExperience={insertFromLibrary}
+        onPlaceCard={onPlaceCard} onGoDesk={onGoDesk} onOpenAssets={onOpenAssets} onOpenSource={onOpenSource} />
     </section>
     <section className="r-body" hidden={panelView !== 'titles'} aria-label="稿件标题">
-      <h3>笔记标题</h3><p>{document.title || '还没有填写标题'}</p>
-      {copyContainer ? <ActionButton variant="outline" disabled={!document.title.trim() || !canCopy} onClick={() => void copyTitle()}>复制标题</ActionButton> : null}
-      <h3>封面大字</h3><p>{document.pages.find(page => page.kind === 'cover')?.title || '还没有填写封面大字'}</p>
-      <ActionButton variant="quiet" onClick={onGoCover}>编辑封面</ActionButton>
-      <h3>标题 skill</h3><p className={styles.hint}>可在设置中编辑和切换标题做法。</p>
-      <a href="/settings/models?section=skills&amp;task=creation_title">管理标题 skill ↗</a>
+      <TitlesTab document={document} coverTitle={document.pages.find(page => page.kind === 'cover')?.title ?? ''} onGoCover={onGoCover} tools={titleTools}
+        onCopyTitle={copyContainer ? () => void copyTitle() : undefined} copyDisabled={!document.title.trim() || !canCopy}
+        domainRef={domainRef} enabled={permitted && panelView === 'titles'} usingLocked={locked || composing} onUseOurTitle={adoptOwnTitle} />
     </section>
     <section className="r-body" hidden={panelView !== 'preview'} aria-label="稿件预览">
-      <h3>{document.title || '未命名稿件'}</h3>
-      {document.paragraphs.filter(item => item.text.trim()).map(item => <p key={item.id} className={styles.previewParagraph}>{item.text}</p>)}
-      {document.bridge?.sentence && !document.bridge.skip ? <p className={styles.hint}>衔接句：{document.bridge.sentence.text}</p> : null}
-      {tagsDraft.trim() ? <p className={styles.hint}>话题：{tagsDraft}</p> : null}
-      <p className={styles.hint}>这是编辑中的预览，复制时会使用保存并检查后的稿件。</p>
+      <PreviewTab document={document} workId={workId} tagsDraft={tagsDraft} savedRevisionId={revision.id} unsaved={saveState !== 'saved'} enabled={permitted && panelView === 'preview'} />
     </section>
     {copyContainer ? createPortal(copyPanel, copyContainer) : copyPanel}
     {titleContainer ? createPortal(<ActionButton variant="outline" className={styles.titleCopy} disabled={!document.title.trim() || !canCopy} onClick={() => void copyTitle()}>复制标题</ActionButton>, titleContainer) : null}

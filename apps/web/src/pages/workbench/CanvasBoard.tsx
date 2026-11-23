@@ -8,6 +8,7 @@ import type {
 } from "./workbenchModel";
 import { GROUPS, newCanvasBlock } from "./workbenchModel";
 import styles from "./WorkbenchPage.module.css";
+import { SelectField } from '../../shared/SelectField';
 export function CanvasBoard({
   document,
   busy,
@@ -108,21 +109,7 @@ export function CanvasBoard({
                           }
                         />
                       </label>
-                      <select
-                        aria-label="材料归组"
-                        value={card.group}
-                        onChange={(event) =>
-                          onUpdate(card.id, {
-                            group: event.target.value as CanvasGroup,
-                          })
-                        }
-                      >
-                        {GROUPS.map((item) => (
-                          <option key={item.id} value={item.id}>
-                            {item.label}
-                          </option>
-                        ))}
-                      </select>
+                      <SelectField compact label="材料归组" value={card.group} options={GROUPS.map(item => ({ value: item.id, label: item.label }))} onChange={value => onUpdate(card.id, { group: value as CanvasGroup })} />
                     </details>
                     <div className={styles.useLinks}>
                       {document.uses

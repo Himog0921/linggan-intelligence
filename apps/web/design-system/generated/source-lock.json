@@ -1,5 +1,5 @@
 {
-  "fingerprint": "7f626e0d41d534feb9f008775e323814e0d01cafeb5090d30bbfdf685fa8d14d",
+  "fingerprint": "b83b974c36721555decb416257078f683d431aabfb5f385888f2571d420d5d4b",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -499,11 +499,11 @@
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.tsx",
-      "sha256": "e5df5bf70971877a4271c53a0c097feb82c3f05d3a61b4a317c5033524fe1d70"
+      "sha256": "fadc4650dc90770d373668b3a6ebe7dc04aa499ef098adf4964f58136771fa1b"
     },
     {
       "path": "apps/web/src/pages/workbench/MaterialDesk.tsx",
-      "sha256": "badaf03efa72b6a939878a20806678e44b088ffab1e1a197a1df0692a9e07452"
+      "sha256": "efd2763c0f36b10ebe719858be7ff81bcc6d02df2986efca9f1b833b235819e9"
     },
     {
       "path": "apps/web/src/pages/workbench/TopicLibrary.tsx",
@@ -511,11 +511,11 @@
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.module.css",
-      "sha256": "b0666f6faf4dd7e7252dc707b4c167248ca284f54bcd597287f066d384647ea3"
+      "sha256": "80cc83b882a83f2ad211e0202685737391726e0c39291e71595625e0fbf9e0e5"
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-      "sha256": "91ae29d9051ae33bcd9366f213095bd2591317ba8d811c52a13a314fa68465d5"
+      "sha256": "fea7a9afc2a101d2871beb1ecb1a1d4f7e32e39181f83554f7b132a2ddab645f"
     },
     {
       "path": "apps/web/src/shared/ActionButton.module.css",

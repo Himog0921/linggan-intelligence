@@ -6,6 +6,7 @@ import { MemoryRouter } from 'react-router';
 import { PublicationLinker, type PublicationPending } from './PublicationLinker';
 import * as api from './assetsApi';
 import { newDocument } from '../workbenchModel';
+import { chooseOption } from '../../../test/selectField';
 vi.mock('./assetsApi', async original => ({ ...(await original<typeof import('./assetsApi')>()), publicationCandidates: vi.fn(), linkPublication: vi.fn(), publicationLinks: vi.fn(), unlinkPublication: vi.fn() }));
 const work = '00000000-0000-4000-8000-000000000001';
 const revision = '00000000-0000-4000-8000-000000000002';
@@ -26,10 +27,10 @@ beforeEach(() => {
 describe('publication link', () => {
   it('saves first and links only the record the operator chooses', async () => {
     const save = show(); fireEvent.click(screen.getByRole('button', { name: '关联发布记录' }));
-    const select = await screen.findByLabelText('发布记录');
+    await screen.findByRole('combobox', { name: '发布记录' });
     expect(save).toHaveBeenCalled();
     expect(api.linkPublication).not.toHaveBeenCalled();
-    fireEvent.change(select, { target: { value: publication } });
+    chooseOption('发布记录', /合成发布/);
     fireEvent.click(screen.getByRole('button', { name: '确认关联' }));
     await screen.findByText('已关联运营发布记录。');
     expect(api.linkPublication).toHaveBeenCalledWith(work, expect.objectContaining({ expectedRevision: revision, publicationRef: publication }));
@@ -37,7 +38,8 @@ describe('publication link', () => {
   it('reuses the request identity after an uncertain response', async () => {
     vi.mocked(api.linkPublication).mockRejectedValueOnce(new Error('network'));
     show(); fireEvent.click(screen.getByRole('button', { name: '关联发布记录' }));
-    fireEvent.change(await screen.findByLabelText('发布记录'), { target: { value: publication } });
+    await screen.findByRole('combobox', { name: '发布记录' });
+    chooseOption('发布记录', /合成发布/);
     fireEvent.click(screen.getByRole('button', { name: '确认关联' }));
     await screen.findByText('关联结果尚未确认。请沿用原请求重试。');
     fireEvent.click(screen.getByRole('button', { name: '重试关联' }));

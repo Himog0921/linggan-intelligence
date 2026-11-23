@@ -127,6 +127,8 @@ export interface CopyReady {
   hintCount: number;
   replayed: boolean;
 }
+/** What copying the saved revision would give, before any receipt exists. */
+export type CopyPreview = Omit<CopyReady, 'receiptRef' | 'replayed'>;
 export interface CopiedMark { receiptRef: string; revisionId: string; copiedAt: string }
 export interface CopyStatus { copied: CopiedMark | null }
 export interface PublicationCandidate { publicationRef: string; title: string | null; publishedOn: string | null; url: string | null }
@@ -295,6 +297,12 @@ function parseCopyReady(r: Json): CopyReady {
     text: str(r, 'text'), warnCount: count(r, 'warnCount'), hintCount: count(r, 'hintCount'), replayed: bool(r, 'replayed'),
   };
 }
+function parseCopyPreview(r: Json): CopyPreview {
+  return {
+    workId: uuid(r, 'workId'), revisionId: uuid(r, 'revisionId'), rulesetVersion: str(r, 'rulesetVersion'), title: str(r, 'title'), body: str(r, 'body'),
+    tags: strings(r, 'tags'), text: str(r, 'text'), warnCount: count(r, 'warnCount'), hintCount: count(r, 'hintCount'),
+  };
+}
 function parseMark(r: Json): CopiedMark {
   return { receiptRef: uuid(r, 'receiptRef'), revisionId: uuid(r, 'revisionId'), copiedAt: str(r, 'copiedAt') };
 }
@@ -309,6 +317,7 @@ export const decodeSentenceReceipt = (value: unknown) => decode(value, r => ({ s
 export const decodeSentenceCheck = (value: unknown) => decode(value, parseSentenceCheck);
 export const decodeCheckReport = (value: unknown) => decode(value, parseCheckReport);
 export const decodeCopyReady = (value: unknown) => decode(value, parseCopyReady);
+export const decodeCopyPreview = (value: unknown) => decode(value, parseCopyPreview);
 export const decodeCopiedMark = (value: unknown) => decode(value, parseMark);
 export const decodeCopyStatus = (value: unknown) => decode(value, r => {
   const copied = optObj(r, 'copied');

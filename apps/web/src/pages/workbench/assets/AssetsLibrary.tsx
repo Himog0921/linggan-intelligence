@@ -12,12 +12,13 @@ import * as stylesApi from './stylesApi';
 import * as templatesApi from './structuralTemplatesApi';
 
 const KINDS = [['persona', '人设事实'], ['experience', '经历'], ['factCard', '产品事实卡'], ['sentence', '衔接句'], ['template', '样板库'], ['style', '风格']] as const;
-type Kind = typeof KINDS[number][0];
+export type AssetKind = typeof KINDS[number][0];
+type Kind = AssetKind;
 const SCOPES: Partial<Record<Kind, string>> = { persona: 'persona', experience: 'experience', factCard: 'product' };
 
 /** The asset library of the creation module: type tabs across the top, the chosen type below. */
-export function AssetsLibrary({ domainRef, onPendingChange = () => {}, onDirtyChange = () => {}, onClose }: { domainRef: string; onPendingChange?: (pending: boolean) => void; onDirtyChange?: (dirty: boolean) => void; onClose?: () => void }) {
-  const [kind, setKind] = useState<Kind>('persona');
+export function AssetsLibrary({ domainRef, initialKind = 'persona', onPendingChange = () => {}, onDirtyChange = () => {}, onClose }: { domainRef: string; initialKind?: AssetKind; onPendingChange?: (pending: boolean) => void; onDirtyChange?: (dirty: boolean) => void; onClose?: () => void }) {
+  const [kind, setKind] = useState<Kind>(initialKind);
   const [pending, setPending] = useState(false);
   const [dirty, setDirty] = useState(false);
   const accounts = useQuery({ queryKey: ['creation-assets', 'accounts', domainRef], queryFn: ({ signal }) => api.listAccounts(domainRef, signal), retry: false });
