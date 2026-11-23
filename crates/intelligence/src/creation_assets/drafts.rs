@@ -482,7 +482,8 @@ async fn replay(
 }
 
 /// What a saved revision would copy: its sources requalified, every rule run, the text formatted.
-/// The copy command and the read-only preview both come through here, so they cannot disagree.
+/// The copy command and the read-only preview both compute it here, so the rules and the text cannot differ
+/// between them; what each takes around it (the copy's own lock, the preview's gate) is theirs.
 struct CopyCandidate {
     revision_id: Uuid,
     document: WorkDocument,
@@ -519,7 +520,8 @@ async fn copy_candidate(
 /// The text `prepare_copy` would hand to the clipboard for the saved current revision, without a
 /// receipt and without writing anything: the transaction is read-only, so an accidental write would
 /// fail rather than leave a trace. The gate lock comes before any read, as in `read_work`, so a
-/// withdrawal that is in flight finishes first and its experience cannot appear in the preview.
+/// withdrawal that is in flight finishes first and its experience cannot appear in the preview. It is
+/// one global lock held for a few short reads, the same cost every `read_work` already pays.
 pub async fn preview_copy(db: &Database, work: Uuid) -> Result<CopyPreview, AssetsError> {
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET TRANSACTION READ ONLY")
