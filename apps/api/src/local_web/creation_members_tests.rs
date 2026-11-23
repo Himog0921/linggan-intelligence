@@ -107,6 +107,28 @@ async fn creation_members_share_reads_and_keep_writes_and_assets_scoped() {
             .bind(Uuid::new_v4()).bind(group).bind(member).bind(admin).bind(Uuid::new_v4()).execute(db.pool()).await.unwrap();
     }
     let app = app_with_database(db.clone());
+    let source_prepare = "/ops/api/creation/sources/prepare";
+    let unknown_source_payload = json!({
+        "domainRef": domain, "title": "作业启动", "angle": "第一步", "triggerCollection": true,
+    });
+    for (cookie, expected_status) in [
+        (None, StatusCode::UNAUTHORIZED),
+        (Some(writer_cookie.as_str()), StatusCode::FORBIDDEN),
+        (
+            Some(admin_cookie.as_str()),
+            StatusCode::UNPROCESSABLE_ENTITY,
+        ),
+    ] {
+        let (status, _) = request(
+            &app,
+            Method::POST,
+            source_prepare,
+            cookie,
+            Some(unknown_source_payload.clone()),
+        )
+        .await;
+        assert_eq!(status, expected_status);
+    }
     let create_path = "/api/local/ops/creation/works";
     let account = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_ops_account(account_ref,source_system,source_record_id,domain_ref,ledger_state,platform,account_name,profile_link_state,native_record_state,current_responsible_member_ref,native_version,native_created_by_member_ref,native_updated_by_member_ref,status) VALUES($1,'linggan_native',$1::text,$2,'native_active','xhs','成员合成账号','missing','active',$3,1,$3,$3,'active')")
