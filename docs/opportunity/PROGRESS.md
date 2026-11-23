@@ -697,3 +697,5 @@
 - 工作包：机会首页、详情和机会页专属面包屑的展示/交互修正。默认选择 ADHD 时保留显式领域；首页直接展示其他观察，按协议分组并保留不可比较说明；作者预览按服务器原顺序逐组展示，完整列表可展开，不变更业务指标、来源资格或协议规则。
 - 候选前端独立运行于 loopback，读取 3001 的现有数据：无参进入解析 ADHD；首屏 100 个协议组直接可见；面包屑计算色为 `rgb(213, 210, 221)`；详情真实样例默认展示 14 位作者，展开至 370 位，收起回到 14 位。只做页面只读交互，未迁移、真实采集或模型外发。
 - `bash scripts/ci-preflight.sh origin/main` → exit 0，54 项检查通过；`impeccable detect --json` → `[]`；`npm run test -- src/pages/opportunity/OpportunityPage.test.tsx` → 1 文件、17 项通过。完整前端验证与独立审阅另行记录在 PR，不以该候选页面访问冒充部署或业务验收。
+- 独立规格与工程审阅基线 `1e5ccf05`、候选 `79557dec`：发现列表翻页入口过远、作者展开缺少组别与状态、暗底焦点对比不足；本次一起修正。候选页实测顶部翻至第 2 页的 3 个问题，键盘焦点实际颜色 `rgb(255, 255, 255)`，作者控件可读出所属协议、展开状态和受控列表。
+- 增量回归：`npm run test -- src/pages/opportunity/OpportunityPage.test.tsx` → exit 0、1 文件 18 项通过；`bash scripts/ci-preflight.sh origin/main` → exit 0、54 项通过。未执行迁移或触发真实采集及模型外发。

@@ -106,6 +106,20 @@ describe('机会卡页面', () => {
     expect(within(table).getByRole('link', { name: '合成的用户问题' })).toBeVisible();
     expect(table).toHaveTextContent('不可比较：本周提及率未知');
   });
+  it('可从列表顶部和底部使用同一游标翻页', async () => {
+    setup(`domain=${DOMAIN}`, url => {
+      if (!url.pathname.endsWith('/opportunities')) return undefined;
+      const card = fixture();
+      const second = url.searchParams.has('cursor');
+      card.problem.statement = second ? '第二页的问题' : '第一页的问题';
+      return reply({ domainRef: DOMAIN, items: [card], weeklyComparisons: [{ problemId: PROBLEM, groups: [{ protocolVersion: 1, currentPeriodStart: '2026-11-09', previousPeriodStart: '2026-11-02', currentRatePer1k: null, previousRatePer1k: null, status: 'incomparable', reason: 'current_unavailable' }] }], page: { nextCursor: second ? null : 'next', hasMore: !second, asOf: card.asOf } });
+    });
+    await screen.findByRole('link', { name: '第一页的问题' });
+    await userEvent.click(within(screen.getByRole('navigation', { name: '机会列表顶部翻页' })).getByRole('button', { name: '下一页' }));
+    expect(await screen.findByRole('link', { name: '第二页的问题' })).toBeVisible();
+    await userEvent.click(within(screen.getByRole('navigation', { name: '机会列表底部翻页' })).getByRole('button', { name: '上一页' }));
+    expect(await screen.findByRole('link', { name: '第一页的问题' })).toBeVisible();
+  });
   it('作者列表只预览前五项，展开与收起不改变组内顺序', async () => {
     setup(`domain=${DOMAIN}&problem=${PROBLEM}`, url => {
       if (!url.pathname.endsWith('/card')) return undefined;
@@ -120,14 +134,17 @@ describe('机会卡页面', () => {
     expect(screen.queryByText('排序作者 6')).not.toBeInTheDocument();
     expect(screen.getByText('样本不足作者 5')).toBeVisible();
     expect(screen.queryByText('样本不足作者 6')).not.toBeInTheDocument();
-    const expand = screen.getAllByRole('button', { name: '查看全部 7 位作者' });
-    if (!expand[0] || !expand[1]) throw new Error('missing creator group controls');
-    await userEvent.click(expand[0]);
+    const ranked = screen.getByRole('button', { name: '展开采集协议 1可排序作者，共 7 位' });
+    const small = screen.getByRole('button', { name: '展开采集协议 1样本不足作者，共 7 位' });
+    expect(ranked).toHaveAttribute('aria-expanded', 'false');
+    expect(ranked).toHaveAttribute('aria-controls', screen.getByRole('list', { name: '采集协议 1可排序作者' }).id);
+    await userEvent.click(ranked);
+    expect(ranked).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('排序作者 7')).toBeVisible();
     expect(screen.queryByText('样本不足作者 6')).not.toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: '收起作者' }));
+    await userEvent.click(ranked);
     expect(screen.queryByText('排序作者 7')).not.toBeInTheDocument();
-    await userEvent.click(expand[1]);
+    await userEvent.click(small);
     expect(screen.getByText('样本不足作者 7')).toBeVisible();
   });
   it('首页直接显示服务端返回的卡片过期提示', async () => {
