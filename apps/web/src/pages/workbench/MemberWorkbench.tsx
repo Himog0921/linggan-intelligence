@@ -1,6 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
-import { Link, useBeforeUnload, useBlocker, useSearchParams } from 'react-router';
+import { Link, useBeforeUnload, useBlocker, useNavigate, useSearchParams } from 'react-router';
 import { ActionButton } from '../../shared/ActionButton';
 import { ApiError } from '../../shared/api';
 import { OpsFrame } from '../ops/OpsFrame';
@@ -25,6 +25,7 @@ function errorMessage(error: unknown) {
 
 export function MemberWorkbench({ memberRef }: { memberRef: string }) {
   const [params, setParams] = useSearchParams();
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<'mine' | 'team'>('mine');
   const [title, setTitle] = useState('');
   const [creating, setCreating] = useState(false);
@@ -32,6 +33,7 @@ export function MemberWorkbench({ memberRef }: { memberRef: string }) {
   const [error, setError] = useState('');
   const [assetAccount, setAssetAccount] = useState<string | null>(null);
   const pending = useRef<(Submission & { domainRef: string }) | null>(null);
+  const hasPendingCreation = useCallback(() => pending.current !== null, []);
   const client = useQueryClient();
   const domain = params.get('domain') ?? '';
   const work = params.get('work');
@@ -72,20 +74,20 @@ export function MemberWorkbench({ memberRef }: { memberRef: string }) {
       pending.current = null;
       setUnconfirmed(false);
       setTitle('');
-      await workspace.refetch();
+      void client.invalidateQueries({ queryKey: ['member-creation', memberRef, 'workspace', domain] });
       open(receipt.workId);
     } catch (failure) {
-      const answered = failure instanceof ApiError && failure.answered;
+      const answered = failure instanceof ApiError && failure.failure.kind === 'http' && failure.failure.status < 500;
       if (answered) pending.current = null;
       setUnconfirmed(!answered);
-      setError(errorMessage(failure));
+      setError(answered ? errorMessage(failure) : '新建稿件的结果尚未确认。请沿用原请求重试。');
     } finally {
       setCreating(false);
     }
   }
 
   const firstAccount = workspace.data?.accounts[0];
-  return <OpsFrame section="creation" domain={domain} restricted creationPageKey={section}
+  return <OpsFrame section="creation" domain={domain} restricted creationPageKey={section} onNavigate={href => { void navigate(href); }}
     scope={<OpsScopePicker creation options={domains.data ?? []} value={domain} loading={domains.isPending} failed={domains.isError}
       disabled={creating || unconfirmed} onChange={next => { setAssetAccount(null); setParams({ domain: next, section }); }} />}
     meta={firstAccount ? <ActionButton variant="outline" onClick={() => setAssetAccount(assetAccount ? null : firstAccount.ref)}>账号资产</ActionButton> : null}>
@@ -114,6 +116,7 @@ export function MemberWorkbench({ memberRef }: { memberRef: string }) {
             <Link to={`/ops/creation?${new URLSearchParams({ domain, section: 'works' })}`}>去我的创作</Link>
           </> : <>
             <h1>我的创作</h1>
+            <CreationNavigationGuard hasPendingCreation={hasPendingCreation} />
             <form className={styles.createForm} onSubmit={event => { event.preventDefault(); void create(); }}>
               <input aria-label="稿件标题" placeholder="稿件标题" value={title} disabled={creating || unconfirmed} onChange={event => setTitle(event.target.value)} />
               <ActionButton type="submit" variant="primary" disabled={!title.trim() || creating} busy={creating}>{unconfirmed ? '沿用原请求重试' : '新建稿件'}</ActionButton>
@@ -133,6 +136,19 @@ export function MemberWorkbench({ memberRef }: { memberRef: string }) {
         </section>}
     </main>
   </OpsFrame>;
+}
+
+// The list and draft editor mount their navigation blockers in separate views.
+function CreationNavigationGuard({ hasPendingCreation }: { hasPendingCreation: () => boolean }) {
+  const blocker = useBlocker(hasPendingCreation);
+  useBeforeUnload(useCallback((event: BeforeUnloadEvent) => {
+    if (hasPendingCreation()) event.preventDefault();
+  }, [hasPendingCreation]));
+
+  return blocker.state === 'blocked' ? <div role="alert" className={styles.warning}>
+    <p>新建稿件尚未确认，请留在当前页面。</p>
+    <ActionButton onClick={() => blocker.reset()}>留在我的创作</ActionButton>
+  </div> : null;
 }
 
 export function MemberDraft({ draft, accounts, refresh }: { draft: Draft; accounts: Workspace['accounts']; refresh: () => void }) {

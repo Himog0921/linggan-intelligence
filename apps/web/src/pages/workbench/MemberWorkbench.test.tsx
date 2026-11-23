@@ -3,7 +3,9 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import { createMemoryRouter, RouterProvider } from 'react-router';
 import { expect, it, vi } from 'vitest';
 import * as operations from '../ops/api';
-import { MemberDraft } from './MemberWorkbench';
+import { ApiError } from '../../shared/api';
+import { MemberDraft, MemberWorkbench } from './MemberWorkbench';
+import { newDocument, type SaveReceipt } from './workbenchModel';
 import * as creation from './memberWorkbenchApi';
 
 vi.mock('../ops/api', async original => ({
@@ -13,6 +15,10 @@ vi.mock('../ops/api', async original => ({
 vi.mock('./memberWorkbenchApi', async original => ({
   ...(await original<typeof import('./memberWorkbenchApi')>()),
   save: vi.fn(),
+  create: vi.fn(),
+  readDomains: vi.fn(),
+  readWorkspace: vi.fn(),
+  readDraft: vi.fn(),
 }));
 
 const draft: creation.Draft = {
@@ -56,3 +62,50 @@ it.each([['team', true], ['mine', false]] as const)(
     expect(screen.queryByRole('button', { name: '登记发布' })).not.toBeInTheDocument();
   },
 );
+
+
+it.each([
+  { kind: 'network' },
+  { kind: 'http', status: 503, code: null },
+] as const)('retains a creation request when leaving would lose an unconfirmed $kind result', async failure => {
+  vi.mocked(creation.readDomains).mockResolvedValue([{ domainRef: draft.domainRef, name: '合成领域' }]);
+  vi.mocked(creation.readWorkspace).mockResolvedValue({ works: [], ideas: [], accounts: [] });
+  vi.mocked(creation.readDraft).mockResolvedValue(draft);
+  let rejectCreation: (error: ApiError) => void = () => {};
+  const pending = new Promise<SaveReceipt>((_resolve, reject) => { rejectCreation = reject; });
+  vi.mocked(creation.create).mockClear().mockReturnValueOnce(pending).mockImplementationOnce(async command => ({
+    workId: draft.workId, requestId: command.requestId, outcome: 'accepted', replayed: true,
+    revision: { id: draft.revisionId, document: newDocument('新稿标题'), number: 1, savedAt: '2026-11-22', referenceFormat: 'current' },
+  }));
+  const router = createMemoryRouter([
+    { path: '/ops/creation', element: <MemberWorkbench memberRef="writer" /> },
+    { path: '/ops/publications', element: <h1>发布记录</h1> },
+  ], { initialEntries: ['/ops/creation?domain=domain&section=works'] });
+  render(<QueryClientProvider client={new QueryClient()}><RouterProvider router={router} /></QueryClientProvider>);
+
+  const title = await screen.findByRole('textbox', { name: '稿件标题' });
+  fireEvent.change(title, { target: { value: '新稿标题' } });
+  fireEvent.click(screen.getByRole('button', { name: '新建稿件' }));
+  const dataNavigation = screen.getByRole('link', { name: '数据' });
+  fireEvent.click(dataNavigation);
+  await screen.findByText('新建稿件尚未确认，请留在当前页面。');
+  expect(router.state.location.pathname).toBe('/ops/creation');
+  expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(false);
+
+  rejectCreation(new ApiError(failure));
+  const retry = await screen.findByRole('button', { name: '沿用原请求重试' });
+  expect(title).toBeDisabled();
+  fireEvent.click(screen.getByRole('button', { name: '留在我的创作' }));
+  fireEvent.click(dataNavigation);
+  await screen.findByText('新建稿件尚未确认，请留在当前页面。');
+  expect(router.state.location.search).toBe('?domain=domain&section=works');
+  fireEvent.click(retry);
+
+  await screen.findByRole('heading', { name: '已有结构化稿' });
+  expect(router.state.location.search).toContain('work=draft');
+  expect(creation.create).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(creation.create).mock.calls[1]?.[0]).toEqual(vi.mocked(creation.create).mock.calls[0]?.[0]);
+  expect(window.dispatchEvent(new Event('beforeunload', { cancelable: true }))).toBe(true);
+  fireEvent.click(screen.getByRole('link', { name: '数据' }));
+  await screen.findByRole('heading', { name: '发布记录' });
+});
