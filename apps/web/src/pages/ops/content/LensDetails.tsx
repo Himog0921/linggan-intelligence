@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ActionButton } from '../../../shared/ActionButton';
 import { reason } from '../api';
 import { Dialog, Status } from '../ui';
-import { getPublications, getSpotCheck, type Drill, type Snapshot } from './api';
+import { getPublications, type Drill } from './api';
 import css from './Lens.module.css';
 
 export function PublicationList({ snapshotRef, drill, close }: { snapshotRef: string; drill: Drill; close: () => void }) {
@@ -24,17 +24,5 @@ export function PublicationList({ snapshotRef, drill, close }: { snapshotRef: st
         <ActionButton disabled={offset+query.data.items.length >= query.data.total} onClick={() => setOffset(offset+query.data.limit)}>下一页</ActionButton>
       </nav>}
     </>}
-  </Dialog>;
-}
-export function SpotList({ snapshot,close }: { snapshot:Snapshot; close:()=>void }) {
-  const query = useQuery({ queryKey:['ops','content-lens','spot-check',snapshot.ref],retry:false,
-    queryFn: ({signal}) => getSpotCheck(snapshot.ref,signal) });
-  return <Dialog label="人工抽看样本" onClose={close} outsideClose className={css.dialog}>
-    <header className={css.heading}><h2>人工抽看样本</h2><ActionButton onClick={close}>关闭</ActionButton></header>
-    {query.isError ? <Status error retry={() => void query.refetch()}>抽看样本读取失败（{reason(query.error)}）。</Status>
-      : query.isPending ? <Status>正在读取样本…</Status> : query.data.length === 0 ? <p>暂无抽看样本。</p> :
-      <table className={css.effects}><thead><tr><th>标题</th><th>给什么</th><th>时刻</th><th>处境</th></tr></thead><tbody>{query.data.map(p => <tr key={p.key}>
-        <th scope="row">{p.title ?? '标题未取得'}</th>{(['offer','moment','situation'] as const).map(dim => <td key={dim}>{snapshot.structure[dim].find(row => row.key === p[dim])?.name ?? p[dim]}</td>)}
-      </tr>)}</tbody></table>}
   </Dialog>;
 }

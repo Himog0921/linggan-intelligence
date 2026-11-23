@@ -49,3 +49,12 @@
 
 .effectTable { margin-block:var(--lgi-space-2); }
 .effectTable thead th { position:sticky; top:0; z-index:1; }
+
+.reviewControls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: var(--lgi-space-3);
+  margin-top: var(--lgi-space-4);
+}
+.reviewControls label { display: grid; gap: var(--lgi-space-1); }

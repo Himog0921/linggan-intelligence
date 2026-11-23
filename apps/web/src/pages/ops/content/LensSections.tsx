@@ -20,7 +20,7 @@ export function Quality({ snapshot: { quality: q }, open, spot }: { snapshot: Sn
     </small><small>范围内 {q.publications} 篇，有标题 {q.titled} 篇，待标 {q.pending} 个标题</small></div>
     <div><span>机器标签一致率</span><details><summary>{summary ? (labels[summary.dimension as keyof typeof labels] ?? summary.dimension) + ' ' + percent(summary.value) + (summary.meetsThreshold ? '' : ' · 未达标') : '暂无复标结果'}</summary>{q.agreement.length ? q.agreement.map(a =>
       <p key={a.run + a.dimension}>{labels[a.dimension as keyof typeof labels] ?? a.dimension} · {percent(a.value)} · κ {a.kappa?.toFixed(2) ?? '未知'} · {a.count} 条 <small>批次 {a.run.slice(0, 8)}</small></p>) : <p>暂无复标结果</p>}</details></div>
-    <div><span>人工抽看</span><Link label="查看人工抽看样本" onClick={spot}>查看抽看样本</Link><small>已裁定 {q.adjudicated} 个标题</small></div>
+    <div><span>人工抽看</span><Link label="查看人工抽看样本" onClick={spot}>查看抽看样本</Link><small>已裁定 {q.adjudicated} 个标题</small>{q.corrected !== null && <small>已改正 {q.corrected} 个标题</small>}</div>
     <div><span>分类体系</span><strong>v{q.taxonomy}</strong><small>指标 v{q.metric}</small></div>
   </section>;
 }

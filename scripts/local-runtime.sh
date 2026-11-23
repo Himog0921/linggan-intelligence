@@ -547,6 +547,7 @@ migrate() {
   apply_migration_once "0233_comment_problem_withdrawn_source" "$project_root/database/migrations/0233_comment_problem_withdrawn_source.sql"
   apply_migration_once "0234_ops_content_lens" "$project_root/database/migrations/0234_ops_content_lens.sql"
   apply_migration_once "0235_ops_title_label" "$project_root/database/migrations/0235_ops_title_label.sql"
+  apply_migration_once "0236_ops_lens_settled_primary" "$project_root/database/migrations/0236_ops_lens_settled_primary.sql"
 }
 
 case "$command_name" in

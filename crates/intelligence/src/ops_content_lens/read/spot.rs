@@ -1,7 +1,8 @@
 use super::{LensDefinitionError, frozen};
+use crate::ops_content_lens::LabelDimension as Dim;
 use crate::ops_content_lens::{LabelDimension, TITLED_PUBLICATIONS_CTE};
 use linggan_storage_postgres::Database;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sqlx::Row;
 use std::collections::BTreeMap;
 use uuid::Uuid;
@@ -11,11 +12,18 @@ use uuid::Uuid;
 pub struct SpotCheck {
     pub snapshot_ref: Uuid,
     pub items: Vec<SpotItem>,
+    pub vocabulary: BTreeMap<Dim, Vec<Choice>>,
+}
+#[derive(Serialize, Deserialize)]
+pub struct Choice {
+    key: String,
+    name: String,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpotItem {
     pub title_key: String,
+    pub effective: BTreeMap<Dim, String>,
     pub run_ref: Uuid,
     pub publication_ref: Uuid,
     pub title: Option<String>,
@@ -58,6 +66,11 @@ pub async fn spot_check(db: &Database, id: Uuid) -> Result<SpotCheck, LensDefini
         let title_key: String = row.try_get("title_key")?;
         let (_, publication_ref) = titles[title_key.as_str()];
         items.push(SpotItem {
+            effective: input.publications[&publication_ref]
+                .labels
+                .iter()
+                .map(|(dim, l)| (dim.clone(), l.value.clone()))
+                .collect(),
             title_key,
             publication_ref,
             title: None,
@@ -98,7 +111,14 @@ pub async fn spot_check(db: &Database, id: Uuid) -> Result<SpotCheck, LensDefini
             item.title = Some(title);
         }
     }
+    let (vocabulary,): (sqlx::types::Json<BTreeMap<Dim, Vec<Choice>>>,) = sqlx::query_as(
+        "SELECT body - '_meta' FROM linggan_ops_lens_definition WHERE definition_ref=$1",
+    )
+    .bind(input.method.taxonomy_ref)
+    .fetch_one(db.pool())
+    .await?;
     Ok(SpotCheck {
+        vocabulary: vocabulary.0,
         snapshot_ref: id,
         items,
     })

@@ -152,9 +152,16 @@ pub(super) async fn require_admin(
     state: &LocalWebState,
     headers: &HeaderMap,
 ) -> Result<(), Response> {
+    require_admin_ref(state, headers).await.map(|_| ())
+}
+
+pub(super) async fn require_admin_ref(
+    state: &LocalWebState,
+    headers: &HeaderMap,
+) -> Result<uuid::Uuid, Response> {
     let member = super::ops_auth::current_member(state, headers).await?;
     if member.role == "admin" {
-        Ok(())
+        Ok(member.member_ref)
     } else {
         Err(local_read_json_error(
             axum::http::StatusCode::FORBIDDEN,
