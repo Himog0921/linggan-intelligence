@@ -5,7 +5,7 @@ import * as d from '../../../shared/decode';
 const base = '/api/local/ops/content-lens/';
 export const dims = ['offer', 'moment', 'situation'] as const;
 export type Dimension = typeof dims[number];
-export const labels = { offer: '给什么', moment: '时刻', situation: '处境', audience: '面向谁' };
+export const labels = { offer: '内容内核', moment: '选题内容', situation: '家长处境', audience: '面向谁' };
 export type EffectDimension = 'offer' | 'moment';
 export type SampleMetric = 'publications' | 'titledPublications' | 'titledViews' | 'views' | 'overThousand' | 'hit' | 'activeComments' | 'commentsPerThousandViews' | 'withinAccountViews';
 export type Drill = { label: string; metric: SampleMetric; subset?: 'all' | 'numerator' | 'denominator' } & Partial<Record<Dimension, string>>;

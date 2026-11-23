@@ -45,7 +45,7 @@ it('uses the frozen ref, dimension, metric and subset for both sides of a suppre
     expect(Object.fromEntries(latest.searchParams)).toMatchObject({snapshotRef:'snapshot-1',offer:'method',metric:'overThousand',subset});
     fireEvent.click(within(dialog).getByRole('button',{name:'关闭'}));
   }
-  fireEvent.click(within(screen.getByRole('navigation',{name:'效果维度'})).getByRole('button',{name:'时刻'}));
+  fireEvent.click(within(screen.getByRole('navigation',{name:'效果维度'})).getByRole('button',{name:'选题内容'}));
   expect(await screen.findByText(/复标一致率不足/)).toBeVisible();
 });
 it('keeps disabled and in-progress routes from requesting a snapshot', async () => {

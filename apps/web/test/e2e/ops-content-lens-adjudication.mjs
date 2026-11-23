@@ -72,7 +72,7 @@ try {
   const moved = publications(before,from) - publications(after,from);
   assert.ok(moved > 0);
   assert.equal(publications(after,to.key) - publications(before,to.key), moved);
-  const row = dialog.getByRole('row').filter({has:page.getByRole('rowheader',{name:'给什么',exact:true})});
+  const row = dialog.getByRole('row').filter({has:page.getByRole('rowheader',{name:'内容内核',exact:true})});
   await row.getByText('已记录',{exact:true}).waitFor();
   const cells = await row.getByRole('cell').allTextContents();
   assert.deepEqual(cells,[sample.vocabulary.offer.find(choice => choice.key === from).name,to.name,'已记录']);

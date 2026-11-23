@@ -39,8 +39,8 @@ export function ContentLensPage({ domain }: { domain:string }) {
   const current = snapshot.isSuccess ? snapshot.data : null;
   const open = (drill:Drill) => current && setDetail({domain,ref:current.ref,drill});
   return <div className={css.board}>
-    <div className={css.top}><h2>内容回溯</h2><div className={css.controls}>
-      <ActionButton disabled={active || action.isPending} onClick={() => action.mutate('label')}>标注全部业务待标标题</ActionButton>
+    <div className={css.top}><div className={css.controls}>
+      <ActionButton disabled={active || action.isPending} onClick={() => action.mutate('label')}>标注所有业务的待标标题</ActionButton>
       <ActionButton disabled={active || action.isPending} onClick={() => action.mutate('snapshot')}>生成当前范围快照</ActionButton>
     </div></div>
     {action.isError && <p role="alert">操作未完成（{reason(action.error)}）。</p>}

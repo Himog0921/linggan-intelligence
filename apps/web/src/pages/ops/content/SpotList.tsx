@@ -37,7 +37,7 @@ function TitleReview({ item, decisions, vocabulary, busy, stale, dimension, sele
     <h3>{item.title ?? '标题未取得'}</h3>
     <p>机器标注把握程度：{confidenceNames[item.confidence] ?? '未知'}</p>
     <table className={css.effects}>
-      <thead><tr><th>维度</th><th>冻结机器值</th><th>生效值</th><th>本轮裁定</th></tr></thead>
+      <thead><tr><th>维度</th><th>原始机器分类</th><th>当前分类</th><th>本轮裁定</th></tr></thead>
       <tbody>{reviewDimensions.map(dim => <tr key={dim}>
         <th scope="row">{labels[dim]}</th><td>{name(dim, item.machine[dim])}</td><td>{name(dim, effective(dim))}</td><td>{decisions?.[dim] ? '已记录' : '待裁定'}</td>
       </tr>)}</tbody>
@@ -102,6 +102,7 @@ export function SpotList({ snapshotRef, domain, ids, close }: {
   }
   return <Dialog label="人工抽看样本" onClose={dismiss} className={css.dialog}>
     <header className={css.heading}><h2>人工抽看样本</h2><ActionButton disabled={busy} onClick={dismiss}>关闭</ActionButton></header>
+    <div className={css.dialogBody}>
     {conflict ? <p role="alert">裁定发生冲突。请关闭抽看，点击“生成当前范围快照”，再重新打开抽看样本。</p>
       : mutation.isError && <p role="alert">{failure?.kind === 'http' ? '裁定未保存' : '裁定未确认'}（{reason(mutation.error)}）。可再次提交。</p>}
     {mutation.isSuccess && <p role="status">裁定已记录。</p>}
@@ -119,5 +120,6 @@ export function SpotList({ snapshotRef, domain, ids, close }: {
             mutation.mutate({ snapshotRef: source, titleKey: item.key, dimension, value, reason });
           }} />
       </>}
+    </div>
   </Dialog>;
 }
