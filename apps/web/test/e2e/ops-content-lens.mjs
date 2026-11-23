@@ -78,7 +78,7 @@ try {
     {offer:'actionable_method',metric:'publications',subset:'all'},2);
   await compareList(page.getByRole('button',{name:momentName+' × '+offerName+'，2 篇',exact:true}),small,
     {moment:'homework_study',offer:'actionable_method',metric:'publications',subset:'all'},2);
-  await page.getByRole('navigation',{name:'效果维度'}).getByRole('button',{name:'时刻'}).click();
+  await page.getByRole('navigation',{name:'效果维度'}).getByRole('button',{name:'选题内容'}).click();
   const smallRow=page.getByRole('row').filter({has:page.getByRole('button',{name:momentName+'过千率分子 1',exact:true})});
   await shot('06-small-denominator',smallRow);
   assert.ok(await smallRow.getByText('样本不足',{exact:true}).count()>0);
@@ -94,7 +94,7 @@ try {
   await page.getByRole('button',{name:'重试'}).click(); await page.getByText('内容结构',{exact:true}).waitFor();
   await use('enough');
   const good=(await data('snapshot')).snapshot;
-  await page.getByRole('navigation',{name:'效果维度'}).getByRole('button',{name:'时刻'}).click();
+  await page.getByRole('navigation',{name:'效果维度'}).getByRole('button',{name:'选题内容'}).click();
   const result=good.effect.byDimension.moment.rows.find(r=>r.midRate.denominator===25);
   const name=good.structure.moment.find(r=>r.key===result.key).name;
   const enoughRow=page.getByRole('row').filter({has:page.getByRole('button',{name:name+'过千率分子 13',exact:true})});
