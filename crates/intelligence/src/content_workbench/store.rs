@@ -524,6 +524,7 @@ pub async fn save_as_in(
         None,
         false,
         false,
+        false,
     )
     .await?;
     let (domain, _) = read_revision_in(tx, work, None).await?;
@@ -586,6 +587,7 @@ async fn save_in(
     adoption: Option<&AdoptionLink>,
     force_revision: bool,
     allow_epoch_rotation: bool,
+    restore_adoption_parent: bool,
 ) -> Result<SaveReceipt, WorkbenchError> {
     lock_save_in(tx, work, request).await?;
     let mut submitted_experiences: Vec<Uuid> = doc
@@ -634,7 +636,11 @@ async fn save_in(
         if !allow_epoch_rotation && doc.experience_epoch != current.document.experience_epoch {
             return Err(WorkbenchError::Invalid("experience_editor_reset_required"));
         }
-        prepare(tx, work, domain, Some(&current.document), &mut doc).await?;
+        // An explicit immediate adoption undo restores the exact server-owned parent.
+        // Its source lineage belongs to that parent, not to the candidate being undone.
+        let restored = restore_adoption_parent.then(|| Box::new(doc.clone()));
+        let lineage = restored.as_deref().unwrap_or(&current.document);
+        prepare(tx, work, domain, Some(lineage), &mut doc).await?;
         if doc == current.document && adoption.is_none() && !force_revision {
             ("unchanged", current)
         } else {
@@ -673,7 +679,7 @@ pub async fn adopt_in(
     doc: WorkDocument,
     link: &AdoptionLink,
 ) -> Result<SaveReceipt, WorkbenchError> {
-    if link.input_revision != expected {
+    if link.input_revision != expected && link.action != "rewrite_selection" {
         return Err(WorkbenchError::Invalid("inputRevision"));
     }
     let command = hash(serde_json::to_vec(&json!([
@@ -688,6 +694,7 @@ pub async fn adopt_in(
         &command,
         Some(link),
         true,
+        false,
         false,
     )
     .await?;
@@ -713,6 +720,17 @@ pub async fn restore(
     if current.document.idea_name.is_some() {
         revision.document.angle = current.document.angle.clone();
     }
+    let undo_adoption: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_creation_revision r
+         JOIN linggan_creation_adoption a USING (revision_ref)
+         WHERE r.work_ref=$1 AND r.revision_ref=$2 AND r.previous_revision_ref=$3
+           AND a.action='rewrite_selection')",
+    )
+    .bind(work)
+    .bind(current.id)
+    .bind(r.restore_revision)
+    .fetch_one(&mut *tx)
+    .await?;
     let mut out = save_in(
         &mut tx,
         work,
@@ -723,6 +741,7 @@ pub async fn restore(
         None,
         true,
         false,
+        undo_adoption,
     )
     .await?;
     let (domain, _) = read_revision_in(&mut tx, work, None).await?;
@@ -788,6 +807,7 @@ pub async fn reset_withdrawn(
         None,
         true,
         true,
+        false,
     )
     .await?;
     redact(&mut tx, domain, &mut out.revision.document).await?;

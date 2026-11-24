@@ -124,6 +124,128 @@ fn call_count(path: &std::path::Path) -> usize {
         .count()
 }
 #[tokio::test]
+#[ignore = "isolated PostgreSQL targeted adoption and undo with local fake transport"]
+async fn rewrite_adoption_checks_only_the_frozen_target_and_undo_restores_the_actual_parent() {
+    let db = fixture::db("creation_ai_targeted_adoption").await;
+    let config = foundation_fixture::configure_fake_prerequisites(&db).await;
+    let mut document = fixture::cited_doc(&db).await;
+    document.paragraphs[0].text = "前缀🙂旧选段。后缀".into();
+    let other = Uuid::new_v4();
+    document.paragraphs.push(Paragraph {
+        id: other,
+        text: "另一段旧文".into(),
+    });
+    let work = fixture::create(&db, document).await;
+    let mut preview = request(&work, config, ai::WritingAction::RewriteSelection, "");
+    let target = preview.paragraph_ids[0];
+    preview.selection = Some(ai::RewriteSelection {
+        paragraph_id: target,
+        start: 3,
+        end: 6,
+        text_hash: linggan_intelligence::content_workbench_sources::text_hash("旧选段"),
+    });
+    preview
+        .citations
+        .push(work.revision.document.excerpts[0].citation.clone());
+    let execute = prepare(&db, &preview).await;
+    ai::execute(&db, &execute).await.unwrap();
+    let (adapter, counter, _owned) = adapter();
+    run_request(&db, execute.request_id, &SyntheticModelSecrets, &adapter)
+        .await
+        .unwrap();
+    let mut changed = work.revision.document.clone();
+    changed.paragraphs[1].text = "另一段已编辑".into();
+    let parent = save(
+        &db,
+        work.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: work.revision.id,
+            document: changed,
+        },
+    )
+    .await
+    .unwrap();
+    let status = ai::status(&db, execute.request_id).await.unwrap();
+    assert_eq!(status["staleBase"], true);
+    assert_eq!(
+        status["rewriteTarget"],
+        json!({"paragraphId": target,"start":3,"end":6})
+    );
+    let mut command = ai::AdoptRequest {
+        request_id: Uuid::new_v4(),
+        expected_revision: work.revision.id,
+        paragraph_indices: Some(vec![0]),
+        page_indices: Some(vec![]),
+        adopt_title: false,
+        rewrite_text: Some("合成手改😀".into()),
+    };
+    assert!(matches!(
+        ai::adopt(&db, execute.request_id, &command).await,
+        Err(ai::AiError::Stale)
+    ));
+    command.expected_revision = parent.revision.id;
+    let adopted: SaveReceipt =
+        serde_json::from_value(ai::adopt(&db, execute.request_id, &command).await.unwrap())
+            .unwrap();
+    assert_eq!(adopted.revision.number, parent.revision.number + 1);
+    assert_eq!(
+        adopted.revision.document.paragraphs[0].text,
+        "前缀🙂合成手改😀。后缀"
+    );
+    assert_eq!(adopted.revision.document.paragraphs[1].text, "另一段已编辑");
+    assert!(!adopted.revision.document.derived_sources.is_empty());
+    let ancestry: (Uuid, Uuid) = sqlx::query_as(
+        "SELECT r.previous_revision_ref,a.input_revision_ref FROM linggan_creation_revision r
+         JOIN linggan_creation_adoption a USING (revision_ref) WHERE r.revision_ref=$1",
+    )
+    .bind(adopted.revision.id)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(ancestry, (parent.revision.id, work.revision.id));
+    let replay = ai::adopt(&db, execute.request_id, &command).await.unwrap();
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(replay["revision"]["id"], json!(adopted.revision.id));
+
+    let undo = RestoreRequest {
+        request_id: Uuid::new_v4(),
+        expected_revision: adopted.revision.id,
+        restore_revision: parent.revision.id,
+    };
+    let undone = restore(&db, work.work_id, &undo).await.unwrap();
+    assert_eq!(undone.revision.document, parent.revision.document);
+    assert_eq!(undone.revision.number, adopted.revision.number + 1);
+    assert!(restore(&db, work.work_id, &undo).await.unwrap().replayed);
+
+    let mut changed = undone.revision.document;
+    // Even an edit outside the selected span of this paragraph requires a new candidate.
+    changed.paragraphs[0].text.push_str("目标段新增尾句");
+    let newer = save(
+        &db,
+        work.work_id,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: undone.revision.id,
+            document: changed,
+        },
+    )
+    .await
+    .unwrap();
+    command.request_id = Uuid::new_v4();
+    command.expected_revision = newer.revision.id;
+    assert!(matches!(
+        ai::adopt(&db, execute.request_id, &command).await,
+        Err(ai::AiError::TargetChanged)
+    ));
+    assert_eq!(
+        read_work(&db, work.work_id).await.unwrap().revision.id,
+        newer.revision.id
+    );
+    assert_eq!(call_count(&counter), 1);
+}
+
+#[tokio::test]
 #[ignore = "isolated PostgreSQL draft context proof with local fake transport"]
 async fn selected_draft_context_matches_dispatch_and_rechecks_template_approval() {
     use linggan_intelligence::creation_assets::{
@@ -277,6 +399,7 @@ async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_
         .await
         .unwrap();
     let adoption = ai::AdoptRequest {
+        rewrite_text: None,
         request_id: Uuid::new_v4(),
         expected_revision: first.revision.id,
         paragraph_indices: None,
@@ -308,6 +431,7 @@ async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_
     .await
     .unwrap();
     let pages = ai::AdoptRequest {
+        rewrite_text: None,
         request_id: Uuid::new_v4(),
         expected_revision: adopted.revision.id,
         paragraph_indices: None,
@@ -542,6 +666,7 @@ async fn selected_unicode_range_rewrite_splices_only_the_confirmed_substring() {
         &db,
         execute.request_id,
         &ai::AdoptRequest {
+            rewrite_text: None,
             request_id: Uuid::new_v4(),
             expected_revision: first.revision.id,
             paragraph_indices: None,
@@ -855,6 +980,7 @@ async fn adopted_paraphrase_keeps_source_through_edits_and_later_generation() {
             &db,
             execute.request_id,
             &ai::AdoptRequest {
+                rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: first.revision.id,
                 paragraph_indices: None,
@@ -1012,6 +1138,7 @@ async fn adopted_paraphrase_keeps_source_through_edits_and_later_generation() {
             &db,
             next_execute.request_id,
             &ai::AdoptRequest {
+                rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: saved.revision.id,
                 paragraph_indices: None,
@@ -1416,6 +1543,7 @@ async fn experience_rewrite_retains_erasable_lineage_and_replay_after_withdrawal
     .unwrap();
     assert!(!public.contains("合成改写"));
     let adoption = ai::AdoptRequest {
+        rewrite_text: None,
         request_id: Uuid::new_v4(),
         expected_revision: work.revision.id,
         paragraph_indices: None,
@@ -1660,6 +1788,7 @@ async fn experience_model_preview_and_result_are_unavailable_after_person_replac
             &db,
             command.request_id,
             &ai::AdoptRequest {
+                rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: work.revision.id,
                 paragraph_indices: None,
@@ -1795,6 +1924,7 @@ async fn experience_rewrite_with_public_citation_keeps_source_uses_erasable() {
         &db,
         command.request_id,
         &ai::AdoptRequest {
+            rewrite_text: None,
             request_id: Uuid::new_v4(),
             expected_revision: work.revision.id,
             paragraph_indices: None,
@@ -1988,6 +2118,7 @@ async fn experience_adoption_waits_for_work_before_locking_experiences() {
             &other_db,
             request_id,
             &ai::AdoptRequest {
+                rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: revision_id,
                 paragraph_indices: None,

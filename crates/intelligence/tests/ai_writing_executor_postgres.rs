@@ -426,6 +426,7 @@ async fn actual_writing_is_queued_once_then_uses_one_typed_invocation_and_the_ex
         &db,
         confirmed.request_id,
         &ai::AdoptRequest {
+            rewrite_text: None,
             request_id: Uuid::new_v4(),
             expected_revision: work.revision.id,
             paragraph_indices: None,

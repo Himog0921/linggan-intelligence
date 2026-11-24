@@ -1,7 +1,7 @@
 {
   "kind": "implementation_fix",
-  "reason": "在材料桌选题框设置复用样板选择控件，写稿区展示所选版本",
-  "authorization": "Mog 确认推进 S2 连续创作",
+  "reason": "在写稿对照按目标段采用，并复用写稿工具撤销",
+  "authorization": "Mog 确认继续推进 S2 目标段采用与撤销",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",

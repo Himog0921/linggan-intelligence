@@ -387,6 +387,7 @@ export interface AiStatus {
   sourceQualification: string;
   failureCode: string | null;
   staleBase: boolean;
+  rewriteTarget?: { paragraphId: string; start: number; end: number };
   batchRef?: string | null;
   taskConfigRef?: string | null;
   usage: {
@@ -870,6 +871,7 @@ export const parseAiStatus = shape<AiStatus>({
   sourceQualification: str,
   failureCode: nullable(str),
   staleBase: bool,
+  rewriteTarget: optional(shape({ paragraphId: uuid, start: integer, end: integer })),
   batchRef: optional(nullable(uuid)),
   taskConfigRef: optional(nullable(uuid)),
   usage: shape({

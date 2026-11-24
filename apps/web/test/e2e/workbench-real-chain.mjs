@@ -744,11 +744,66 @@ try {
       await page.getByText('合成正文候选：先写一件具体的小事。',{exact:true}).first().waitFor();
       assert.equal((await creationJson(`/works/${draftId}`)).revision.document.paragraphs.length,0);
       await screenshot('workbench-draft-context-suggestion');
+      await page.getByRole('button',{name:'返回正文',exact:true}).click();
+      const writeParagraph=async (index,text)=>{
+        await page.getByRole('button',{name:'＋ 继续写一段',exact:true}).click();
+        await page.getByLabel(`正文第 ${index} 段`,{exact:true}).fill(text);
+      };
+      await writeParagraph(1,'目标段原文');
+      await writeParagraph(2,'其他段原文');
+      await save(page);
+      const rewrite=async ()=>{
+        await openWritingTools(page);
+        await page.getByLabel('正文第 1 段',{exact:true}).focus();
+        await page.keyboard.press('ControlOrMeta+A');
+        await page.getByRole('button',{name:'改写选段',exact:true}).click();
+        const panel=page.getByRole('dialog',{name:'改写选段',exact:true});
+        await panel.getByRole('button',{name:'准备并核对输入'}).click();
+        await panel.locator('pre').filter({hasText:'目标段原文'}).first().waitFor();
+        await panel.getByLabel('已核对不含真实姓名、学校、密码和点赞数，确认输入及额度').check();
+        const waiting=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/ai/requests'&&response.request().method()==='POST');
+        await panel.getByRole('button',{name:'执行一次',exact:true}).click();
+        const response=await waiting;
+        assert.equal(response.status(),200,await response.text());
+        const command=await response.json();
+        await until(async()=>{
+          const state=await creationJson(`/ai/requests/${command.requestId}`);
+          if(['failed','cancelled'].includes(state.state)) throw new Error(`synthetic targeted rewrite ${state.state}: ${state.failureCode}`);
+          return !!state.rewriteTarget && state.state==='succeeded';
+        },'target rewrite candidate received');
+        await panel.getByRole('button',{name:'刷新结果'}).click();
+        await panel.getByRole('button',{name:'打开改稿对照'}).click();
+      };
+      const editFromOtherPage=async (index,text)=>{
+        const {revision}=await creationJson(`/works/${draftId}`);
+        const document=revision.document;
+        document.paragraphs[index].text=text;
+        const response=await context.request.post(`${origin}/ops/api/creation/works/${draftId}/save`,{
+          headers:{Origin:origin},data:{requestId:randomUUID(),expectedRevision:revision.id,document}
+        });
+        assert.equal(response.status(),200,await response.text());
+      };
+      await rewrite();
+      await editFromOtherPage(1,'另一编辑保留');
+      await page.getByLabel('编辑改稿 第 1 段',{exact:true}).fill('采用前手改');
+      await page.getByRole('button',{name:'采用这一段',exact:true}).click();
+      await until(async()=>(await creationJson(`/works/${draftId}`)).revision.document.paragraphs[0].text==='采用前手改','edited target adopted');
+      await page.getByLabel('正文第 2 段',{exact:true}).waitFor();
+      assert.equal(await page.getByLabel('正文第 2 段',{exact:true}).inputValue(),'另一编辑保留');
+      await page.getByRole('button',{name:'撤销这次采用',exact:true}).click();
+      await until(async()=>(await creationJson(`/works/${draftId}`)).revision.document.paragraphs[0].text==='目标段原文','one undo saved on server');
+      assert.equal((await creationJson(`/works/${draftId}`)).revision.document.paragraphs[1].text,'另一编辑保留');
+      await rewrite();
+      await editFromOtherPage(0,'目标段原文加了新尾句');
+      await page.getByRole('button',{name:'采用这一段',exact:true}).click();
+      await page.getByText(/目标段已经变化.*重新选择/).first().waitFor();
+      assert.equal((await creationJson(`/works/${draftId}`)).revision.document.paragraphs[0].text,'目标段原文加了新尾句');
+      await screenshot('workbench-rewrite-target-changed');
     }
   });
   await step('没有外部请求、未授权模型执行或页面脚本错误',async()=>{
     assert.deepEqual(report.externalRequests,[]);assert.deepEqual(report.pageErrors,[]);
-    const expectedCalls = (process.env.CW_BROWSER_TITLE_PROOF === '1' ? 2 : 0) + (process.env.CW_BROWSER_DRAFT_CONTEXT_PROOF === '1' ? 1 : 0);
+    const expectedCalls = (process.env.CW_BROWSER_TITLE_PROOF === '1' ? 2 : 0) + (process.env.CW_BROWSER_DRAFT_CONTEXT_PROOF === '1' ? 3 : 0);
     assert.equal(report.requests.filter(request=>request.method==='POST'&&request.path==='/ops/api/creation/ai/requests').length,expectedCalls,'only explicit synthetic requests');
     assert.ok(report.requests.every(request=>!request.path.includes('/probes')),'no model/provider probe');
     const unexpected=report.failedRequests.filter(request=>!(request.method==='POST'&&request.path.endsWith('/save'))&&!request.error?.includes('ERR_ABORTED'));

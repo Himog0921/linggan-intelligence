@@ -29,9 +29,18 @@ pub(super) async fn status(db: &Database, id: Uuid) -> Result<Value, AiError> {
     } else {
         Some(public)
     };
+    let mut rewrite_target = None;
     let readable = if let Some(value) = manifest {
         let input: PreviewRequest = serde_json::from_value(value).map_err(|_| AiError::Invalid)?;
-        qualify_frozen_inputs(&mut tx, &input).await?
+        let readable = qualify_frozen_inputs(&mut tx, &input).await?;
+        if readable && input.action == super::WritingAction::RewriteSelection {
+            rewrite_target = input.selection.map(|selection| {
+                json!({
+                    "paragraphId":selection.paragraph_id,"start":selection.start,"end":selection.end
+                })
+            });
+        }
+        readable
     } else {
         false
     };
@@ -55,6 +64,9 @@ pub(super) async fn status(db: &Database, id: Uuid) -> Result<Value, AiError> {
             "cachedWriteTokens":r.get::<Option<i64>,_>("cached_write_tokens"),"reasoningTokens":r.get::<Option<i64>,_>("reasoning_tokens"),
             "inputTokens":r.get::<Option<i64>,_>("input_tokens"),"outputTokens":r.get::<Option<i64>,_>("output_tokens"),
             "chargedTokens":r.get::<Option<i64>,_>("charged_tokens"),"costUsd":null,"costPicoUsd":r.get::<Option<String>,_>("cost_quote")}});
+    if let Some(target) = rewrite_target {
+        response["rewriteTarget"] = target;
+    }
     if r.get::<String, _>("action") == "title_ideas" {
         let warnings = suggestion.as_ref().and_then(|value| serde_json::from_value::<super::title::TitleSuggestion>(value.clone()).ok()).map(|titles| json!({
             "cover": titles.cover_titles.iter().map(|title| crate::creation_assets::title_has_cure_promise(title)).collect::<Vec<_>>(),

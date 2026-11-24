@@ -133,6 +133,7 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
             &db,
             exec.request_id,
             &ai::AdoptRequest {
+                rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: work.revision.id,
                 paragraph_indices: None,
@@ -150,6 +151,7 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
         .await
         .unwrap();
     let adoption = ai::AdoptRequest {
+        rewrite_text: None,
         request_id: Uuid::new_v4(),
         expected_revision: newer.revision.id,
         paragraph_indices: Some(vec![0]),

@@ -202,7 +202,7 @@ print(json.dumps({'version':'linggan.pi.v1/0.85.1','ok':True,'text':json.dumps(o
         let worker_db = db.clone();
         Some(tokio::spawn(async move {
             loop {
-                let id:Option<Uuid>=sqlx::query_scalar("SELECT r.request_ref FROM linggan_creation_ai_request r JOIN linggan_creation_ai_preview p USING(preview_ref) WHERE (($1 AND p.action IN ('title_ideas','rewrite_selection')) OR ($2 AND p.action='draft')) AND r.state='queued' ORDER BY r.created_at LIMIT 1").bind(title_proof).bind(draft_proof).fetch_optional(worker_db.pool()).await.unwrap();
+                let id:Option<Uuid>=sqlx::query_scalar("SELECT r.request_ref FROM linggan_creation_ai_request r JOIN linggan_creation_ai_preview p USING(preview_ref) WHERE (($1 AND p.action='title_ideas') OR (($1 OR $2) AND p.action='rewrite_selection') OR ($2 AND p.action='draft')) AND r.state='queued' ORDER BY r.created_at LIMIT 1").bind(title_proof).bind(draft_proof).fetch_optional(worker_db.pool()).await.unwrap();
                 if let Some(id) = id {
                     writing_setup::run_request(
                         &worker_db,
@@ -268,7 +268,7 @@ print(json.dumps({'version':'linggan.pi.v1/0.85.1','ok':True,'text':json.dumps(o
     );
     assert_eq!(
         after.0,
-        before.0 + 2 * i64::from(title_proof) + i64::from(draft_proof),
+        before.0 + 2 * i64::from(title_proof) + 3 * i64::from(draft_proof),
         "only the explicitly enabled synthetic title, experience rewrite and draft calls may run"
     );
     if let Some(result) = result {

@@ -297,6 +297,7 @@ export async function adopt(id: string, body: {
   requestId: string;
   expectedRevision: string;
   paragraphIndices: number[] | null;
+  rewriteText?: string;
   pageIndices: number[] | null;
   adoptTitle: boolean;
 }) {
@@ -406,7 +407,8 @@ export function errorText(error: unknown): string {
       creation_legacy_reference_unavailable: '这份历史作品缺少当前所需的来源定位，原稿已保留，但暂不能安全打开。',
       creation_ai_model_unavailable: '创作模型尚不可用，仍可手写。',
       creation_ai_admission_denied: '当前运行条件尚未满足，请到AI设置核对开关、模型、额度和外发许可。当前输入仍保留。',
-      creation_ai_stale: '底稿已改变，请重新预览。',
+      creation_ai_stale: '当前稿件版本已更新，请重新读取后再试。',
+      creation_ai_target_changed: '目标段已经变化。请返回正文，重新选择文字并生成。',
       creation_request_conflict: '这次操作与先前的内容不一致，请先刷新核对。当前输入仍保留。'
     };
     return code && messages[code] ? messages[code] : '操作未完成，当前输入仍保留。请稍后重试。';

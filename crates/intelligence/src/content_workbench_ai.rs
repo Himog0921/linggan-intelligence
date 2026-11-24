@@ -16,6 +16,8 @@ pub enum AiError {
     Invalid,
     #[error("creation_ai_stale")]
     Stale,
+    #[error("creation_ai_target_changed")]
+    TargetChanged,
     #[error("creation_ai_not_found")]
     NotFound,
     #[error("creation_ai_conflict")]
@@ -49,6 +51,7 @@ impl AiError {
         match self {
             Self::Invalid => "creation_ai_invalid",
             Self::Stale => "creation_ai_stale",
+            Self::TargetChanged => "creation_ai_target_changed",
             Self::NotFound => "creation_ai_not_found",
             Self::Conflict => "creation_ai_conflict",
             Self::Source => "creation_ai_source_unavailable",
@@ -160,6 +163,8 @@ pub struct WritingSuggestion {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdoptRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewrite_text: Option<String>,
     pub request_id: Uuid,
     pub expected_revision: Uuid,
     pub paragraph_indices: Option<Vec<usize>>,
