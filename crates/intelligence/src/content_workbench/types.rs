@@ -418,6 +418,36 @@ pub struct CreateRequest {
     pub domain_ref: Uuid,
     pub document: WorkDocument,
 }
+/// Opens one draft per account for an existing idea in a single transaction (一题多号).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OpenIdeaDraftsRequest {
+    pub request_id: Uuid,
+    /// One to `IDEA_ACCOUNT_LIMIT` accounts, in the order the drafts should be offered.
+    pub account_refs: Vec<Uuid>,
+}
+/// One account's draft under the idea: made by this command, or already there.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedIdeaDraft {
+    pub work_id: Uuid,
+    pub account_ref: Uuid,
+    /// This command made the draft: now, or when it first ran (see `OpenedIdeaDrafts::replayed`).
+    pub created: bool,
+    pub revision_id: Uuid,
+}
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenedIdeaDrafts {
+    pub request_id: Uuid,
+    pub idea_ref: Uuid,
+    pub drafts: Vec<OpenedIdeaDraft>,
+    /// Material cards of the idea's anchor that were not carried over because their source cannot be
+    /// read right now (changed, restricted or unavailable). Nothing is carried over unread.
+    pub skipped_excerpts: usize,
+    /// The same command (same `request_id`) had already made some of these drafts.
+    pub replayed: bool,
+}
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RestoreRequest {

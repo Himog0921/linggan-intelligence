@@ -6,7 +6,6 @@ import * as api from './assetsApi';
 import { insertExperience, usableExperiences } from './assetsText';
 import styles from './Assets.module.css';
 import { SelectField } from '../../../shared/SelectField';
-import { FieldLabel } from '../FieldLabel';
 
 export function ExperiencePicker({ document, edit }: { document: WorkDocument; edit: (doc: WorkDocument) => void }) {
   const [open, setOpen] = useState(false);
@@ -27,7 +26,7 @@ export function ExperiencePicker({ document, edit }: { document: WorkDocument; e
     {open ? !document.accountRef ? <p className={styles.hint}>请先为这篇稿件选择账号。</p> : <>
       {items.isPending ? <p role="status">正在读取经历…</p> : items.isError ? <p role="alert" className={styles.problem}>经历读取失败，请重试。</p> : null}
       {items.isSuccess && available.length === 0 ? <p className={styles.hint}>没有可新增的本人确认经历；已放入本稿的同一版本不重复插入。</p> : null}
-      {available.length ? <><FieldLabel>选择本人已确认的经历<SelectField label="选择本人已确认的经历" value={chosen} options={[{ value: '', label: '选择经历' }, ...available.map(item => ({ value: item.id, label: `${item.code} · ${item.title}` }))]} onChange={setChosen} /></FieldLabel>
+      {available.length ? <><label>选择本人已确认的经历<SelectField label="选择本人已确认的经历" value={chosen} options={[{ value: '', label: '选择经历' }, ...available.map(item => ({ value: item.id, label: `${item.code} · ${item.title}` }))]} onChange={setChosen} /></label>
         <ActionButton disabled={!experience} onClick={insert}>放入正文</ActionButton></> : null}
     </> : null}
   </div>;

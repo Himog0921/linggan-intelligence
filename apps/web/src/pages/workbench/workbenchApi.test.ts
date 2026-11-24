@@ -179,3 +179,33 @@ it('keeps title candidates and server-side warning flags aligned', async () => {
   vi.mocked(requestJson).mockResolvedValue({...status,titleWarnings:{cover:[],note:[false]}});
   await expect(titleStatus(id)).rejects.toThrow(WorkbenchContractError);
 });
+
+describe('opening drafts for several accounts under one idea', () => {
+  const account = '00000000-0000-4000-8000-000000000011';
+  const answer = (over: Record<string, unknown> = {}) => ({
+    requestId: id, ideaRef: other, skippedExcerpts: 1, replayed: false,
+    drafts: [{ workId: id, accountRef: account, created: true, revisionId: other }], ...over,
+  });
+  it('sends the request identity and the accounts to the idea’s drafts route and reads the answer', async () => {
+    const { openIdeaDrafts } = await import('./workbenchApi');
+    vi.mocked(requestJson).mockResolvedValue(answer());
+    expect(await openIdeaDrafts(other, { requestId: id, accountRefs: [account] })).toEqual(answer());
+    expect(requestJson).toHaveBeenCalledWith(`/ops/api/creation/idea-boxes/${other}/drafts`, { method: 'POST', body: { requestId: id, accountRefs: [account] } });
+  });
+  it('refuses an answer that belongs to another request or another idea', async () => {
+    const { openIdeaDrafts } = await import('./workbenchApi');
+    vi.mocked(requestJson).mockResolvedValue(answer({ requestId: other }));
+    await expect(openIdeaDrafts(other, { requestId: id, accountRefs: [account] })).rejects.toBeInstanceOf(WorkbenchContractError);
+    vi.mocked(requestJson).mockResolvedValue(answer({ ideaRef: id }));
+    await expect(openIdeaDrafts(other, { requestId: id, accountRefs: [account] })).rejects.toBeInstanceOf(WorkbenchContractError);
+  });
+  it('refuses an answer with a missing or unknown field', async () => {
+    const { openIdeaDrafts } = await import('./workbenchApi');
+    vi.mocked(requestJson).mockResolvedValue({ ...answer(), extra: 1 });
+    await expect(openIdeaDrafts(other, { requestId: id, accountRefs: [account] })).rejects.toBeInstanceOf(WorkbenchContractError);
+    const missing: Record<string, unknown> = answer();
+    delete missing.replayed;
+    vi.mocked(requestJson).mockResolvedValue(missing);
+    await expect(openIdeaDrafts(other, { requestId: id, accountRefs: [account] })).rejects.toBeInstanceOf(WorkbenchContractError);
+  });
+});

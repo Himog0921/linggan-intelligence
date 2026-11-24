@@ -269,6 +269,9 @@ pub async fn save_desk_card_position(
     })
 }
 
+/// How many different accounts may write drafts under one idea.
+pub const IDEA_ACCOUNT_LIMIT: i64 = 3;
+
 async fn ensure_idea_box(
     tx: &mut Transaction<'_, Postgres>,
     work: Uuid,
@@ -314,7 +317,7 @@ async fn ensure_idea_box(
     }
     let count: i64 = sqlx::query_scalar("SELECT count(DISTINCT account_ref) FROM (SELECT r.document->>'accountRef' AS account_ref FROM linggan_creation_work w JOIN linggan_creation_revision r ON r.revision_ref=w.current_revision_ref WHERE w.domain_ref=$1 AND w.work_ref<>$2 AND r.document->>'ideaRef'=$3 UNION ALL SELECT $4::text) accounts WHERE account_ref IS NOT NULL")
         .bind(domain).bind(work).bind(idea.to_string()).bind(doc.account_ref.map(|id| id.to_string())).fetch_one(&mut **tx).await?;
-    if count > 3 {
+    if count > IDEA_ACCOUNT_LIMIT {
         return Err(WorkbenchError::Invalid("idea_account_limit"));
     }
     Ok(())

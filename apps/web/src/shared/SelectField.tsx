@@ -48,7 +48,11 @@ export function SelectField<T extends string>({ label, value, options, onChange,
     };
     place();
     const outside = (event: PointerEvent) => {
-      if (event.target instanceof Node && !trigger.current?.contains(event.target) && !popup?.contains(event.target)) setOpen(false);
+      if (!(event.target instanceof Node) || trigger.current?.contains(event.target) || popup?.contains(event.target)) return;
+      // The caption of a wrapping label is part of this control: the browser forwards its click to the trigger, which
+      // toggles the menu closed. Closing here as well would let that forwarded click open it again.
+      if (trigger.current?.closest('label')?.contains(event.target)) return;
+      setOpen(false);
     };
     const dismiss = (event: Event) => {
       if (event.type === 'scroll' && event.target instanceof Node) {
@@ -128,7 +132,10 @@ export function SelectField<T extends string>({ label, value, options, onChange,
       disabled={disabled} onKeyDown={keys} onClick={() => { setActive(Math.max(0, selected)); setOpen(current => !current); }}>
       <span id={`${id}-value`} title={options[selected]?.label}>{options[selected]?.label ?? value}</span><span className={styles.chevron} aria-hidden="true">⌄</span>
     </button>
-    {open ? <div ref={menu} id={id} popover={hasPopover ? 'manual' : undefined} role="listbox" aria-label={label} className={styles.menu} style={position}>
+    {/* The menu sits inside the DOM of any label that wraps the select, and a label forwards a click on its content to
+        its first control: choosing an option would click the trigger again and reopen the menu. A click in the menu is
+        never meant for that label, so its default action is cancelled here, once, for every caller. */}
+    {open ? <div ref={menu} id={id} popover={hasPopover ? 'manual' : undefined} role="listbox" aria-label={label} className={styles.menu} style={position} onClick={event => event.preventDefault()}>
       {options.map((option, index) => <div key={option.value} id={`${id}-${index}`} role="option"
         aria-selected={option.value === value} aria-disabled={option.disabled || undefined} data-active={active === index}
         onPointerMove={() => { if (!option.disabled) setActive(index); }}

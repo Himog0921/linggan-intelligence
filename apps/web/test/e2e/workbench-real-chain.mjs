@@ -41,13 +41,13 @@ const stage = async (name, surface = page) => {
   const label = ({材料:'选题与材料',画布:'创作画布'})[name] ?? name;
   const id = ({'选题与材料':'desk','创作画布':'canvas','正文':'body','封面':'cover','内页':'inner','预览与导出':'export'})[label];
   await surface.locator('[data-view]:visible').first().waitFor();
-  // Each attempt must let the previous click render before deciding: the desk's own 返回写稿 button would
+  // Each attempt must let the previous click render before deciding: the desk's own 去稿件 button would
   // otherwise bounce the view straight back and burn the whole attempt budget.
   const arrive = async () => surface.locator(`[data-view="${id}"]:visible`).waitFor({timeout:2_000}).then(()=>true,()=>false);
   for (let attempt = 0; attempt < 5; attempt++) {
     if (await arrive()) return;
-    // The desk and the body view hide the step menu; the desk returns through 返回写稿, the body reaches the image pages through its footer.
-    const back = surface.getByRole('button', {name:'返回写稿',exact:true});
+    // The desk and the body view hide the step menu; the desk returns through the current frame's 去稿件, the body reaches the image pages through its footer.
+    const back = surface.locator('.desk .frame.sel').getByRole('button', {name:'去稿件',exact:true});
     if (await back.count()) { await robustClick(back); continue; }
     await openWritingTools(surface);
     const workflow = surface.locator('details:not([open]) > summary').filter({hasText:'创作步骤'});
@@ -660,6 +660,47 @@ try {
     await library.getByRole('button',{name:'编辑结构'}).click();await library.getByRole('button',{name:'＋ 行动'}).click();await library.getByRole('button',{name:'保存新版本'}).click();
     await library.getByText('新版本已保存，等待审核。').waitFor();await library.getByText('版本历史').click();await library.getByText(/第 1 版 · 已通过 · 开头 → 观点/).waitFor();await library.getByText(/第 2 版 · 待审核 · 开头 → 观点 → 行动/).waitFor();
     await screenshot('structural-template-version-history');
+  });
+  await step('一题多号：选题框设置里选另一个账号一次开稿，新稿只带材料，不带正文，也不重复开',async()=>{
+    const other=(await creationJson(`/accounts?domainRef=${domainRef}`)).items.find(item=>item.accountRef!==accountRef);
+    assert.ok(other,'the fixture domain has a second writable account');
+    const ideaName='一题多号合成选题';
+    await page.goto(workUrl);await stage('正文');
+    // The idea is made on the page: a name, then 建立并关联, then a save that records this draft as the idea's own.
+    await page.locator('summary').filter({hasText:'补一个选题框'}).click();
+    await page.getByLabel('新选题框名称',{exact:true}).fill(ideaName);
+    await page.getByRole('button',{name:'建立并关联',exact:true}).click();await save();
+    const anchor=(await envelope()).revision.document;
+    assert.equal(anchor.ideaName,ideaName);assert.ok(anchor.ideaRef);assert.ok(anchor.excerpts.length>0&&anchor.canvas.length>0,'the idea draft holds material to share');
+    const before=(await creationJson(`/works?domainRef=${domainRef}`)).items.length;
+    await stage('材料');
+    await page.getByLabel('选题框：作业启动').getByRole('button',{name:'设置',exact:true}).click();
+    const settings=page.getByRole('region',{name:'选题框设置'});await settings.waitFor();
+    const mine=settings.getByRole('button',{name:`${await fixtureAccountName()} · 已开稿`,exact:true});
+    assert.equal(await mine.isDisabled(),true,'the idea draft’s own account already has its draft');
+    const open=settings.getByRole('button',{name:/^用这组材料开稿/});
+    assert.equal(await open.isDisabled(),true,'no account chosen yet');
+    await settings.getByRole('group',{name:'给哪些账号写'}).getByRole('button',{name:other.accountName,exact:true}).click();
+    const answered=page.waitForResponse(response=>new URL(response.url()).pathname===`/ops/api/creation/idea-boxes/${anchor.ideaRef}/drafts`&&response.request().method()==='POST');
+    await open.click();const response=await answered;assert.equal(response.status(),200);
+    const opened=await response.json();
+    assert.equal(opened.drafts.length,1);assert.equal(opened.drafts[0].accountRef,other.accountRef);assert.equal(opened.drafts[0].created,true);assert.equal(opened.replayed,false);
+    await settings.getByText(`已开稿 1 篇：${other.accountName}`).waitFor();
+    // The server holds one new draft for that account: the idea's material, none of what the idea's draft wrote.
+    const made=(await creationJson(`/works/${opened.drafts[0].workId}`)).revision.document;
+    assert.equal(made.ideaRef,anchor.ideaRef);assert.ok(made.ideaName==null,'only the idea’s own draft holds its name');assert.equal(made.accountRef,other.accountRef);assert.equal(made.title,ideaName);
+    assert.equal(made.paragraphs.length,0);assert.equal(made.pages.length,0);assert.ok(!made.experienceSlots?.length&&!made.experienceGaps?.length&&!made.bridge,'nothing of the account’s own experience or bridge is carried over');
+    assert.equal(made.excerpts.length,anchor.excerpts.length);assert.equal(made.canvas.length,anchor.canvas.length);
+    assert.deepEqual(made.excerpts.map(item=>item.selectedText),anchor.excerpts.map(item=>item.selectedText));
+    assert.ok(made.excerpts.every(item=>!anchor.excerpts.some(old=>old.id===item.id)),'each excerpt is the new draft’s own');
+    assert.ok(made.canvas.every(card=>!anchor.canvas.some(old=>old.id===card.id)&&made.excerpts.some(item=>item.id===card.excerptId)),'each card quotes one of the new draft’s own excerpts');
+    assert.equal((await creationJson(`/works?domainRef=${domainRef}`)).items.length,before+1);
+    // The panel now treats that account as written for, and the new draft is a frame on the desk.
+    await settings.getByRole('button',{name:`${other.accountName} · 已开稿`,exact:true}).waitFor();
+    await until(async()=>await page.getByLabel(`选题框：${ideaName}`).count()>0,'the new draft is a frame on the desk');
+    assert.equal(await open.isDisabled(),true,'nothing is left to open');
+    report.ideaDrafts={ideaRef:anchor.ideaRef,opened:opened.drafts.length,skippedExcerpts:opened.skippedExcerpts};
+    await screenshot('workbench-idea-drafts');
   });
   await step('没有外部请求、未授权模型执行或页面脚本错误',async()=>{
     assert.deepEqual(report.externalRequests,[]);assert.deepEqual(report.pageErrors,[]);

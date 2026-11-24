@@ -1,13 +1,13 @@
 {
   "kind": "implementation_fix",
-  "reason": "PR #618 retires the legacy note_interpretation capability card and its material mapping from the AI settings page. The registered ICON-B-001 consumer changes only by removing that obsolete task entry; the shared icon implementation and contract are unchanged.",
-  "authorization": "Mog 2026-11-18 explicitly authorized direct implementation in PR #618.",
+  "reason": "C17 SelectField: an option click inside a wrapping label was forwarded by the browser to the trigger and reopened the menu, and a click on the label caption while the menu was open closed it and reopened it. The menu now cancels the default action of clicks inside it, and the outside-pointer rule treats the wrapping label's caption as part of the control. Parameters, states, visual design and keyboard behaviour are unchanged; the creation-workbench FieldLabel workaround is removed.",
+  "authorization": "Mog 2026-11-24: '下拉组件可以从根本修复一下' in the current conversation.",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",
     "ICON-B-001": "5561180601213c88b2f1645e5b1e59e28b5de6dd2dccd560d7d6f2e715663e54",
     "C26": "e0e3d1f3088b7cc0e309b92ad77e110e0bf89fbca12830655cfa437f0f721dcd",
-    "C17": "05ca31ec53fdc2af0a7ff2e115ccfb290f47d5f4abb00688386ce84c5da01e00",
+    "C17": "5d5c858e936070d802a20f01cd9f7395ae9dc879314690aed3bc6eb6fd9adb5f",
     "C42": "59267d41aaf2b6adabfe34d78251e68ed269d956c822e080f17003e2449bedb1",
     "C41": "4aa129123e26f9436eb99d13c8b86ae52822d2a6be5df31b77e4aba469c9a778",
     "C43": "ad3ce8b80e4ad810db0bef898bf9e1387cd4d30ecf6ffcf729b960a81264e962",

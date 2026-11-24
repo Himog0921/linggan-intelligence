@@ -698,6 +698,15 @@ export const parseWorkList = shape<{
 export const parseIdeaBoxList = shape<{ items: IdeaBoxSummary[] }>({ items: array(shape<IdeaBoxSummary>({
   ideaRef: uuid, anchorWorkId: uuid, anchorRevisionId: uuid, savedAt: str, name: str, intent: str,
 })) });
+/** An idea is written for at most this many accounts; the server enforces the same number. */
+export const IDEA_ACCOUNT_LIMIT = 3;
+/** One account's draft under an idea, from opening several at once. `created` is false when the account already had one. */
+export interface OpenedIdeaDraft { workId: string; accountRef: string; created: boolean; revisionId: string }
+export interface OpenedIdeaDrafts { requestId: string; ideaRef: string; drafts: OpenedIdeaDraft[]; skippedExcerpts: number; replayed: boolean }
+export const parseOpenedIdeaDrafts = shape<OpenedIdeaDrafts>({
+  requestId: uuid, ideaRef: uuid, skippedExcerpts: integer, replayed: bool,
+  drafts: array(shape<OpenedIdeaDraft>({ workId: uuid, accountRef: uuid, created: bool, revisionId: uuid })),
+});
 export interface DeskPosition { workId: string; x: number; y: number; width: number | null; height: number | null }
 export const parseDeskPosition = shape<DeskPosition>({ workId: uuid, x: num, y: num, width: nullable(num), height: nullable(num) });
 export const parseDeskPositions = shape<{ items: DeskPosition[] }>({ items: array(parseDeskPosition) });

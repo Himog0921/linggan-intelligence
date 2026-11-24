@@ -7,10 +7,11 @@ mod fixture;
 mod full_schema;
 use fixture::*;
 use linggan_intelligence::content_workbench::{
-    BridgeChoice, BridgeGroup, BridgeUse, CreateRequest, ExperienceSlot, FreezeRequest, PageKind,
-    Paragraph, PlaceRequest, ResetWithdrawnRequest, RestoreRequest, SaveRequest, UseTarget,
-    WorkDocument, WorkbenchError, create_work, freeze_export, list_idea_boxes, list_works, place,
-    read_request, read_work, reset_withdrawn, restore, revisions, save,
+    BridgeChoice, BridgeGroup, BridgeUse, CreateRequest, ExperienceSlot, FreezeRequest,
+    OpenIdeaDraftsRequest, PageKind, Paragraph, PlaceRequest, ResetWithdrawnRequest,
+    RestoreRequest, SaveRequest, UseTarget, WorkDocument, WorkbenchError, create_work,
+    freeze_export, list_idea_boxes, list_works, open_idea_drafts, place, read_request, read_work,
+    reset_withdrawn, restore, revisions, save,
 };
 use linggan_intelligence::creation_assets::*;
 use linggan_storage_postgres::Database;
@@ -790,6 +791,268 @@ async fn saved_draft_batch_checks_actual_revision_and_keeps_unknown_unknown() {
         check_saved_drafts(&db, &duplicate).await,
         Err(AssetsError::Invalid("items"))
     ));
+}
+
+/// An idea whose anchor draft (written for `account`) holds one quoted note, its card, a free note card and some
+/// writing of its own: everything a new draft under the idea must and must not take over.
+async fn idea_with_material(db: &Database, account: Uuid) -> (Uuid, Uuid) {
+    let idea = Uuid::new_v4();
+    let mut document = cited_doc(db).await;
+    document.account_ref = Some(account);
+    document.idea_ref = Some(idea);
+    document.idea_name = Some("合成选题".into());
+    document.angle = "合成选题意图".into();
+    document.tags = vec!["合成标签".into()];
+    document
+        .canvas
+        .push(linggan_intelligence::content_workbench::CanvasBlock {
+            id: Uuid::new_v4(),
+            excerpt_id: None,
+            group: linggan_intelligence::content_workbench::CanvasGroup::Resonance,
+            note: "自己写的便签".into(),
+            expression: "自己的话".into(),
+            expression_revision: 1,
+        });
+    let anchor = create(db, document).await;
+    (idea, anchor.work_id)
+}
+async fn extra_account(db: &Database, like: Uuid, name: &str) -> Uuid {
+    let account = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_ops_account(account_ref,source_system,source_record_id,domain_ref,ledger_state,platform,account_name,status,is_retained,review_status,profile_link_state,source_created_at,source_updated_at,first_batch_ref,last_changed_batch_ref) SELECT $1,source_system,$3,domain_ref,ledger_state,platform,$3,status,is_retained,review_status,'missing',source_created_at,source_updated_at,first_batch_ref,last_changed_batch_ref FROM linggan_ops_account WHERE account_ref=$2")
+        .bind(account).bind(like).bind(name).execute(db.pool()).await.unwrap();
+    account
+}
+fn open_for(accounts: &[Uuid]) -> OpenIdeaDraftsRequest {
+    OpenIdeaDraftsRequest {
+        request_id: Uuid::new_v4(),
+        account_refs: accounts.to_vec(),
+    }
+}
+async fn work_count(db: &Database) -> usize {
+    list_works(db, Some(fixture::dossier::DOMAIN))
+        .await
+        .unwrap()
+        .len()
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn opening_drafts_for_two_accounts_gives_each_the_material_and_nothing_the_anchor_wrote() {
+    let db = db("assets_open_idea_drafts").await;
+    let (a, b, c) = accounts(&db).await;
+    let (idea, anchor) = idea_with_material(&db, a).await;
+    let before = read_work(&db, anchor).await.unwrap();
+    assert_eq!(work_count(&db).await, 1);
+
+    let opened = open_idea_drafts(&db, idea, &open_for(&[b, c]))
+        .await
+        .unwrap();
+    assert_eq!(opened.idea_ref, idea);
+    assert_eq!(opened.skipped_excerpts, 0);
+    assert_eq!(
+        opened
+            .drafts
+            .iter()
+            .map(|d| (d.account_ref, d.created))
+            .collect::<Vec<_>>(),
+        vec![(b, true), (c, true)],
+        "in the order asked for, both made"
+    );
+    assert_eq!(work_count(&db).await, 3);
+    let source = &before.revision.document;
+    for draft in &opened.drafts {
+        let made = read_work(&db, draft.work_id).await.unwrap();
+        assert_eq!(made.revision.id, draft.revision_id);
+        let document = &made.revision.document;
+        assert_eq!(document.account_ref, Some(draft.account_ref));
+        assert_eq!(
+            (document.idea_ref, document.idea_name.as_deref()),
+            (Some(idea), None)
+        );
+        assert_eq!(
+            (document.title.as_str(), document.angle.as_str()),
+            ("合成选题", "合成选题意图")
+        );
+        // What the anchor wrote, and what belongs to its account, stays with the anchor.
+        assert!(
+            document.paragraphs.is_empty() && document.pages.is_empty() && document.uses.is_empty()
+        );
+        assert!(
+            document.tags.is_empty()
+                && document.bridge.is_none()
+                && document.experience_slots.is_empty()
+        );
+        // The material comes along as this draft's own: same quoted source, new identities.
+        assert_eq!(document.excerpts.len(), 1);
+        assert_eq!(document.excerpts[0].citation, source.excerpts[0].citation);
+        assert_eq!(
+            document.excerpts[0].selected_text,
+            source.excerpts[0].selected_text
+        );
+        assert_ne!(document.excerpts[0].id, source.excerpts[0].id);
+        assert_eq!(document.canvas.len(), 2);
+        assert_eq!(document.canvas[0].excerpt_id, Some(document.excerpts[0].id));
+        assert_eq!(
+            (
+                document.canvas[0].group.clone(),
+                document.canvas[0].note.as_str()
+            ),
+            (source.canvas[0].group.clone(), "自己的备注")
+        );
+        assert_eq!(document.canvas[1].note, "自己写的便签");
+        assert!(
+            document
+                .canvas
+                .iter()
+                .all(|card| source.canvas.iter().all(|old| old.id != card.id))
+        );
+    }
+    let again = read_work(&db, anchor).await.unwrap();
+    assert_eq!(
+        again.revision.id, before.revision.id,
+        "the anchor is not touched"
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn an_account_that_already_writes_under_the_idea_keeps_its_draft_and_asking_again_opens_nothing()
+ {
+    let db = db("assets_open_idea_drafts_repeat").await;
+    let (a, b, _) = accounts(&db).await;
+    let (idea, anchor) = idea_with_material(&db, a).await;
+    let command = open_for(&[a, b]);
+    let first = open_idea_drafts(&db, idea, &command).await.unwrap();
+    assert_eq!(
+        first.drafts[0].work_id, anchor,
+        "the anchor's own account keeps the anchor"
+    );
+    assert_eq!(
+        (first.drafts[0].created, first.drafts[1].created),
+        (false, true)
+    );
+    assert_eq!(work_count(&db).await, 2);
+    let (made_work, made_revision) = (first.drafts[1].work_id, first.drafts[1].revision_id);
+
+    assert!(!first.replayed);
+    // The same command again, as after a lost response: nothing new, and the draft it made is known as its own.
+    let repeat = open_idea_drafts(&db, idea, &command).await.unwrap();
+    assert!(repeat.replayed);
+    assert_eq!(
+        repeat
+            .drafts
+            .iter()
+            .map(|draft| (draft.account_ref, draft.created))
+            .collect::<Vec<_>>(),
+        vec![(a, false), (b, true)]
+    );
+    assert_eq!(
+        (repeat.drafts[1].work_id, repeat.drafts[1].revision_id),
+        (made_work, made_revision)
+    );
+    // A different command for the same account: that account already writes, so nothing is made and nothing is claimed.
+    let other = open_idea_drafts(&db, idea, &open_for(&[b])).await.unwrap();
+    assert!(!other.replayed && other.drafts.iter().all(|draft| !draft.created));
+    assert_eq!(other.drafts[0].work_id, made_work);
+    assert_eq!(work_count(&db).await, 2);
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn the_account_limit_and_a_bad_request_leave_no_draft_behind() {
+    let db = db("assets_open_idea_drafts_atomic").await;
+    let (a, b, c) = accounts(&db).await;
+    let fourth = extra_account(&db, a, "合成第四号").await;
+    let (idea, _) = idea_with_material(&db, a).await;
+    let count = work_count(&db).await;
+
+    // Three new accounts would make four under the idea: refused, and the two that fit are not opened either.
+    assert!(matches!(
+        open_idea_drafts(&db, idea, &open_for(&[b, c, fourth])).await,
+        Err(WorkbenchError::Invalid("idea_account_limit"))
+    ));
+    // One account the ledger does not know: refused, and the valid one before it is not opened.
+    assert!(matches!(
+        open_idea_drafts(&db, idea, &open_for(&[b, Uuid::new_v4()])).await,
+        Err(WorkbenchError::Invalid("accountRef"))
+    ));
+    assert_eq!(work_count(&db).await, count, "all or none");
+
+    // Nothing to open, too many to ask for, an idea that is not there.
+    assert!(matches!(
+        open_idea_drafts(&db, idea, &open_for(&[])).await,
+        Err(WorkbenchError::Invalid("accounts"))
+    ));
+    assert!(matches!(
+        open_idea_drafts(&db, idea, &open_for(&[a, b, c, fourth])).await,
+        Err(WorkbenchError::Invalid("accounts"))
+    ));
+    assert!(matches!(
+        open_idea_drafts(&db, Uuid::new_v4(), &open_for(&[b])).await,
+        Err(WorkbenchError::Invalid("idea_not_found"))
+    ));
+    // The same account twice is one draft.
+    let twice = open_idea_drafts(&db, idea, &open_for(&[b, b]))
+        .await
+        .unwrap();
+    assert_eq!(twice.drafts.len(), 1);
+    assert_eq!(work_count(&db).await, count + 1);
+    // Once the idea has three accounts, a fourth is refused whatever the command.
+    open_idea_drafts(&db, idea, &open_for(&[c])).await.unwrap();
+    assert!(matches!(
+        open_idea_drafts(&db, idea, &open_for(&[fourth])).await,
+        Err(WorkbenchError::Invalid("idea_account_limit"))
+    ));
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn a_source_that_cannot_be_read_now_is_not_carried_into_the_new_draft() {
+    let db = db("assets_open_idea_drafts_source").await;
+    let (a, b, _) = accounts(&db).await;
+    let idea = Uuid::new_v4();
+    let mut document = cited_doc(&db).await;
+    // The quoted comment belongs to the same source work as the note: the fixture seeds it once.
+    let restricted_work = document.excerpts[0].citation.work_ref.unwrap();
+    let quoted = comment_doc_for_work(&db, restricted_work).await;
+    let quote = quoted.excerpts[0].selected_text.clone().unwrap();
+    document.excerpts.extend(quoted.excerpts);
+    document.canvas.extend(quoted.canvas);
+    document.account_ref = Some(a);
+    document.idea_ref = Some(idea);
+    // The idea's name and intent quote the whole comment that is restricted afterwards.
+    document.idea_name = Some(format!("合成选题：{quote}"));
+    document.angle = format!("意图：{quote}");
+    create(&db, document).await;
+    restrict_comment(&db, restricted_work).await;
+
+    let opened = open_idea_drafts(&db, idea, &open_for(&[b])).await.unwrap();
+    assert_eq!(opened.skipped_excerpts, 1);
+    let made = read_work(&db, opened.drafts[0].work_id).await.unwrap();
+    let document = &made.revision.document;
+    assert_eq!(
+        (document.excerpts.len(), document.canvas.len()),
+        (1, 1),
+        "the readable note and its card only"
+    );
+    let holders: Vec<&str> = [
+        ("title", document.title.as_str()),
+        ("angle", document.angle.as_str()),
+        ("ideaName", document.idea_name.as_deref().unwrap_or("")),
+    ]
+    .into_iter()
+    .filter(|(_, text)| text.contains(&quote))
+    .map(|(field, _)| field)
+    .collect();
+    assert!(
+        holders.is_empty(),
+        "the restricted quote reached: {holders:?}"
+    );
+    let stored = serde_json::to_string(document).unwrap();
+    assert!(
+        !stored.contains(&quote),
+        "no restricted quote travels, not even in the title or the intent: {stored}"
+    );
 }
 
 #[tokio::test]

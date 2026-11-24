@@ -1,5 +1,5 @@
 {
-  "fingerprint": "fde60298711974e934c88cf1be30d906845421bff6ca065153ba52fced68118e",
+  "fingerprint": "2c178ed41948934c7b4c22aa9201faaea94b1aa54e2b15537506956398e67943",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -499,11 +499,11 @@
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.tsx",
-      "sha256": "63b86f0bd229b69809b6fed5295afaa85ccbfaeb11a885293a0318c12d76e52c"
+      "sha256": "fadc4650dc90770d373668b3a6ebe7dc04aa499ef098adf4964f58136771fa1b"
     },
     {
       "path": "apps/web/src/pages/workbench/MaterialDesk.tsx",
-      "sha256": "48ee1f6cc4d9d504ec0a03cc302df3769418878da8d9b9b4a16094f587208f53"
+      "sha256": "51f5eaf7380dc9330c318ee1d235c5deb573bf5f2352c18dd30446267f421593"
     },
     {
       "path": "apps/web/src/pages/workbench/TopicLibrary.tsx",
@@ -515,7 +515,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-      "sha256": "fea7a9afc2a101d2871beb1ecb1a1d4f7e32e39181f83554f7b132a2ddab645f"
+      "sha256": "6f93818e783fd0229f8ee7ad9823ff12b9a46ef865f4f69de7efe597a6d7f347"
     },
     {
       "path": "apps/web/src/shared/ActionButton.module.css",
@@ -619,11 +619,11 @@
     },
     {
       "path": "apps/web/src/shared/SelectField.test.tsx",
-      "sha256": "6b218d75edc10efb8ab92863fbbdedd4e0449a2f48a070e8af6ebb8d24c82189"
+      "sha256": "b48be5dd3c4d486b530073c17f182336a4f6c5bfefa6ac4b75b5b3c4c53d2d6e"
     },
     {
       "path": "apps/web/src/shared/SelectField.tsx",
-      "sha256": "3e172bca8ccb9c081aa3289ca612ab379da647aaade20a9940772d0676e32a33"
+      "sha256": "d4ce102a04cad727e0639093789fef5186f9f50e4cb862e9cbd28e10824649e7"
     },
     {
       "path": "apps/web/src/shared/Sidebar.tsx",
@@ -659,7 +659,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "673fab8e2a4d59a2db5e4c01eef457e938fe4ab9c5164cac0c2257b84bab0841"
+      "sha256": "3d3d74b1171a9262ac6e211cbb75d628f46e9c2964dafcdc2cc720a8c500abd1"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

@@ -11,7 +11,6 @@ import type { Revision } from '../workbenchModel';
 import * as api from './assetsApi';
 import styles from './Assets.module.css';
 import { SelectField } from '../../../shared/SelectField';
-import { FieldLabel } from '../FieldLabel';
 
 type Command = { requestId: string; expectedRevision: string; publicationRef: string };
 export type PublicationPending = { kind: 'link'; command: Command } | { kind: 'unlink'; linkRef: string; requestId: string };
@@ -88,7 +87,7 @@ export function PublicationLinker({ workId, domainRef, saveCurrent, disabled, pe
       {pendingUnlink ? <p>上一笔撤销结果未确认。<ActionButton variant="quiet" disabled={busy} onClick={() => void unlink(pendingUnlink!.linkRef)}>沿用原请求重试撤销</ActionButton></p> : null}
       {busy ? <p>正在处理…</p> : null}
       {candidates.isError && !pendingLink ? <p role="alert">发布记录读取失败。<ActionButton variant="quiet" onClick={() => void candidates.refetch()}>重试</ActionButton></p> : null}
-      {revision && !pendingLink && candidates.isSuccess ? <><FieldLabel>发布记录<SelectField label="发布记录" value={selected} options={[{ value: '', label: '请选择' }, ...candidates.data.map(item => ({ value: item.publicationRef, label: `${item.publishedOn ?? '日期未填'} · ${item.title ?? '标题未填'} · ${item.url ?? '链接未填'}` }))]} onChange={setSelected} /></FieldLabel>{!candidates.data.length ? <p>该账号没有可关联的发布记录。</p> : null}</> : null}
+      {revision && !pendingLink && candidates.isSuccess ? <><label>发布记录<SelectField label="发布记录" value={selected} options={[{ value: '', label: '请选择' }, ...candidates.data.map(item => ({ value: item.publicationRef, label: `${item.publishedOn ?? '日期未填'} · ${item.title ?? '标题未填'} · ${item.url ?? '链接未填'}` }))]} onChange={setSelected} /></label>{!candidates.data.length ? <p>该账号没有可关联的发布记录。</p> : null}</> : null}
       {pendingLink ? <p>上一请求结果未确认，重试会沿用原来的记录和请求编号。</p> : null}
       {notice ? <p role="status">{notice}</p> : null}
       <div className={styles.actions}><ActionButton variant="outline" disabled={busy} onClick={() => setOpen(false)}><IntelligenceIcon name="close" size={16}/>关闭</ActionButton><ActionButton variant="primary" disabled={busy || !!pendingUnlink || !revision || !selected} onClick={() => void link()}>{pendingLink ? '重试关联' : '确认关联'}</ActionButton></div>

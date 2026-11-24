@@ -7,6 +7,7 @@ import { ExperiencePicker } from './assets/ExperiencePicker';
 import { CoverCanvas } from './assets/CoverCanvas';
 import { withCoverTitle } from './assets/assetsText';
 import { SelectField } from '../../shared/SelectField';
+import { AccountPicker, type PickerAccount } from './AccountPicker';
 const STEP_OPTIONS = [{ value: '', label: '标步骤' }, ...Object.entries(stepNames).map(([key, name]) => ({ value: key, label: name }))];
 
 export function ManuscriptEditor({
@@ -21,6 +22,7 @@ export function ManuscriptEditor({
   onCover,
   onOpenDesk,
   accountName,
+  accounts,
   accountChip,
   edMeta,
   ideas = [], ideaState = 'success', onOpenAnchor = () => {}, draftInputs, onDraftInputs, titleNotes, coverActions, coverCandidates, noteCandidates, noteTitleActions, footer, tools, related, publication,
@@ -36,6 +38,8 @@ export function ManuscriptEditor({
   onCover?: () => void;
   onOpenDesk?: () => void;
   accountName?: string;
+  /** The accounts of the domain once they are read; until then the account is only shown, not chosen. */
+  accounts?: PickerAccount[];
   ideas?: IdeaBoxSummary[]; ideaState?: 'pending' | 'error' | 'success'; onOpenAnchor?: (anchor: string) => void;
   draftInputs: { cover: string; note: string; idea: string };
   onDraftInputs: (inputs: { cover: string; note: string; idea: string }) => void;
@@ -75,7 +79,9 @@ export function ManuscriptEditor({
   }
   return <section className="editor" aria-label="正文编辑">
     <div className="ed-head">
-      <span className="acc-btn"><span className="avatar">{Array.from(accountName ?? '未')[0]}</span>{accountName ?? (document.accountRef ? '账号读取中' : '未选择账号')}</span>
+      {accounts
+        ? <AccountPicker accounts={accounts} value={document.accountRef} mark={Array.from(accountName ?? '未')[0] ?? '未'} name={accountName ?? (document.accountRef ? '账号未知' : '未选择账号')} onPick={accountRef => edit({ ...document, accountRef })} />
+        : <span className="acc-btn"><span className="avatar">{Array.from(accountName ?? '未')[0]}</span>{accountName ?? (document.accountRef ? '账号读取中' : '未选择账号')}</span>}
       {accountChip}
       <IdeaBoxLink document={document} ideas={ideas} state={ideaState} edit={edit} openAnchor={onOpenAnchor} onOpenDesk={onOpenDesk} compose={compose} name={draftInputs.idea} onNameChange={idea => onDraftInputs({ ...draftInputs, idea })} />
       {edMeta}
