@@ -137,6 +137,16 @@
 .gm-studio .ed-head .idea-link .idea-panel {position:absolute;top:calc(100% + 6px);left:0;z-index:var(--lgi-z-popover);display:grid;gap:var(--lgi-space-3);width:min(360px,calc(100vw - 32px));padding:var(--lgi-space-3);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal);white-space:normal;font:400 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui);color:var(--lgi-body)}
 .gm-studio .ed-head .idea-link .idea-panel label {display:grid;gap:var(--lgi-space-1);font-size:var(--lgi-type-label-size);color:var(--lgi-muted)}
 .gm-studio .ed-head .idea-link .idea-panel p {margin:0}
+/* 页头里的账号按钮：点开是这个领域的账号，带搜索，没选账号的稿也能在写稿处选；面板外观沿用选题框弹出面板。 */
+.gm-studio .ed-head .acc-pick {position:relative;display:inline-flex;flex:none}
+.gm-studio .ed-head .acc-pick .acc-btn {cursor:pointer}
+.gm-studio .ed-head .acc-pick .acc-btn::after {content:"▾";color:var(--lgi-muted)}
+.gm-studio .ed-head .acc-pick .acc-btn:hover {color:var(--lgi-signal)}
+.gm-studio .ed-head .acc-pick .acc-panel {position:absolute;top:calc(100% + 6px);left:0;z-index:var(--lgi-z-popover);display:grid;gap:var(--lgi-space-3);width:min(320px,calc(100vw - 32px));padding:var(--lgi-space-3);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal);white-space:normal;font:400 var(--lgi-type-control-size)/1.5 var(--lgi-font-ui);color:var(--lgi-body)}
+.gm-studio .ed-head .acc-pick .acc-panel .acc-picks {max-height:200px;overflow:auto;overscroll-behavior:contain}
+.gm-studio .ed-head .acc-pick .acc-panel p {margin:0}
+.gm-studio .ed-head .acc-pick .acc-panel .find svg {width:16px;height:16px;flex:none;align-self:center;margin-left:12px;fill:none;stroke:var(--lgi-muted);stroke-width:1.6}
+.gm-studio .ed-head .acc-pick .acc-panel .btn {justify-self:start}
 
 /* 写稿工具菜单（⋯）：沿用样稿 .menu-list 的语言——1px 墨线、小硬阴影、分区用发丝线；视图用分段控件，AI 三项为整行菜单项，保存在底部。 */
 .gm-studio .ed-head .tools-menu {width:264px;gap:0;padding:var(--lgi-space-1);border:1px solid var(--lgi-ink);background:var(--lgi-canvas);box-shadow:var(--lgi-shadow-brutal);align-items:stretch}

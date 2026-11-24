@@ -1602,3 +1602,168 @@ it('offers our own publications as a material type and asks the sources for exac
   await waitFor(() => expect(api.sources).toHaveBeenCalledWith(expect.objectContaining({ domainRef: domain, kind: 'ops_publication' }), expect.any(AbortSignal)));
   expect(screen.getByPlaceholderText('搜原笔记、评论、我方发布')).toBeVisible();
 });
+
+// --- The desk canvas: wheel, frames that never overlap, and leaving the desk ---
+
+const otherWork = '00000000-0000-4000-8000-000000000012';
+const twoWorks = () => vi.mocked(api.listWorks).mockResolvedValue([
+  { workId: work, domainRef: domain, title: '第一个选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' },
+  { workId: otherWork, domainRef: domain, title: '第二个选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' },
+]);
+const place = (workId: string, x: number, y: number, width: number | null = null, height: number | null = null) => ({ workId, x, y, width, height });
+const boxOf = (frame: Element) => { const style = (frame as HTMLElement).style; return { x: parseInt(style.left, 10), y: parseInt(style.top, 10), w: parseInt(style.width, 10), h: parseInt(style.height, 10) }; };
+const clear = (a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }, gap = 24) => a.x + a.w + gap <= b.x || b.x + b.w + gap <= a.x || a.y + a.h + gap <= b.y || b.y + b.h + gap <= a.y;
+const frames = () => Array.from(document.querySelectorAll('.desk .frame'));
+const zoomText = () => screen.getByRole('status', { name: '画布缩放' }).textContent;
+const worldAt = () => (document.querySelector('.desk .world') as HTMLElement).style.transform;
+
+it('moves the canvas with the wheel and zooms it only with Ctrl/⌘, as on the demo desk', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  show('desk');
+  await screen.findByLabelText('选题框：真实选题');
+  const viewport = document.querySelector('.desk .viewport') as HTMLElement;
+  const before = worldAt();
+  // The wheel over the bare canvas pans it (and is the canvas's, so the page does not scroll as well).
+  expect(fireEvent.wheel(viewport, { deltaY: 120 })).toBe(false);
+  expect(zoomText()).toBe('100%');
+  expect(worldAt()).not.toBe(before);
+  // Ctrl/⌘ (also what a trackpad pinch sends) zooms.
+  expect(fireEvent.wheel(viewport, { deltaY: 30, ctrlKey: true })).toBe(false);
+  expect(parseInt(zoomText() ?? '', 10)).toBeLessThan(100);
+  expect(fireEvent.wheel(viewport, { deltaY: -30, metaKey: true })).toBe(false);
+  expect(parseInt(zoomText() ?? '', 10)).toBeGreaterThan(70);
+});
+
+it('lets the wheel scroll the settings panel instead of moving or zooming the canvas behind it', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  show('desk');
+  await screen.findByLabelText('选题框：真实选题');
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
+  const panel = await screen.findByRole('region', { name: '选题框设置' });
+  const world = worldAt();
+  // Not cancelled: the browser scrolls the panel. Ctrl/⌘ makes no difference over a panel.
+  expect(fireEvent.wheel(panel, { deltaY: 120 })).toBe(true);
+  expect(fireEvent.wheel(panel, { deltaY: 120, ctrlKey: true })).toBe(true);
+  expect(zoomText()).toBe('100%');
+  expect(worldAt()).toBe(world);
+  expect(screen.getByRole('region', { name: '选题框设置' })).toBeInTheDocument();
+  // The tool bar is not the canvas either.
+  expect(fireEvent.wheel(screen.getByRole('status', { name: '画布缩放' }), { deltaY: 120, ctrlKey: true })).toBe(true);
+  expect(zoomText()).toBe('100%');
+  // The bare canvas still moves, and takes the panel (anchored to the old place) away.
+  expect(fireEvent.wheel(document.querySelector('.desk .viewport') as HTMLElement, { deltaY: 60 })).toBe(false);
+  expect(screen.queryByRole('region', { name: '选题框设置' })).toBeNull();
+});
+
+it('leaves the desk through a frame’s own 去稿件; the breadcrumb has no second way back to the same place', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  show('desk');
+  const frame = await screen.findByLabelText('选题框：真实选题');
+  expect(screen.getByText('选题组织 · 材料编排 · 多账号开稿')).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /返回写稿/ })).toBeNull();
+  // Focus mode has its own 去稿件 and still no 返回写稿.
+  fireEvent.click(within(frame).getByRole('button', { name: '专注' }));
+  expect(screen.queryByRole('button', { name: /返回写稿/ })).toBeNull();
+  expect(screen.getAllByRole('button', { name: '去稿件' })).toHaveLength(2);
+  fireEvent.click(within(frame).getByRole('button', { name: '去稿件' }));
+  expect(await screen.findByLabelText('正文第 1 段')).toBeInTheDocument();
+});
+
+it('settles two frames that were saved on top of each other so that none overlaps', async () => {
+  twoWorks();
+  vi.mocked(api.deskPositions).mockResolvedValue([place(work, 0, 0), place(otherWork, 100, 50)]);
+  show('desk');
+  await waitFor(() => expect(frames()).toHaveLength(2));
+  await waitFor(() => expect(clear(boxOf(frames()[0]!), boxOf(frames()[1]!))).toBe(true));
+  // The upper-left frame stays where it was put.
+  expect(boxOf(frames()[0]!)).toMatchObject({ x: 0, y: 0 });
+});
+
+it('puts a new frame beside a stretched one, not on top of it', async () => {
+  twoWorks();
+  // The first frame was stretched far wider than the default column; the second has no position yet.
+  vi.mocked(api.deskPositions).mockResolvedValue([place(work, 0, 0, 1450, 760)]);
+  show('desk');
+  await waitFor(() => expect(frames()).toHaveLength(2));
+  await waitFor(() => expect(boxOf(frames()[0]!).w).toBe(1450));
+  await waitFor(() => expect(clear(boxOf(frames()[0]!), boxOf(frames()[1]!), 48)).toBe(true));
+});
+
+it('settles a frame dropped on another at the nearest clear place and saves that place', async () => {
+  twoWorks();
+  vi.mocked(api.deskPositions).mockResolvedValue([place(work, 0, 0), place(otherWork, 1000, 0)]);
+  show('desk');
+  await waitFor(() => expect(frames()).toHaveLength(2));
+  await waitFor(() => expect(boxOf(frames()[1]!).x).toBe(1000));
+  const head = frames()[1]!.querySelector('.frame-head') as HTMLElement;
+  fireEvent.pointerDown(head, { button: 0, clientX: 1100, clientY: 20, pointerId: 1 });
+  // Held over the first frame: it follows the pointer exactly while it is held.
+  fireEvent.pointerMove(head, { clientX: 200, clientY: 70, pointerId: 1 });
+  expect(boxOf(frames()[1]!)).toMatchObject({ x: 100, y: 50 });
+  fireEvent.pointerUp(head, { clientX: 200, clientY: 70, pointerId: 1 });
+  await waitFor(() => expect(api.saveDeskPosition).toHaveBeenCalledTimes(1));
+  const saved = vi.mocked(api.saveDeskPosition).mock.calls[0]![0];
+  const landed = boxOf(frames()[1]!);
+  expect(saved).toMatchObject({ workId: otherWork, x: landed.x, y: landed.y });
+  expect(clear(landed, boxOf(frames()[0]!))).toBe(true);
+});
+
+it('stops a frame short of its neighbour when its corner is dragged into it', async () => {
+  twoWorks();
+  vi.mocked(api.deskPositions).mockResolvedValue([place(work, 0, 0), place(otherWork, 800, 0)]);
+  show('desk');
+  await waitFor(() => expect(frames()).toHaveLength(2));
+  await waitFor(() => expect(boxOf(frames()[1]!).x).toBe(800));
+  const grip = frames()[0]!.querySelector('.frame-resize') as HTMLElement;
+  fireEvent.pointerDown(grip, { button: 0, clientX: 0, clientY: 0, pointerId: 3 });
+  fireEvent.pointerMove(grip, { clientX: 400, clientY: 0, pointerId: 3 });
+  fireEvent.pointerUp(grip, { clientX: 400, clientY: 0, pointerId: 3 });
+  await waitFor(() => expect(api.saveDeskPosition).toHaveBeenCalledTimes(1));
+  // 800 (the neighbour) − 24 (clearance): as wide as it can get.
+  expect(vi.mocked(api.saveDeskPosition).mock.calls[0]![0]).toMatchObject({ workId: work, width: 776 });
+  expect(clear(boxOf(frames()[0]!), boxOf(frames()[1]!))).toBe(true);
+});
+
+it('gives a draft that has no account one in the writing view, finding it by name', async () => {
+  vi.mocked(api.accounts).mockResolvedValue([
+    { ref: '00000000-0000-4000-8000-0000000000a1', name: '裴裴妈妈', platform: 'xhs', identity: null },
+    { ref: '00000000-0000-4000-8000-0000000000a2', name: '小满老师', platform: 'xhs', identity: null },
+  ]);
+  show();
+  await screen.findByLabelText('正文第 1 段');
+  fireEvent.click(await screen.findByRole('button', { name: '写作账号：未选择账号' }));
+  fireEvent.change(screen.getByLabelText('搜索账号'), { target: { value: '小满' } });
+  expect(screen.queryByRole('button', { name: '裴裴妈妈' })).toBeNull();
+  fireEvent.click(screen.getByRole('button', { name: '小满老师' }));
+  expect(await screen.findByRole('button', { name: '写作账号：小满老师' })).toBeInTheDocument();
+  // The choice is an edit of the draft: it is saved like any other.
+  expect(screen.getByLabelText('写稿工具，未保存')).toBeInTheDocument();
+});
+
+it('puts away the open settings panel on Escape, but lets an open menu inside it take the first Escape', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  vi.mocked(api.accounts).mockResolvedValue([{ ref: '00000000-0000-4000-8000-0000000000a1', name: '甲号', platform: 'xhs', identity: null }]);
+  show('desk');
+  await screen.findByLabelText('选题框：真实选题');
+  fireEvent.click(screen.getByRole('button', { name: '设置' }));
+  const trigger = await screen.findByRole('combobox', { name: '给哪个账号写' });
+  // An open menu closes first; the panel stays.
+  fireEvent.click(trigger);
+  expect(screen.getByRole('listbox', { name: '给哪个账号写' })).toBeInTheDocument();
+  fireEvent.keyDown(trigger, { key: 'Escape' });
+  expect(screen.queryByRole('listbox', { name: '给哪个账号写' })).toBeNull();
+  expect(screen.getByRole('region', { name: '选题框设置' })).toBeInTheDocument();
+  // The next Escape closes the panel itself.
+  fireEvent.keyDown(trigger, { key: 'Escape' });
+  expect(screen.queryByRole('region', { name: '选题框设置' })).toBeNull();
+});
+
+it('opens a stretched frame zoomed out far enough to show its whole width, and a desk that has no width yet at full size', async () => {
+  vi.mocked(api.listWorks).mockResolvedValue([{ workId: work, domainRef: domain, title: '真实选题', revisionId: revision, savedAt: '2026-10-15T01:00:00Z' }]);
+  vi.mocked(api.deskPositions).mockResolvedValue([place(work, 0, 0, 2000, 400)]);
+  // jsdom lays nothing out: the desk is not shown yet, so it opens at 100% rather than at the smallest zoom.
+  show('desk');
+  await screen.findByLabelText('选题框：真实选题');
+  await waitFor(() => expect(parseInt((document.querySelector('.desk .frame') as HTMLElement).style.width, 10)).toBe(2000));
+  expect(zoomText()).toBe('100%');
+});
