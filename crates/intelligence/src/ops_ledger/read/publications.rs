@@ -126,6 +126,8 @@ pub struct OpsPublicationItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpsPublicationCreation {
+    pub link_ref: Uuid,
+    pub registered_with_draft: bool,
     pub work_id: Uuid,
     pub domain_ref: Uuid,
     pub revision_id: Uuid,
@@ -421,11 +423,12 @@ async fn read_page(
                 kept.sync_request_ref, kept.sync_decision, coalesce(kept.sync_state,'not_requested') AS sync_state, \
                 cover.publication_ref IS NOT NULL AS has_cover, \
                 draft.work_ref AS draft_work_ref, draft.domain_ref AS draft_domain_ref, \
-                draft.revision_ref AS draft_revision_ref, \
+                draft.revision_ref AS draft_revision_ref, draft.link_ref AS draft_link_ref, \
+                draft.registered_with_draft AS draft_registered_with_draft, \
                 media.media_state,media.observed_media,media.available_media,media.failed_media,media.unavailable_media \
            FROM kept LEFT JOIN linggan_ops_publication_cover cover ON cover.publication_ref = kept.publication_ref \
            LEFT JOIN LATERAL ( \
-             SELECT l.work_ref, w.domain_ref, l.revision_ref \
+             SELECT l.work_ref, w.domain_ref, l.revision_ref, l.link_ref, (l.linked_by='member') AS registered_with_draft \
                FROM linggan_creation_publication_link l JOIN linggan_creation_work w ON w.work_ref=l.work_ref \
               WHERE l.publication_ref=kept.publication_ref \
                 AND $9::uuid IS NOT NULL AND ($8::uuid[] IS NULL OR w.created_by_member_ref=$9) \
@@ -566,6 +569,8 @@ fn item(row: &sqlx::postgres::PgRow) -> Result<OpsPublicationItem, OpsReadError>
         .try_get::<Option<Uuid>, _>("draft_work_ref")?
         .map(|work_id| {
             Ok::<_, sqlx::Error>(OpsPublicationCreation {
+                link_ref: row.try_get("draft_link_ref")?,
+                registered_with_draft: row.try_get("draft_registered_with_draft")?,
                 work_id,
                 domain_ref: row.try_get("draft_domain_ref")?,
                 revision_id: row.try_get("draft_revision_ref")?,

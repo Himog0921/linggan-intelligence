@@ -118,6 +118,7 @@ pub async fn link_publication(
     let link_ref = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_creation_publication_link(link_ref,request_ref,work_ref,revision_ref,publication_ref,linked_by) VALUES($1,$2,$3,$4,$5,'local_machine')")
         .bind(link_ref).bind(cmd.request_id).bind(work).bind(revision.id).bind(cmd.publication_ref).execute(&mut *tx).await?;
+    crate::ops_content_lens::mark_publication_dirty(&mut tx, cmd.publication_ref).await?;
     tx.commit().await?;
     Ok(PublicationLinkReceipt {
         link_ref,
@@ -280,6 +281,7 @@ pub async fn unlink_publication(
     }
     sqlx::query("INSERT INTO linggan_creation_publication_unlink(link_ref,request_ref,unlinked_by) VALUES($1,$2,'local_machine')")
         .bind(link_ref).bind(request_id).execute(&mut *tx).await?;
+    crate::ops_content_lens::mark_publication_dirty(&mut tx, publication).await?;
     tx.commit().await?;
     Ok(false)
 }

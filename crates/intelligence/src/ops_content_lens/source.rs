@@ -1,6 +1,6 @@
 use super::{
     AnalysisInput, CountSource, CreationLink, EffectiveLabel, LabelDimension, LabelMethod,
-    LensDefinitionError, PublicationInput, SnapshotScope, SourcedCount,
+    LensDefinitionError, PublicationInput, SnapshotScope, SourcedCount, snapshot::SnapshotMode,
 };
 use crate::ops_ledger::read::LATEST_VIEWS_CTE;
 use sqlx::{PgConnection, Row};
@@ -24,6 +24,7 @@ pub(super) async fn read_input(
     conn: &mut PgConnection,
     scope: &SnapshotScope,
     method: LabelMethod,
+    mode: SnapshotMode,
 ) -> Result<AnalysisInput, LensDefinitionError> {
     let sql = format!(
         r#"WITH {TITLED_PUBLICATIONS_CTE},{LATEST_VIEWS_CTE}
@@ -106,25 +107,35 @@ pub(super) async fn read_input(
                 },
             );
     }
-    // A primary run with labels but no qualified audit must not masquerade as an unlabeled title.
     let pending: Vec<_> = keys
         .iter()
         .filter(|k| !by_title.contains_key(*k))
-        .cloned()
+        .map(String::as_str)
         .collect();
-    let unaudited:bool=sqlx::query_scalar("SELECT EXISTS(SELECT FROM linggan_ops_lens_label_run r JOIN linggan_ops_lens_label l USING(run_ref)
-       WHERE r.run_kind='primary' AND r.taxonomy_ref=$1 AND r.task_config_ref=$2 AND r.prompt_version_ref=$3 AND l.title_key=ANY($4))")
-        .bind(method.taxonomy_ref).bind(method.task_config_ref).bind(method.prompt_version_ref).bind(&pending).fetch_one(&mut *conn).await?;
-    if unaudited || (!keys.is_empty() && by_title.is_empty()) {
-        return Err(LensDefinitionError::MissingAgreement);
+    if matches!(mode, SnapshotMode::Strict) {
+        if !keys.is_empty() && by_title.is_empty() {
+            return Err(LensDefinitionError::MissingAgreement);
+        }
+        let unaudited:bool=sqlx::query_scalar("SELECT EXISTS(SELECT FROM linggan_ops_lens_label_run r JOIN linggan_ops_lens_label l USING(run_ref)
+           WHERE r.run_kind='primary' AND r.taxonomy_ref=$1 AND r.task_config_ref=$2 AND r.prompt_version_ref=$3 AND l.title_key=ANY($4))")
+            .bind(method.taxonomy_ref).bind(method.task_config_ref).bind(method.prompt_version_ref).bind(&pending).fetch_one(&mut *conn).await?;
+        if unaudited {
+            return Err(LensDefinitionError::MissingAgreement);
+        }
     }
     for row in publications.values_mut() {
         if let Some(labels) = by_title.get(&row.title_key) {
             row.labels = labels.clone();
         }
     }
-    let links=sqlx::query("SELECT publication_ref,link_ref,work_ref,revision_ref FROM linggan_creation_publication_link l
-        WHERE publication_ref=ANY($1) AND NOT EXISTS (SELECT FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref)")
+    let links = sqlx::query(
+        "SELECT l.publication_ref, l.link_ref, l.work_ref, l.revision_ref,
+                (r.document->>'ideaRef')::uuid AS idea_ref
+         FROM linggan_creation_publication_link l
+         JOIN linggan_creation_revision r USING (work_ref, revision_ref)
+         WHERE l.publication_ref = ANY($1)
+           AND NOT EXISTS (SELECT FROM linggan_creation_publication_unlink u WHERE u.link_ref=l.link_ref)",
+    )
         .bind(publications.keys().copied().collect::<Vec<Uuid>>()).fetch_all(&mut *conn).await?;
     for row in links {
         let id: Uuid = row.try_get("publication_ref")?;
@@ -137,6 +148,7 @@ pub(super) async fn read_input(
                 CreationLink {
                     work_ref: row.try_get("work_ref")?,
                     revision_ref: row.try_get("revision_ref")?,
+                    idea_ref: row.try_get("idea_ref")?,
                 },
             );
     }

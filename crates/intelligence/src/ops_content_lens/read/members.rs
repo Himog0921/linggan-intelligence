@@ -39,6 +39,15 @@ pub struct Publication {
     pub views: Option<u64>,
     pub comments: Option<u64>,
     pub business_date: Option<String>,
+    pub creation_links: Vec<PublicationCreationLink>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationCreationLink {
+    link_ref: Uuid,
+    work_id: Uuid,
+    revision_id: Uuid,
 }
 
 type Display = (Option<String>, Option<String>);
@@ -106,6 +115,15 @@ pub async fn publications(
                 views: row.views.value,
                 comments: row.comments.value,
                 business_date: row.business_date.clone(),
+                creation_links: row
+                    .creation_links
+                    .iter()
+                    .map(|(link_ref, link)| PublicationCreationLink {
+                        link_ref: *link_ref,
+                        work_id: link.work_ref,
+                        revision_id: link.revision_ref,
+                    })
+                    .collect(),
             }
         })
         .collect();

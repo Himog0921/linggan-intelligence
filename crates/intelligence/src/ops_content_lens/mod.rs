@@ -71,9 +71,12 @@ pub async fn metric_definition(
 }
 
 mod read;
+mod refresh;
 pub use read::{
     BoardStatus, PageRequest, SnapshotLookup, board_status, publications, read_snapshot, spot_check,
 };
+pub(crate) use refresh::mark_publication_dirty;
+pub use refresh::{RefreshError, RefreshReceipt, refresh_pending};
 mod sample;
 mod statistics;
 mod variance;

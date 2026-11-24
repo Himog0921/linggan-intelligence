@@ -1,11 +1,11 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ActionButton } from '../../../shared/ActionButton';
 import { ApiError } from '../../../shared/api';
 import { RequestIdentities } from '../../../shared/requestIdentity';
 import { reason } from '../api';
 import { Status } from '../ui';
-import { generate, getSnapshot, percent, submitRun, useLensStatus, type Drill } from './api';
+import { generate, getSnapshot, percent, submitRun, useLensStatus, type Drill, type Snapshot } from './api';
 import { Coverage, Effects, Quality, Structure } from './LensSections';
 import { PublicationList } from './LensDetails';
 import { SpotList } from './SpotList';
@@ -13,11 +13,29 @@ import css from './Lens.module.css';
 
 export function ContentLensPage({ domain }: { domain:string }) {
   const client = useQueryClient();
-  const status = useLensStatus(true,true);
+  const status = useLensStatus(true, true, domain);
   const active = status.data?.run?.inProgress;
   const snapshot = useQuery({queryKey:['ops','content-lens','snapshot',domain],retry:false,
-    enabled:status.isSuccess && status.data.enabled && !active,
+    enabled:status.data?.enabled === true,
     queryFn:({signal}) => getSnapshot(domain,signal)});
+  const latestSnapshotRef = status.data?.latestSnapshotRef;
+  const lastStatus = useRef<{ domain: string; snapshotRef: string | null }>(null);
+  useEffect(() => {
+    if (latestSnapshotRef === undefined) return;
+    const previous = lastStatus.current;
+    lastStatus.current = { domain, snapshotRef: latestSnapshotRef };
+    if (previous?.domain === domain && previous.snapshotRef !== latestSnapshotRef) {
+      const queryKey = ['ops', 'content-lens', 'snapshot', domain];
+      const cached = client.getQueryData<Snapshot | null>(queryKey)?.ref ?? null;
+      if (cached !== latestSnapshotRef) {
+        void client.cancelQueries({ queryKey, exact: true }).then(() => {
+          if (lastStatus.current?.domain === domain && lastStatus.current.snapshotRef === latestSnapshotRef) {
+            return client.invalidateQueries({ queryKey, exact: true });
+          }
+        });
+      }
+    }
+  }, [client, domain, latestSnapshotRef]);
   const [ids] = useState(() => new RequestIdentities());
   const [detail,setDetail] = useState<{ref:string; drill:Drill|'spot'; domain:string} | null>(null);
   const action = useMutation({
@@ -32,11 +50,11 @@ export function ContentLensPage({ domain }: { domain:string }) {
     onSuccess: async () => { await client.invalidateQueries({ queryKey:['ops','content-lens'] }); },
   });
   if (status.isError) return <Status error retry={() => void status.refetch()}>看板状态读取失败（{reason(status.error)}）。</Status>;
-  if (status.isPending) return <Status>正在读取看板状态…</Status>;
+  if (!status.data) return <Status>正在读取看板状态…</Status>;
   if (!status.data.enabled) return <Status>内容回溯未启用。</Status>;
   const run = status.data.run;
   const phase = run?.audit ?? run?.primary;
-  const current = snapshot.isSuccess ? snapshot.data : null;
+  const current = snapshot.data;
   const open = (drill:Drill) => current && setDetail({domain,ref:current.ref,drill});
   return <div className={css.board}>
     <div className={css.top}><div className={css.controls}>
@@ -47,17 +65,17 @@ export function ContentLensPage({ domain }: { domain:string }) {
     {action.isSuccess && <p role="status">{action.data}</p>}
     {active && run && phase ? <section className={css.section} aria-live="polite"><h2>{run.audit ? '独立复标进行中' : '标注进行中'}</h2>
       <progress aria-label="标注进度" max="1" value={run.progress} /> <strong>{percent(run.progress)}</strong>
-      <p>已完成 {phase.succeeded} / {phase.total} 个分片</p></section>
-    : snapshot.isError ? <Status error retry={() => void snapshot.refetch()}>快照读取失败（{reason(snapshot.error)}）。</Status>
-    : snapshot.isPending ? <Status>正在读取快照…</Status> : !current ? <Status>{run ? '当前范围暂无快照。完成标注与复标后可生成快照。' : '暂无标注数据。请先完成一次标题标注与复标，再生成快照。'}</Status>
-    : <>
+      <p>已完成 {phase.succeeded} / {phase.total} 个分片</p></section> : null}
+    {snapshot.isError && <Status error retry={() => void snapshot.refetch()}>快照读取失败（{reason(snapshot.error)}）。</Status>}
+    {!active && snapshot.isPending && <Status>正在读取快照…</Status>}
+    {snapshot.isSuccess && !current && !active && <Status>{run ? '当前范围暂无快照。完成标注与复标后可生成快照。' : '暂无标注数据。请先完成一次标题标注与复标，再生成快照。'}</Status>}
+    {current ? <>
       <Quality snapshot={current} open={open} spot={() => setDetail({domain,ref:current.ref,drill:'spot'})}/>
       <Structure snapshot={current} open={open} /><Coverage snapshot={current} open={open} /><Effects snapshot={current} open={open} />
       <section className={css.section}><h2>假设与检验</h2><p>暂无已登记的假设。</p></section>
-      {detail?.domain === domain && detail.drill !== 'spot' && detail.ref === current.ref &&
-        <PublicationList snapshotRef={detail.ref} drill={detail.drill} close={() => setDetail(null)} />}
-    </>}
-    {detail?.domain === domain && detail.drill === 'spot' &&
-      <SpotList snapshotRef={detail.ref} domain={domain} ids={ids} close={() => setDetail(null)} />}
+    </> : null}
+    {detail?.domain === domain && (detail.drill === 'spot'
+      ? <SpotList snapshotRef={detail.ref} domain={domain} ids={ids} close={() => setDetail(null)} />
+      : <PublicationList snapshotRef={detail.ref} domain={domain} drill={detail.drill} close={() => setDetail(null)} />)}
   </div>;
 }

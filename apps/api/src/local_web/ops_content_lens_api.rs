@@ -24,6 +24,7 @@ pub(super) fn routes(enabled: bool) -> Router<LocalWebState> {
                     Json(BoardStatus {
                         enabled: false,
                         run: None,
+                        latest_snapshot_ref: None,
                     })
                 }),
             )
@@ -74,13 +75,28 @@ fn read_response<T: serde::Serialize>(result: Result<T, LensDefinitionError>) ->
     }
 }
 
-async fn status(State(state): State<LocalWebState>, headers: HeaderMap) -> Response {
-    match admin_db(&state, &headers).await {
-        Ok(db) => read_response(board_status(db).await),
-        Err(response) => response,
-    }
-}
 type ReadQuery<T> = Result<Query<T>, QueryRejection>;
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct StatusQuery {
+    domain_ref: Option<uuid::Uuid>,
+}
+
+async fn status(
+    State(state): State<LocalWebState>,
+    headers: HeaderMap,
+    query: ReadQuery<StatusQuery>,
+) -> Response {
+    let db = match admin_db(&state, &headers).await {
+        Ok(db) => db,
+        Err(response) => return response,
+    };
+    let Ok(Query(query)) = query else {
+        return local_read_json_error(StatusCode::BAD_REQUEST, "ops_lens_scope_invalid");
+    };
+    read_response(board_status(db, query.domain_ref).await)
+}
 
 async fn snapshot(
     State(state): State<LocalWebState>,

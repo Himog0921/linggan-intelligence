@@ -5,7 +5,7 @@ use super::{
 };
 use crate::{
     ai_foundation::store::{Command, FoundationError},
-    ops_content_lens::{MetricDefinition, agreement, shuffle_with_seed},
+    ops_content_lens::{MetricDefinition, TITLED_PUBLICATIONS_CTE, agreement, shuffle_with_seed},
 };
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
@@ -117,6 +117,7 @@ async fn save_agreements(
     let rows:Vec<(String,Value,Value)>=sqlx::query_as("SELECT a.title_key,to_jsonb(p),to_jsonb(a)
         FROM linggan_ops_lens_label a JOIN linggan_ops_lens_label p ON p.title_key=a.title_key AND p.run_ref=$2
         WHERE a.run_ref=$1 ORDER BY a.title_key").bind(audit).bind(primary).fetch_all(&mut **tx).await?;
+    let mut settled = false;
     for dimension in DIMENSIONS {
         let pairs: Vec<_> = rows
             .iter()
@@ -129,11 +130,27 @@ async fn save_agreements(
             })
             .collect::<Result<_, FoundationError>>()?;
         let answer = agreement(&pairs, &metric);
-        sqlx::query("INSERT INTO linggan_ops_lens_agreement(primary_run_ref,audit_run_ref,dimension,sample_count,
+        let inserted = sqlx::query("INSERT INTO linggan_ops_lens_agreement(primary_run_ref,audit_run_ref,dimension,sample_count,
             excluded_example_count,agreement,kappa,reason) VALUES($1,$2,$3,$4,$5,$6::float8,$7::float8,$8)
             ON CONFLICT (primary_run_ref,audit_run_ref,dimension) DO NOTHING")
             .bind(primary).bind(audit).bind(dimension).bind(answer.sample_count as i32).bind(answer.excluded_example_count as i32)
             .bind(answer.agreement).bind(answer.kappa).bind(answer.reason).execute(&mut **tx).await?;
+        settled |= inserted.rows_affected() > 0;
+    }
+    if settled {
+        // The settlement and its refresh signal must be visible together.
+        let sql = format!(
+            "WITH {TITLED_PUBLICATIONS_CTE}
+          UPDATE linggan_ops_lens_refresh q SET generation=q.generation+1
+          FROM titled_publications t
+          WHERE t.publication_ref=q.publication_ref AND t.title ~ '[^[:space:]]'
+            AND EXISTS (SELECT FROM linggan_ops_lens_label l
+              WHERE l.run_ref=$1 AND l.title_key=linggan_ops_lens_title_key(t.title))"
+        );
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(primary)
+            .execute(&mut **tx)
+            .await?;
     }
     Ok(())
 }

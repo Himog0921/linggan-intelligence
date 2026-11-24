@@ -41,6 +41,8 @@ pub struct EffectiveLabel {
 pub struct CreationLink {
     pub work_ref: Uuid,
     pub revision_ref: Uuid,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub idea_ref: Option<Uuid>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
