@@ -1210,6 +1210,20 @@ fn model_draft_keeps_canonical_source_and_requires_direct_book_title_support() {
         snapshot.texts[1].structure["time"]
     );
 
+    let mut multiple_origins = snapshot.clone();
+    let mut other_video = snapshot.texts[1].clone();
+    other_video.source_ref = uuid::Uuid::from_u128(1000);
+    multiple_origins.texts.push(other_video);
+    let material = model_draft::material(&multiple_origins);
+    for (index, source) in multiple_origins.texts.iter().enumerate().skip(1) {
+        let text = &material["texts"][index];
+        assert_eq!(text["citationId"], format!("s{}", index + 1));
+        assert_eq!(text["sourceRef"], json!(source.source_ref));
+        assert_eq!(text["sourceVersion"], json!(source.source_version));
+        assert_eq!(text["structure"]["time"], source.structure["time"]);
+        assert!(text.get("start").is_none());
+    }
+
     let result = verify(draft.clone()).unwrap();
     let bound = &result["card"]["evidence"][1];
     assert_eq!(bound["inputCitationId"], "canonical-segment");

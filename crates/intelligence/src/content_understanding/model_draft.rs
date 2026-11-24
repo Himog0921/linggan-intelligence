@@ -9,6 +9,15 @@ pub const PROTOCOL: &str = "content-understanding.draft.short-sources.v1";
 pub const GUIDANCE_VERSION: &str = "content-understanding.l1.guidance.v1";
 
 pub fn material(snapshot: &Snapshot) -> Value {
+    let mut transcripts = snapshot
+        .texts
+        .iter()
+        .filter(|source| source.kind == "transcript");
+    let single_transcript_origin = transcripts.next().is_some_and(|first| {
+        transcripts.all(|other| {
+            other.source_ref == first.source_ref && other.source_version == first.source_version
+        })
+    });
     let mut material = json!(snapshot);
     if let Some(texts) = material["texts"].as_array_mut() {
         for (index, (text, source)) in texts.iter_mut().zip(&snapshot.texts).enumerate() {
@@ -18,8 +27,11 @@ pub fn material(snapshot: &Snapshot) -> Value {
             if source.kind == "transcript"
                 && let Some(fields) = text.as_object_mut()
             {
-                for key in ["sourceRef", "sourceVersion", "start"] {
-                    fields.remove(key);
+                fields.remove("start");
+                // Multiple videos can share timestamps. Keep their grouping keys.
+                if single_transcript_origin {
+                    fields.remove("sourceRef");
+                    fields.remove("sourceVersion");
                 }
                 if source.issues.is_empty() {
                     fields.remove("issues");
