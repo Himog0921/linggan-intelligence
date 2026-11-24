@@ -82,6 +82,9 @@ pub struct CommentCatalogQuery {
     /// Numbered pages: skip this many rows of the current filter. Given an offset, any cursor is
     /// ignored and the page starts from a fresh `asOf`.
     pub offset: Option<i64>,
+    /// Only comments whose current result has a signal supporting this Problem, read through
+    /// merge redirects to the Problem it currently resolves to.
+    pub problem_ref: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -98,6 +101,7 @@ pub struct CatalogSummaryQuery {
     pub min_likes: Option<i64>,
     #[serde(default)]
     pub post_usage: CatalogPostUsage,
+    pub problem_ref: Option<Uuid>,
 }
 
 struct Scope {
@@ -142,6 +146,7 @@ impl CommentCatalogQuery {
             return Err(StudyCatalogError::InvalidLimit);
         }
         if self.work_ref.is_some_and(|value| value.is_nil())
+            || self.problem_ref.is_some_and(|value| value.is_nil())
             || self.q.as_deref().is_some_and(|value| value.contains('\0'))
             || self.signal_kind.as_deref().is_some_and(|kind| {
                 !matches!(
@@ -194,6 +199,9 @@ impl CommentCatalogQuery {
         if self.post_usage != CatalogPostUsage::All {
             scope["postUsage"] = json!(self.post_usage.as_sql());
         }
+        if let Some(problem) = self.problem_ref {
+            scope["problemRef"] = json!(problem);
+        }
         let hash = cursor::scope_hash(&scope)?;
         Ok(Scope {
             pattern: literal_substring_pattern(query)?,
@@ -242,6 +250,7 @@ pub async fn read_catalog_summary(
         cursor: None,
         limit: Some(50),
         offset: None,
+        problem_ref: query.problem_ref,
     };
     read_catalog(database, &query, true)
         .await
@@ -294,6 +303,7 @@ async fn read_catalog(
         .bind(scope.post_usage)
         .bind(last.and_then(|value| value.like_count))
         .bind(scope.offset.unwrap_or(0))
+        .bind(query.problem_ref)
         .fetch_one(&mut *tx)
         .await?;
     if !summary_only {
@@ -377,6 +387,7 @@ pub(super) async fn read_one_projection(
         .bind(CatalogPostUsage::default().as_sql())
         .bind(Option::<i64>::None)
         .bind(0_i64)
+        .bind(Option::<Uuid>::None)
         .fetch_one(&mut **tx)
         .await?;
     if projection.get("currentSource").is_none_or(Value::is_null) {
@@ -550,6 +561,22 @@ mod tests {
         query.signal_kind = Some("need".to_owned());
         assert_ne!(query.validate().unwrap().hash, unfiltered);
         query.signal_kind = Some("high_resonance".to_owned());
+        assert!(matches!(
+            query.validate(),
+            Err(StudyCatalogError::InvalidQuery)
+        ));
+    }
+
+    #[test]
+    fn problem_filter_changes_cursor_scope_and_rejects_nil() {
+        let mut query = query();
+        let unfiltered = query.validate().unwrap().hash;
+        query.problem_ref = Some(Uuid::from_u128(7));
+        let first = query.validate().unwrap().hash;
+        assert_ne!(first, unfiltered);
+        query.problem_ref = Some(Uuid::from_u128(8));
+        assert_ne!(query.validate().unwrap().hash, first);
+        query.problem_ref = Some(Uuid::nil());
         assert!(matches!(
             query.validate(),
             Err(StudyCatalogError::InvalidQuery)

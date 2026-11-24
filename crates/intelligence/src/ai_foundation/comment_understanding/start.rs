@@ -69,6 +69,72 @@ struct Report {
     already_researched: usize,
     already_queued: usize,
     dispatch_unresolved: usize,
+    /// The same counts split by work, for the per-work plan.
+    works: BTreeMap<Uuid, WorkReport>,
+    /// Every selection left out of the plan, in selection order, with the one reason that applied.
+    left_out: Vec<LeftOut>,
+}
+
+#[derive(Debug, Default)]
+struct WorkReport {
+    selected: usize,
+    excluded: usize,
+    waiting_l1: usize,
+    already_researched: usize,
+    already_queued: usize,
+    dispatch_unresolved: usize,
+}
+
+#[derive(Debug)]
+struct LeftOut {
+    work_ref: Uuid,
+    source_ref: Uuid,
+    /// Known once the source gate has read the comment; otherwise looked up for the preview.
+    comment_external_id: Option<String>,
+    reason: &'static str,
+}
+
+/// Preview lists at most this many left-out selections; the counts always cover all of them.
+const EXCLUDED_TARGETS_LIMIT: usize = 200;
+
+impl Report {
+    fn leave_out(
+        &mut self,
+        selection: &Selection,
+        comment_external_id: Option<&str>,
+        reason: &'static str,
+    ) {
+        let work = self.works.entry(selection.work_ref).or_default();
+        match reason {
+            "waiting_l1" => {
+                self.waiting_l1_targets += 1;
+                self.waiting_l1_works.insert(selection.work_ref);
+                work.waiting_l1 += 1;
+            }
+            "already_queued" => {
+                self.already_queued += 1;
+                work.already_queued += 1;
+            }
+            "dispatch_unresolved" => {
+                self.dispatch_unresolved += 1;
+                work.dispatch_unresolved += 1;
+            }
+            "already_researched" => {
+                self.already_researched += 1;
+                work.already_researched += 1;
+            }
+            code => {
+                *self.excluded.entry(code).or_default() += 1;
+                work.excluded += 1;
+            }
+        }
+        self.left_out.push(LeftOut {
+            work_ref: selection.work_ref,
+            source_ref: selection.source_ref,
+            comment_external_id: comment_external_id.map(str::to_owned),
+            reason,
+        });
+    }
 }
 
 struct Plan {
@@ -149,6 +215,7 @@ async fn plan_in(
     let mut l1: BTreeMap<Uuid, Option<Uuid>> = BTreeMap::new();
     let mut groups: BTreeMap<Uuid, WorkGroup> = BTreeMap::new();
     for selection in unique {
+        report.works.entry(selection.work_ref).or_default().selected += 1;
         let target = match target::read_in(
             tx,
             domain,
@@ -161,7 +228,7 @@ async fn plan_in(
         {
             Ok(target) => target,
             Err(code) => {
-                *report.excluded.entry(code).or_default() += 1;
+                report.leave_out(selection, None, code);
                 continue;
             }
         };
@@ -173,22 +240,22 @@ async fn plan_in(
                 found
             }
         };
+        let id = Some(target.comment_external_id.as_str());
         let Some(l1_ref) = l1_ref else {
-            report.waiting_l1_targets += 1;
-            report.waiting_l1_works.insert(selection.work_ref);
+            report.leave_out(selection, id, "waiting_l1");
             continue;
         };
         let state = state_in(tx, domain, selection.work_ref, &target.comment_external_id).await?;
         if state.queued {
-            report.already_queued += 1;
+            report.leave_out(selection, id, "already_queued");
             continue;
         }
         if state.unresolved {
-            report.dispatch_unresolved += 1;
+            report.leave_out(selection, id, "dispatch_unresolved");
             continue;
         }
         if state.researched && !rerun {
-            report.already_researched += 1;
+            report.leave_out(selection, id, "already_researched");
             continue;
         }
         groups
@@ -259,6 +326,8 @@ pub async fn preview(
     .fetch_one(&mut *tx)
     .await?;
     let plan = plan_in(&mut tx, domain, selections, rerun, &as_of).await?;
+    let groups = work_groups(&mut tx, domain, &plan, &as_of).await?;
+    let (excluded_targets, truncated) = excluded_targets(&mut tx, domain, &plan.report).await?;
     tx.commit().await?;
     let report = &plan.report;
     let targets: usize = plan.units.iter().map(|unit| unit.targets.len()).sum();
@@ -280,7 +349,110 @@ pub async fn preview(
         "dispatchUnresolvedCount": report.dispatch_unresolved,
         "excludedCounts": report.excluded,
         "units": plan.units.iter().map(|u| json!({"workRef":u.work_ref,"l1RequestRef":u.l1_request_ref,"targetCount":u.targets.len()})).collect::<Vec<_>>(),
+        "groups": groups,
+        "excludedTargets": excluded_targets,
+        "excludedTargetsTruncated": truncated,
     }))
+}
+
+/// The plan of each selected work. Its counts split the plan-wide counts exactly: per work,
+/// `selectedCount` = researchable + already researched + active + dispatch unresolved + waiting
+/// for L1 + excluded. The title comes from the same source as the comment directory and is only
+/// read for works of this domain.
+async fn work_groups(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    plan: &Plan,
+    as_of: &str,
+) -> Result<Vec<Value>, FoundationError> {
+    let works: Vec<Uuid> = plan.report.works.keys().copied().collect();
+    let in_domain: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT DISTINCT content_public_ref FROM linggan_material_domain_usage
+         WHERE domain_ref=$1 AND content_public_ref=ANY($2::uuid[])",
+    )
+    .bind(domain)
+    .bind(&works)
+    .fetch_all(&mut **tx)
+    .await?;
+    // The directory reads titles at an RFC 3339 instant; use the same form of this cutoff.
+    let as_of: String = sqlx::query_scalar(
+        "SELECT to_char($1::timestamptz AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+    )
+    .bind(as_of)
+    .fetch_one(&mut **tx)
+    .await?;
+    let titles = crate::comment_study_source::context::read_titles(tx, &in_domain, &as_of).await?;
+    let mut groups: Vec<(usize, usize, Uuid, Value)> = plan
+        .report
+        .works
+        .iter()
+        .map(|(work, counts)| {
+            let units: Vec<_> = plan.units.iter().filter(|u| u.work_ref == *work).collect();
+            let researchable: usize = units.iter().map(|u| u.targets.len()).sum();
+            let group = json!({
+                "workRef": work,
+                "workTitle": titles.get(work).map_or(Value::Null, |t| t["displayTitle"].clone()),
+                "selectedCount": counts.selected,
+                "researchableCount": researchable,
+                "unitCount": units.len(),
+                "alreadyResearchedCount": counts.already_researched,
+                "waitingL1": counts.waiting_l1 > 0,
+                "waitingL1TargetCount": counts.waiting_l1,
+                "activeCount": counts.already_queued,
+                "dispatchUnresolvedCount": counts.dispatch_unresolved,
+                "excludedCount": counts.excluded,
+            });
+            (researchable, counts.selected, *work, group)
+        })
+        .collect();
+    // Works the plan researches most come first, as their units run first.
+    groups.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+    Ok(groups.into_iter().map(|(.., group)| group).collect())
+}
+
+/// The first selections left out of the plan, each with its reason. A comment the source gate
+/// refused is named only when its work belongs to this domain; it never carries author fields.
+async fn excluded_targets(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    report: &Report,
+) -> Result<(Vec<Value>, bool), FoundationError> {
+    let shown = &report.left_out[..report.left_out.len().min(EXCLUDED_TARGETS_LIMIT)];
+    let unnamed: Vec<Uuid> = shown
+        .iter()
+        .filter(|item| item.comment_external_id.is_none())
+        .map(|item| item.source_ref)
+        .collect();
+    let names: BTreeMap<(Uuid, Uuid), String> = if unnamed.is_empty() {
+        BTreeMap::new()
+    } else {
+        sqlx::query_as::<_, (Uuid, Uuid, String)>(
+            "SELECT c.material_ref,c.content_public_ref,c.comment_external_id
+             FROM linggan_material_comment c
+             WHERE c.material_ref=ANY($2::uuid[]) AND EXISTS(
+               SELECT 1 FROM linggan_material_domain_usage u
+               WHERE u.content_public_ref=c.content_public_ref AND u.domain_ref=$1)",
+        )
+        .bind(domain)
+        .bind(&unnamed)
+        .fetch_all(&mut **tx)
+        .await?
+        .into_iter()
+        .map(|(source, work, id)| ((work, source), id))
+        .collect()
+    };
+    let items = shown
+        .iter()
+        .map(|item| {
+            let id = item
+                .comment_external_id
+                .clone()
+                .or_else(|| names.get(&(item.work_ref, item.source_ref)).cloned());
+            json!({"workRef": item.work_ref, "sourceRef": item.source_ref,
+                   "commentExternalId": id, "reason": item.reason})
+        })
+        .collect();
+    Ok((items, report.left_out.len() > EXCLUDED_TARGETS_LIMIT))
 }
 
 /// Freeze the previewed plan as one batch with one item per unit.
