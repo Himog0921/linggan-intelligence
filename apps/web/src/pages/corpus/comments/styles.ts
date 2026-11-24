@@ -1,8 +1,7 @@
-import study from './Comments.module.css';
-import results from './Results.module.css';
+import page from './CommentResearch.module.css';
 
-/** Keep the current surface's CSS names local to this route, including dialog portals. */
-export function c(...names: string[]) {
-  return names.flatMap(name => name.split(/\s+/)).filter(Boolean)
-    .map(name => [...new Set([study[name], results[name]].filter(Boolean))].join(' ') || name).join(' ');
+/** Keep the B-04 class names local to this route, including dialog portals. Unknown names pass through (global v7-*). */
+export function c(...names: (string | false | null | undefined)[]) {
+  return names.flatMap(name => name ? name.split(/\s+/) : []).filter(Boolean)
+    .map(name => page[name] ?? name).join(' ');
 }

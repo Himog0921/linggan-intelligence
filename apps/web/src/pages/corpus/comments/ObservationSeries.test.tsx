@@ -1,29 +1,47 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { ObservationChart, ObservationSeries } from './ObservationSeries';
+import { ObservationSeries } from './ObservationSeries';
 import type { ObservationPoint } from './overviewDtos';
-const points = (max: number): ObservationPoint[] => Array.from({ length: 7 }, (_, i) => ({ date: `2026-10-${String(i + 1).padStart(2, '0')}`, newObservedCommentCount: i === 0 ? max : 0, acceptedSignalCount: 0, studiedCommentCount: null, coveredWorkCount: null, observationCoverage: i === 0 ? 'partial' : 'none' }));
-describe('D3 observation counts and coverage', () => {
+import { rangePoints } from './researchModel';
+
+const day = (i: number) => `2026-10-${String(i + 1).padStart(2, '0')}`;
+const points = (max: number, length = 7): ObservationPoint[] => Array.from({ length }, (_, i) => ({ date: day(i), newObservedCommentCount: i === 0 ? max : 0, acceptedSignalCount: 0, studiedCommentCount: null, coveredWorkCount: null, observationCoverage: i === 0 ? 'partial' : 'none' }));
+const series = (list: ObservationPoint[]) => ({ timezone: 'Asia/Shanghai', points: list });
+const noop = () => {};
+
+describe('B-04 trend chart', () => {
   it('renders a zero series without invalid geometry and keeps missing coverage explicit', () => {
-    render(<ObservationChart points={points(0)} />);
-    const svg = screen.getByRole('img', { name: '评论柱状与研究信号渐变曲线，共同横轴及采集覆盖' });
+    render(<ObservationSeries series={series(points(0))} range={7} view="chart" onRange={noop} onView={noop} />);
+    const svg = screen.getByRole('img', { name: /近7天，首次观察0条评论/ });
     expect(svg.innerHTML).not.toMatch(/NaN|Infinity/);
-    expect(screen.getAllByRole('img', { name: /无观察记录/ })).toHaveLength(6);
-    expect(svg.querySelectorAll('rect[data-state="partial"]')).toHaveLength(1);
-    expect(svg.querySelectorAll('rect[data-state="none"]')).toHaveLength(6);
+    expect([...svg.querySelectorAll('title')].filter(t => t.textContent?.endsWith('无记录'))).toHaveLength(6);
+    expect([...svg.querySelectorAll('title')].filter(t => t.textContent?.endsWith('部分'))).toHaveLength(1);
   });
-  it('uses unique integer axis labels for a single observed comment', () => {
-    render(<ObservationChart points={points(1)} />);
-    const svg = screen.getByRole('img', { name: '评论柱状与研究信号渐变曲线，共同横轴及采集覆盖' });
-    const axis = [...svg.querySelectorAll('text[text-anchor="end"]')].filter(e => Number(e.getAttribute('x')) === 40 && Number(e.getAttribute('y')) < 400).map(e => e.textContent);
-    expect(axis).toEqual(['1', '0']);
-    expect(screen.getByRole('img', { name: /2026-10-01：首次观察 1 条/ })).toBeInTheDocument();
+  it('labels every day within 14 days and keeps independent integer axes', () => {
+    render(<ObservationSeries series={series(points(1, 14))} range={56} view="chart" onRange={noop} onView={noop} />);
+    const svg = screen.getByRole('img');
+    const dates = [...svg.querySelectorAll('text[text-anchor="middle"]')].map(e => e.textContent);
+    expect(dates).toHaveLength(14);
+    const left = [...svg.querySelectorAll('text[text-anchor="end"]')].map(e => e.textContent).filter(text => /^\d+$/.test(text ?? ''));
+    expect(left).toEqual(['0', '1', '2']);
+    expect(svg.querySelector('rect title')?.textContent).toBe('2026-10-01 · 首次观察 1 条评论');
   });
-  it('shows unobserved days as unknown without hiding independent signal counts', () => {
-    render(<ObservationSeries series={{ timezone: 'Asia/Shanghai', points: points(0) }}
-      days={7} view="table" onDays={() => {}} onView={() => {}} />);
+  it('draws at the container pixel size instead of stretching a fixed viewBox', () => {
+    render(<ObservationSeries series={series(points(2))} range={7} view="chart" onRange={noop} onView={noop} />);
+    const svg = screen.getByRole('img');
+    expect(svg.getAttribute('viewBox')).toBe(`0 0 ${svg.getAttribute('width')} ${svg.getAttribute('height')}`);
+  });
+  it('starts "since data" two days before the first observation, with at least seven days', () => {
+    const list = Array.from({ length: 30 }, (_, i) => ({ ...points(0, 30)[i]!, newObservedCommentCount: i >= 20 ? 1 : 0 }));
+    expect(rangePoints(list, 'fit')[0]?.date).toBe(list[18]!.date);
+    expect(rangePoints(points(0, 30), 'fit')).toHaveLength(7);
+    expect(rangePoints(list.slice(0, 22), 'fit')).toHaveLength(7);
+  });
+  it('shows unobserved days as unknown in the table without hiding independent signal counts', () => {
+    render(<ObservationSeries series={series(points(0))} range={7} view="table" onRange={noop} onView={noop} />);
     const cells = screen.getAllByRole('row')[1]!.querySelectorAll('td');
     expect(cells[1]).toHaveTextContent('—');
-    expect(cells[3]).toHaveTextContent('0');
+    expect(cells[2]).toHaveTextContent('0');
+    expect(cells[3]).toHaveTextContent('无记录');
   });
 });

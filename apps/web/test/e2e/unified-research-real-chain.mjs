@@ -33,10 +33,13 @@ try {
   await page.getByRole('link',{name:'概览',exact:true}).click();
   assert.equal(await page.getByRole('button',{name:'表格',exact:true}).getAttribute('aria-pressed'),'true');
   await page.getByRole('button',{name:'近 56 天',exact:true}).click();await page.getByRole('button',{name:'图表',exact:true}).click();
-  await hero.getByRole('img',{name:'评论柱状与研究信号渐变曲线，共同横轴及采集覆盖',exact:true}).waitFor();
+  await page.getByRole('region',{name:'评论观察趋势',exact:true}).getByRole('img',{name:/^近56天，首次观察\d+条评论/}).waitFor();
+  await page.getByRole('button',{name:'有数据以来',exact:true}).click();
  });
  await step('save, reload and pause comment research scheduling without creating a run', async () => {
-  await page.getByRole('link', { name: '研究记录', exact: true }).click();
+  // B-04: research records moved from the sidebar to the context-bar entry and its dialog.
+  await page.getByRole('button', { name: /^研究记录/ }).click();
+  await page.getByRole('dialog', { name: '研究记录', exact: true }).waitFor();
   const settings = page.getByRole('button', { name: '自动化设置', exact: true });
   const dialog = page.getByRole('dialog', { name: '评论研究自动化设置', exact: true });
   const enabled = dialog.getByRole('checkbox', { name: '启用定时生成清单', exact: true });
@@ -72,12 +75,14 @@ try {
   await page.getByText('已检查当前筛选结果的前 2 条，选入 2 条。',{exact:true}).waitFor();
   assert.ok(await checks.nth(0).isChecked());assert.ok(await checks.nth(1).isChecked());
   assert.equal((await get(`${commentV2}/runs?domainRef=${domain}`)).runs.length,0);
-  const preview=await post(page.getByRole('button',{name:'预览所选评论',exact:true}),commentV2+'/preview');
+  const preview=await post(page.getByRole('button',{name:/预览研究计划/}),commentV2+'/preview');
   assert.equal(preview.waitingL1.targetCount,2);assert.deepEqual(preview.waitingL1.workRefs,[work]);
-  await page.getByText('L1 未就绪 2 条，涉及 1 个作品。',{exact:true}).waitFor();
+  const planDialog=page.getByRole('dialog',{name:'本次研究预览',exact:true});
+  await planDialog.getByText('不会提交 2 条').waitFor();
+  assert.equal(await planDialog.getByText(/作品语境未就绪$/).count(),2);
   const [response]=await Promise.all([
     page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/local/content-understanding'),
-    page.getByRole('button',{name:'为缺 L1 的作品提交内容理解',exact:true}).click(),
+    planDialog.getByRole('button',{name:'补充作品语境',exact:true}).first().click(),
   ]);
   assert.equal(response.status(),202,await response.text());coreRef=(await response.json()).requestRef;
   const l1=await until(`/api/local/content-understanding/latest?domainRef=${domain}&workRef=${work}`,r=>r.analysis?.state==='succeeded');
@@ -85,45 +90,54 @@ try {
   assert.equal((await get(`${commentV2}/runs?domainRef=${domain}`)).runs.length,0);
  });
  await step('open the real unit receipt and cancel the in-flight synthetic run',async()=>{
-  await post(page.getByRole('button',{name:'预览所选评论',exact:true}),commentV2+'/preview');
-  const started=await post(page.getByRole('button',{name:'开始所选评论研究',exact:true}),commentV2+'/runs');
+  const planDialog=page.getByRole('dialog',{name:'本次研究预览',exact:true});
+  await post(planDialog.getByRole('button',{name:'重新预览',exact:true}),commentV2+'/preview');
+  const started=await post(planDialog.getByRole('button',{name:'提交 2 条研究',exact:true}),commentV2+'/runs');
   assert.equal(started.targetCount,2);assert.equal(started.unitCount,1);
   await until(`${commentV2}/runs/${started.batchRef}?domainRef=${domain}`,r=>r.units.some(unit=>unit.state==='running')&&r.usage.modelCalls===1);
-  await page.getByRole('button',{name:'查看研究记录',exact:true}).click();
+  // Submitting opens the records dialog with the new batch expanded.
+  await page.getByRole('dialog',{name:'研究记录',exact:true}).getByRole('region',{name:'运行回执'}).waitFor();
   await page.getByRole('button',{name:'取消运行',exact:true}).click();
   await post(page.getByRole('button',{name:'确认取消',exact:true}),commentV2+'/cancel');
   const run=await until(`${commentV2}/runs/${started.batchRef}?domainRef=${domain}`,r=>r.units.every(unit=>unit.state==='cancelled'));
   assert.equal(run.cancelRequested,true);assert.equal(run.targets[0].state,'cancelled');assert.deepEqual(run.retrySelections,[]);
   assert.equal(run.usage.modelCalls,1);assert.ok(run.usage.inputTokens>0);assert.ok(run.usage.outputTokens>0);
-  await page.getByRole('region',{name:'运行回执'}).getByText(/^已取消 · 2 条评论/).waitFor();
+  await page.getByRole('region',{name:'运行回执'}).getByText(/^已取消 · 2 条/).first().waitFor();
   await page.getByText('已请求取消。',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'关闭研究记录',exact:true}).click();
  });
  await step('start one unit for the selection and inspect a formal demand and its original voices',async()=>{
-  await page.getByRole('link',{name:'用户评论',exact:true}).click();
-  await post(page.getByRole('button',{name:'预览所选评论',exact:true}),commentV2+'/preview');
-  const started=await post(page.getByRole('button',{name:'开始所选评论研究',exact:true}),commentV2+'/runs');
+  await page.goto(`${origin}/corpus/comments?domain=${domain}&view=comments`);
+  await page.getByRole('button',{name:'选择评论',exact:true}).click();
+  await page.getByRole('button',{name:'按当前筛选生成研究清单',exact:true}).click();
+  await page.getByText('已检查当前筛选结果的前 2 条，选入 2 条。',{exact:true}).waitFor();
+  await post(page.getByRole('button',{name:/预览研究计划/}),commentV2+'/preview');
+  const started=await post(page.getByRole('dialog',{name:'本次研究预览',exact:true}).getByRole('button',{name:'提交 2 条研究',exact:true}),commentV2+'/runs');
   const run=await until(`${commentV2}/runs/${started.batchRef}?domainRef=${domain}`,r=>r.units.every(unit=>unit.state==='succeeded'));
   assert.equal(run.usage.modelCalls,1);
   const data=await until(`${commentV2}/problems?domainRef=${domain}`,r=>r.problems.length===1);
   assert.equal(data.problems[0].authorCount,2);
+  await page.getByRole('button',{name:'关闭研究记录',exact:true}).click();
   await page.getByRole('link',{name:'用户问题',exact:true}).click();
-  await page.getByRole('button',{name:'孩子需要每天有人提醒',exact:true}).click();
-  const detail=page.getByRole('dialog',{name:'孩子需要每天有人提醒',exact:true});
-  await detail.getByText('正式 · 2 位作者 · 2 条评论 · 1 个作品',{exact:true}).waitFor();
+  await page.getByRole('button',{name:'打开孩子需要每天有人提醒档案',exact:true}).click();
+  const detail=page.getByRole('dialog',{name:'用户问题档案',exact:true});
+  await detail.getByRole('heading',{name:'孩子需要每天有人提醒',exact:true}).waitFor();
+  await detail.getByText('已有 2 位独立作者支持，达到正式门槛（2 位）。',{exact:true}).waitFor();
   assert.equal(await detail.getByRole('blockquote').count(),2);
   await page.screenshot({path:path.join(directory,'comment-v2-demand-detail.png'),fullPage:true});
-  await detail.getByRole('button',{name:/查看原声/}).first().click();
-  const comment=page.getByRole('region',{name:'研究这条评论',exact:true});
-  await comment.getByRole('heading',{name:'作品 L1 语境'}).waitFor();
-  await comment.getByText(/评论者的孩子需要有人提醒/).waitFor();
-  await comment.getByText('提醒',{exact:true}).waitFor();
+  await detail.getByRole('button',{name:/^查看原声：/}).first().click();
+  const commentDrawer=page.getByRole('dialog',{name:'评论详情',exact:true});
+  const comment=commentDrawer.getByRole('region',{name:'研究这条评论',exact:true});
+  await commentDrawer.getByText(/评论者的孩子需要有人提醒/).waitFor();
+  await commentDrawer.locator('mark').filter({hasText:'提醒'}).first().waitFor();
+  await comment.waitFor();
  });
  await step('overview counts accepted V2 results and formal demand',async()=>{
   await page.goto(`${origin}/corpus/comments?domain=${domain}&view=overview`);
   await page.getByRole('region',{name:'评论研究概览',exact:true}).waitFor();
   const reading=await get(`${commentV2}/overview?domainRef=${domain}`);
   assert.equal(reading.researchSummary.succeededCommentCount,2);assert.equal(reading.researchSummary.currentSignalCount,2);assert.equal(reading.knowledgeSummary.problemCount,1);
-  await page.getByRole('heading',{name:'孩子需要每天有人提醒',exact:true}).waitFor();
+  await page.getByLabel('评论研究概览',{exact:true}).getByText('孩子需要每天有人提醒',{exact:true}).waitFor();
  });
  await step('creator work and explicit account sample use their own configured tasks',async()=>{
   await page.goto(`${origin}/corpus/creators?domain=${domain}`);
