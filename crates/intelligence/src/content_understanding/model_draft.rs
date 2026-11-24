@@ -11,8 +11,20 @@ pub const GUIDANCE_VERSION: &str = "content-understanding.l1.guidance.v1";
 pub fn material(snapshot: &Snapshot) -> Value {
     let mut material = json!(snapshot);
     if let Some(texts) = material["texts"].as_array_mut() {
-        for (index, text) in texts.iter_mut().enumerate() {
+        for (index, (text, source)) in texts.iter_mut().zip(&snapshot.texts).enumerate() {
             text["citationId"] = json!(format!("s{}", index + 1));
+            // The short ID resolves against the frozen snapshot. Keep repeated
+            // provenance and source-local offsets on the server for audio segments.
+            if source.kind == "transcript"
+                && let Some(fields) = text.as_object_mut()
+            {
+                for key in ["sourceRef", "sourceVersion", "start"] {
+                    fields.remove(key);
+                }
+                if source.issues.is_empty() {
+                    fields.remove("issues");
+                }
+            }
             if let Some(structure) = text["structure"].as_object_mut() {
                 structure.remove("ref");
             }
