@@ -1,0 +1,813 @@
+<script>
+/*
+ISC License
+
+Copyright (c) 2026 Lucide Icons and Contributors
+
+Permission to use, copy, modify, and/or distribute this software for any
+purpose with or without fee is hereby granted, provided that the above
+copyright notice and this permission notice appear in all copies.
+
+THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+---
+
+The following Lucide icons are derived from the Feather project:
+
+airplay, alert-circle, alert-octagon, alert-triangle, aperture, arrow-down-circle, arrow-down-left, arrow-down-right, arrow-down, arrow-left-circle, arrow-left, arrow-right-circle, arrow-right, arrow-up-circle, arrow-up-left, arrow-up-right, arrow-up, at-sign, calendar, cast, check, chevron-down, chevron-left, chevron-right, chevron-up, chevrons-down, chevrons-left, chevrons-right, chevrons-up, circle, clipboard, clock, code, columns, command, compass, corner-down-left, corner-down-right, corner-left-down, corner-left-up, corner-right-down, corner-right-up, corner-up-left, corner-up-right, crosshair, database, divide-circle, divide-square, dollar-sign, download, external-link, feather, frown, hash, headphones, help-circle, info, italic, key, layout, life-buoy, link-2, link, loader, lock, log-in, log-out, maximize, meh, minimize, minimize-2, minus-circle, minus-square, minus, monitor, moon, more-horizontal, more-vertical, move, music, navigation-2, navigation, octagon, pause-circle, percent, plus-circle, plus-square, plus, power, radio, rss, search, server, share, shopping-bag, sidebar, smartphone, smile, square, table-2, tablet, target, terminal, trash-2, trash, triangle, tv, type, upload, x-circle, x-octagon, x-square, x, zoom-in, zoom-out
+
+The MIT License (MIT) (for the icons listed above)
+
+Copyright (c) 2013-present Cole Bemis
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+*/
+const ICONS={"History":[["path",{"d":"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"}],["path",{"d":"M3 3v5h5"}],["path",{"d":"M12 7v5l4 2"}]],"Archive":[["rect",{"width":"20","height":"5","x":"2","y":"3","rx":"1"}],["path",{"d":"M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"}],["path",{"d":"M10 12h4"}]],"MessagesSquare":[["path",{"d":"M16 10a2 2 0 0 1-2 2H6.828a2 2 0 0 0-1.414.586l-2.202 2.202A.71.71 0 0 1 2 14.286V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"}],["path",{"d":"M20 9a2 2 0 0 1 2 2v10.286a.71.71 0 0 1-1.212.502l-2.202-2.202A2 2 0 0 0 17.172 19H10a2 2 0 0 1-2-2v-1"}]],"Users":[["path",{"d":"M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"}],["path",{"d":"M16 3.128a4 4 0 0 1 0 7.744"}],["path",{"d":"M22 21v-2a4 4 0 0 0-3-3.87"}],["circle",{"cx":"9","cy":"7","r":"4"}]],"Info":[["circle",{"cx":"12","cy":"12","r":"10"}],["path",{"d":"M12 16v-4"}],["path",{"d":"M12 8h.01"}]],"ArrowRight":[["path",{"d":"M5 12h14"}],["path",{"d":"m12 5 7 7-7 7"}]],"SlidersHorizontal":[["path",{"d":"M10 5H3"}],["path",{"d":"M12 19H3"}],["path",{"d":"M14 3v4"}],["path",{"d":"M16 17v4"}],["path",{"d":"M21 12h-9"}],["path",{"d":"M21 19h-5"}],["path",{"d":"M21 5h-7"}],["path",{"d":"M8 10v4"}],["path",{"d":"M8 12H3"}]],"ListChecks":[["path",{"d":"M13 5h8"}],["path",{"d":"M13 12h8"}],["path",{"d":"M13 19h8"}],["path",{"d":"m3 17 2 2 4-4"}],["path",{"d":"m3 7 2 2 4-4"}]],"X":[["path",{"d":"M18 6 6 18"}],["path",{"d":"m6 6 12 12"}]],"Search":[["path",{"d":"m21 21-4.34-4.34"}],["circle",{"cx":"11","cy":"11","r":"8"}]],"Check":[["path",{"d":"M20 6 9 17l-5-5"}]],"ArrowUpRight":[["path",{"d":"M7 7h10v10"}],["path",{"d":"M7 17 17 7"}]],"ChevronDown":[["path",{"d":"m6 9 6 6 6-6"}]],"ChevronRight":[["path",{"d":"m9 18 6-6-6-6"}]],"RefreshCw":[["path",{"d":"M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"}],["path",{"d":"M21 3v5h-5"}],["path",{"d":"M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"}],["path",{"d":"M8 16H3v5"}]],"AlertCircle":[["circle",{"cx":"12","cy":"12","r":"10"}],["line",{"x1":"12","x2":"12","y1":"8","y2":"12"}],["line",{"x1":"12","x2":"12.01","y1":"16","y2":"16"}]],"Clock":[["circle",{"cx":"12","cy":"12","r":"10"}],["path",{"d":"M12 6v6l4 2"}]],"RotateCcw":[["path",{"d":"M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"}],["path",{"d":"M3 3v5h5"}]],"CheckCircle2":[["circle",{"cx":"12","cy":"12","r":"10"}],["path",{"d":"m9 12 2 2 4-4"}]]};
+
+/* All names, comments, works and research records in this demo are synthetic. */
+(function () {
+  'use strict';
+
+  const works = [
+    { id: 'W-01', title: '孩子坐到书桌前，为什么还是开始不了', context: '作品讨论放学后的家庭作业启动：孩子已经理解任务，却迟迟没有行动。内容以减小第一步、固定准备顺序和减少反复催促为主。', l1Ready: true },
+    { id: 'W-02', title: '把一小时作业拆成看得见的小步骤', context: '作品介绍任务拆分与外部提示的方法，并提醒家长观察孩子在哪一步停下来。评论涉及任务启动、短时投入及中断后的重新开始。', l1Ready: true },
+    { id: 'W-03', title: '一声提示音，就把刚找到的专注打断了', context: '作品讨论学习环境中的声音、消息提醒等刺激，以及专注中断后重新进入任务的成本。没有把个别表现直接归因于诊断。', l1Ready: true },
+    { id: 'W-04', title: '练完之后，孩子需要怎样的反馈', context: '作品对比笼统评价与具体反馈，讨论怎样让孩子知道做对了什么、哪里需要调整，以及下一步可以如何尝试。', l1Ready: true },
+    { id: 'W-05', title: '错题放到周末再讲，还来得及吗', context: '作品讨论延迟讲解、错误原因回忆与复习安排。重点是及时保留思考过程，并给出能在下一次练习中使用的修正线索。', l1Ready: true },
+    { id: 'W-06', title: '昨天会做，今天换个问法又忘了', context: '作品讨论复习线索与知识迁移，区分短期记住答案和在新任务中调用方法。包含间隔复习与变式练习的日常例子。', l1Ready: true },
+    { id: 'W-07', title: '陪写到十点之后，家长也需要暂停', context: '', l1Ready: false },
+    { id: 'W-08', title: '那些让日常轻松一点的小办法', context: '', l1Ready: false }
+  ];
+
+  function signal(kind, proposition, quote, problemId) {
+    return { outcome: 'signals', kind, proposition, quote, problemId };
+  }
+  function contextNeeded(proposition) {
+    return { outcome: 'needs_context', kind: null, proposition, quote: '', problemId: null };
+  }
+  function noSignal(proposition) {
+    return { outcome: 'no_signal', kind: null, proposition, quote: '', problemId: null };
+  }
+  function comment(id, text, likes, workId, author, authorId, observedAt, latestExecution, currentResult) {
+    return { id, text, likes, workId, author, authorId, observedAt, likesDate: '2026-11-20', latestExecution, currentResult, marked: false };
+  }
+
+  const comments = [
+    comment('C-001', '书包打开了，笔也拿在手里了，还是要我一遍遍提醒才肯写第一题。每天最累的不是讲题，是陪他开始。', 3580, 'W-01', '林林妈妈', 'A-01', '2026-11-19T09:12:00+08:00', { state: 'succeeded', runId: 'R-1119-01' }, signal('困难场景', '家长需要反复提醒，孩子才能从准备阶段进入作业行动。', '还是要我一遍遍提醒才肯写第一题。', 'P-008')),
+    comment('C-002', '他说知道要写，也知道先写哪一科，可是坐了二十分钟纸上还是空的。我以前一直以为他是在故意拖。', 2416, 'W-01', '小岛妈妈', 'A-02', '2026-11-19T09:26:00+08:00', { state: 'succeeded', runId: 'R-1119-01' }, signal('困难场景', '知道任务顺序并未转化为行动，任务启动仍需要支持。', '坐了二十分钟纸上还是空的。', 'P-008')),
+    comment('C-003', '后来我们只约定先把日期写上，不说把整张卷子做完，他反而愿意动笔了。第一步真的要小一点。', 1850, 'W-02', '木木妈', 'A-03', '2026-11-18T20:14:00+08:00', { state: 'failed', runId: 'R-1120-04', failure: '本次请求超时，尚未取得新的结果。此前有效结果保留。' }, signal('办法与经历', '把任务缩小为写日期这一可执行动作，有助于启动作业。', '先把日期写上，不说把整张卷子做完，他反而愿意动笔了。', 'P-008')),
+    comment('C-004', '我家是每一步都等人说。换成三格小清单后，他会自己看看下一步是什么，至少开头不用一直催。', 1723, 'W-02', '慢慢学就好', 'A-04', '2026-11-18T19:43:00+08:00', { state: 'succeeded', runId: 'R-1119-01' }, signal('办法与经历', '可见的小清单减少了启动任务时对家长指令的依赖。', '换成三格小清单后，他会自己看看下一步是什么', 'P-008')),
+    comment('C-005', '昨天换了个方法，先陪他写两分钟再离开，比隔着客厅喊快写作业有用。还是得有人帮他迈出第一步。', 1480, 'W-01', '林林妈妈', 'A-01', '2026-11-19T10:02:00+08:00', { state: 'succeeded', runId: 'R-1119-01' }, signal('办法与经历', '短时间共同启动，比远距离催促更容易帮助孩子开始作业。', '先陪他写两分钟再离开，比隔着客厅喊快写作业有用。', 'P-008')),
+    comment('C-006', '刚进入状态，手机一响就完全断了。把手机放远只能少打断几次，重新坐回去还是要缓很久。', 1368, 'W-03', '北北的日常', 'A-05', '2026-11-19T10:18:00+08:00', { state: 'succeeded', runId: 'R-1119-01' }, signal('困难场景', '外部提醒打断专注后，重新进入任务需要较长时间。', '重新坐回去还是要缓很久。', 'P-014')),
+    comment('C-007', '我也试过分成十分钟，开始还行，中间有人叫一下，后面那一段就接不回去了。', 1155, 'W-02', '北北的日常', 'A-05', '2026-11-19T10:36:00+08:00', { state: 'succeeded', runId: 'R-1119-01' }, signal('困难场景', '即使任务已经分段，中断后仍难以恢复连续投入。', '中间有人叫一下，后面那一段就接不回去了。', 'P-014')),
+    comment('C-008', '只告诉他再认真一点，他根本不知道要改哪里。如果能当时指出哪一步算错，再试一道，效果好很多。', 980, 'W-04', '阿禾', 'A-06', '2026-11-20T10:08:00+08:00', { state: 'succeeded', runId: 'R-1120-03' }, signal('办法与经历', '即时指出具体错误步骤，有助于孩子理解下一步如何改进。', '当时指出哪一步算错，再试一道，效果好很多。', 'P-021')),
+    comment('C-009', '孩子写了一页，等了三天才知道哪里错。再问当时怎么想的，他早就忘了，只剩下又要重做的委屈。', 854, 'W-04', '晴天', 'A-07', '2026-11-20T10:22:00+08:00', { state: 'succeeded', runId: 'R-1120-03' }, signal('情绪体验', '反馈延迟导致思考过程难以回忆，并带来重复练习的挫败感。', '等了三天才知道哪里错。', 'P-021')),
+    comment('C-010', '周末整理错题的时候，连我都要重新看题。能当天说清楚，就尽量别攒到一周以后。', 722, 'W-05', '小鱼妈妈', 'A-08', '2026-11-20T11:05:00+08:00', { state: 'succeeded', runId: 'R-1120-03' }, signal('办法与经历', '集中到周末反馈增加了重新理解题目和错误过程的成本。', '能当天说清楚，就尽量别攒到一周以后。', 'P-021')),
+    comment('C-011', '现在我们只留一道典型错题，当天让他讲一遍为什么改。不是再抄一遍答案，得知道自己改的是哪一步。', 635, 'W-05', '阿禾', 'A-06', '2026-11-20T11:14:00+08:00', { state: 'succeeded', runId: 'R-1120-04' }, signal('办法与经历', '当天复述错误和改正步骤，比单纯抄答案提供了更具体的反馈。', '当天让他讲一遍为什么改。', 'P-021')),
+    comment('C-012', '昨天刚讲过，他也能自己做。今天把图换了个方向，就像从没见过一样，不知道怎么把昨天的方法用上。', 589, 'W-06', '一米阳光', 'A-09', '2026-11-20T11:26:00+08:00', { state: 'succeeded', runId: 'R-1120-03' }, signal('困难场景', '题目形式变化后，孩子难以回忆并迁移刚学过的方法。', '不知道怎么把昨天的方法用上。', 'P-027')),
+    comment('C-013', '我家也是，订正时明白了，隔天再做又不会。后来加了第二天的小复习，才发现他记住的是那道题的答案。', 463, 'W-05', '一米阳光', 'A-09', '2026-11-20T11:38:00+08:00', { state: 'succeeded', runId: 'R-1120-04' }, signal('困难场景', '订正后记忆偏向具体答案，尚未形成可以稳定调用的方法。', '订正时明白了，隔天再做又不会。', 'P-027')),
+    comment('C-014', '收藏了，晚上再慢慢看。', 326, 'W-01', '小满', 'A-10', '2026-11-19T11:03:00+08:00', { state: 'succeeded', runId: 'R-1119-01' }, noSignal('这条评论表达收藏意愿，没有提供可归纳的经历、困难或解决办法。')),
+    comment('C-015', '我们也一样，后来换了那个就好多了。', 214, 'W-03', '向日葵', 'A-11', '2026-11-19T11:18:00+08:00', { state: 'succeeded', runId: 'R-1119-01' }, contextNeeded('“那个”指代不清，需要父评论或更多上下文，才能判断具体做法及其效果。')),
+    comment('C-016', '这个年龄真的可以这样吗？我家才刚开始。', 197, 'W-06', '春生', 'A-12', '2026-11-20T12:10:00+08:00', { state: 'succeeded', runId: 'R-1120-03' }, contextNeeded('评论没有说明孩子年龄和所指方法，目前无法确定具体的问题场景。')),
+    comment('C-017', '最难的是我已经很累了，还要忍住不发火。有时候暂停十分钟，对我们两个人都好。', 178, 'W-07', '晚风', 'A-13', '2026-11-20T13:16:00+08:00', { state: 'never' }, null),
+    comment('C-018', '一说作业家里气氛就变了，我希望先把关系缓一缓，再谈效率。', 146, 'W-07', '柚子妈妈', 'A-14', '2026-11-20T13:28:00+08:00', { state: 'never' }, null),
+    comment('C-019', '把早上要带的东西前一晚放进同一个篮子，真的少找了很多次。', 132, 'W-08', '石榴', 'A-15', '2026-11-20T14:08:00+08:00', { state: 'never' }, null),
+    comment('C-020', '这个办法适合我们家，工具不用多，能一直用下去最重要。', 119, 'W-08', '小桥', 'A-16', '2026-11-20T14:24:00+08:00', { state: 'never' }, null),
+    comment('C-021', '一想到还有两张卷子就不愿意开始，先遮住后面的题，眼前只留一小块，会不会好一点？', 106, 'W-01', '橙子', 'A-17', '2026-11-20T17:02:00+08:00', { state: 'running', runId: 'R-1120-05' }, null),
+    comment('C-022', '关掉提醒之后确实安静了，但楼道里的脚步声还是会让他抬头。', 92, 'W-03', '白露', 'A-18', '2026-11-20T17:08:00+08:00', { state: 'running', runId: 'R-1120-05' }, null),
+    comment('C-023', '每次都是打一个叉，孩子不知道是理解错了还是计算错了。我想把反馈说得更具体一些。', 86, 'W-05', '青禾', 'A-19', '2026-11-20T11:30:00+08:00', { state: 'failed', runId: 'R-1120-02', failure: '本次返回内容不完整，没有写入研究结果。可以重试这一研究单元。' }, null),
+    comment('C-024', '今天只写了三个步骤在纸上，他第一次自己划掉了第一项。虽然做得不多，但看得见自己在前进。', 74, 'W-02', '山茶', 'A-20', '2026-11-20T17:20:00+08:00', { state: 'never' }, null)
+  ];
+
+  const problemDefinitions = [
+    { id: 'P-008', emblem: 'phoenix', code: '25K', scan: '01 / 04', orbX: '27%', codeX: '35.5%', orbSize: 78, orbY: -19, date: '2026.11.20', title: '家庭作业启动困难', desc: '孩子知道需要完成作业，但难以从意图转入行动，往往需要持续的外部提醒。', actor: '小学阶段孩子及其家庭支持者', goal: '开始并持续完成家庭作业', barrier: '任务启动困难；第一步不够明确；依赖持续外部提醒', context: '放学后、晚间家庭作业与自主学习场景' },
+    { id: 'P-014', emblem: 'dragon', code: '1FA', scan: '02 / 04', orbX: '36%', codeX: '44%', orbSize: 70, orbY: -16, date: '2026.11.19', title: '长期专注容易中断', desc: '需要持续投入时容易被外部刺激打断，重新进入任务的成本较高。', actor: '需要持续投入学习任务的人', goal: '维持连续的注意与任务投入', barrier: '外部刺激容易中断注意；任务恢复需要额外时间', context: '长时间学习、阅读与连续练习场景' },
+    { id: 'P-021', emblem: 'tortoise', code: '32B', scan: '03 / 04', orbX: '32%', codeX: '40%', orbSize: 75, orbY: -20, date: '2026.11.20', title: '学习反馈不够及时', desc: '完成任务后缺少及时、具体的反馈，难以回忆错误原因并明确改进方向。', actor: '需要通过练习提升能力的学习者', goal: '及时理解表现并明确下一步改进方向', barrier: '反馈延迟；评价笼统；缺少可执行的修正线索', context: '课后练习、作业订正与阶段性学习评价' },
+    { id: 'P-027', emblem: 'tiger', code: '09C', scan: '04 / 04', orbX: '54%', codeX: '39%', orbSize: 67, orbY: -14, date: '2026.11.20', title: '知识容易遗忘', desc: '学习后难以稳定回忆和迁移所学方法，换一种题目形式就容易卡住。', actor: '需要在不同任务中调用知识的学习者', goal: '在需要时回忆并使用已学过的方法', barrier: '记忆保持不稳定；复习线索不足；知识迁移困难', context: '隔天复习、变式练习与综合应用场景' }
+  ];
+  const problems = problemDefinitions.map(function (definition) {
+    const evidence = comments.filter(function (item) {
+      return item.currentResult && item.currentResult.outcome === 'signals' && item.currentResult.problemId === definition.id;
+    });
+    const authorCount = new Set(evidence.map(function (item) { return item.authorId; }).filter(Boolean)).size;
+    return Object.assign({}, definition, {
+      authors: authorCount,
+      comments: evidence.length,
+      works: new Set(evidence.map(function (item) { return item.workId; })).size,
+      state: authorCount >= 2 ? 'formal' : 'candidate',
+      evidenceIds: evidence.map(function (item) { return item.id; })
+    });
+  });
+
+  function completedUnit(id, workId, commentIds) {
+    const targets = commentIds.map(function (commentId) { return comments.find(function (item) { return item.id === commentId; }); });
+    return {
+      id, workId, commentIds, state: 'completed',
+      signalCount: targets.filter(function (item) { return item.currentResult && item.currentResult.outcome === 'signals'; }).length,
+      contextCount: targets.filter(function (item) { return item.currentResult && item.currentResult.outcome === 'needs_context'; }).length,
+      noSignalCount: targets.filter(function (item) { return item.currentResult && item.currentResult.outcome === 'no_signal'; }).length,
+      error: null
+    };
+  }
+  function pendingUnit(id, workId, commentIds, state, error) {
+    return { id, workId, commentIds, state, signalCount: 0, contextCount: 0, noSignalCount: 0, error: error || null };
+  }
+  const runs = [
+    { id: 'R-1120-05', createdAt: '2026-11-20T18:32:00+08:00', state: 'running', units: [pendingUnit('U-05-01', 'W-01', ['C-021'], 'running'), pendingUnit('U-05-02', 'W-03', ['C-022'], 'queued')], usage: { calls: 1, inputTokens: 1048, outputTokens: 0 } },
+    { id: 'R-1120-04', createdAt: '2026-11-20T18:26:00+08:00', state: 'partial', units: [pendingUnit('U-04-01', 'W-02', ['C-003'], 'failed', '请求超时，未取得新结果；原有效结果保留。'), completedUnit('U-04-02', 'W-05', ['C-011', 'C-013'])], usage: { calls: 2, inputTokens: 2314, outputTokens: 816 } },
+    { id: 'R-1120-03', createdAt: '2026-11-20T18:12:00+08:00', state: 'completed', units: [completedUnit('U-03-01', 'W-04', ['C-008', 'C-009']), completedUnit('U-03-02', 'W-05', ['C-010']), completedUnit('U-03-03', 'W-06', ['C-012', 'C-016'])], usage: { calls: 3, inputTokens: 3876, outputTokens: 1694 } },
+    { id: 'R-1120-02', createdAt: '2026-11-20T17:58:00+08:00', state: 'failed', units: [pendingUnit('U-02-01', 'W-05', ['C-023'], 'failed', '返回内容不完整，未写入研究结果。')], usage: { calls: 1, inputTokens: 984, outputTokens: 126 } },
+    { id: 'R-1119-01', createdAt: '2026-11-19T14:12:00+08:00', state: 'completed', units: [completedUnit('U-01-01', 'W-01', ['C-001', 'C-002', 'C-005', 'C-014']), completedUnit('U-01-02', 'W-02', ['C-003', 'C-004', 'C-007']), completedUnit('U-01-03', 'W-03', ['C-006', 'C-015'])], usage: { calls: 3, inputTokens: 4102, outputTokens: 2187 } }
+  ];
+
+  /* Stable selection IDs, grouped by work. Each ready unit contains at most 20 comments.
+     Active comments and works without L1 are excluded from this submission only.
+     A previously successful comment remains eligible for another research attempt. */
+  function derivePlan(ids, commentsOverride = comments) {
+    const requested = new Set(Array.from(ids || []));
+    const selected = commentsOverride.filter(function (item) { return requested.has(item.id); });
+    const groupsByWork = new Map();
+    selected.forEach(function (item) {
+      if (!groupsByWork.has(item.workId)) {
+        groupsByWork.set(item.workId, { workId: item.workId, commentIds: [], eligibleIds: [], waitingIds: [], activeIds: [], unitsCount: 0 });
+      }
+      const group = groupsByWork.get(item.workId);
+      const work = works.find(function (record) { return record.id === item.workId; });
+      group.commentIds.push(item.id);
+      if (item.latestExecution && item.latestExecution.state === 'running') group.activeIds.push(item.id);
+      else if (!work || !work.l1Ready) group.waitingIds.push(item.id);
+      else { group.eligibleIds.push(item.id); if (item.currentResult) (group.rerunIds = group.rerunIds || []).push(item.id); }
+    });
+    const groups = Array.from(groupsByWork.values());
+    const units = [];
+    groups.forEach(function (group) {
+      for (let start = 0; start < group.eligibleIds.length; start += 20) {
+        units.push({ workId: group.workId, commentIds: group.eligibleIds.slice(start, start + 20) });
+      }
+      group.unitsCount = Math.ceil(group.eligibleIds.length / 20);
+    });
+    const waitingIds = groups.flatMap(function (group) { return group.waitingIds; });
+    const activeIds = groups.flatMap(function (group) { return group.activeIds; });
+    const researchableCount = units.reduce(function (total, unit) { return total + unit.commentIds.length; }, 0);
+    const rerunIds = groups.flatMap(function (group) { return group.rerunIds || []; });
+    return {
+      selectedCount: selected.length,
+      researchableCount,
+      excludedCount: waitingIds.length + activeIds.length,
+      waitingCount: waitingIds.length,
+      activeCount: activeIds.length,
+      workCount: groups.length,
+      unitCount: units.length,
+      callCount: units.length,
+      rerunCount: rerunIds.length,
+      groups, units, waitingIds, activeIds, rerunIds
+    };
+  }
+
+  function summarize() {
+    const results = comments.filter(function (item) { return Boolean(item.currentResult); });
+    const allPlan = derivePlan(comments.map(function (item) { return item.id; }));
+    return {
+      // All 24 synthetic comments have been indexed and passed semantic eligibility.
+      total: comments.length, indexed: comments.length, eligible: comments.length,
+      // entered: ever submitted, including current failures and active executions.
+      entered: comments.filter(function (item) { return item.latestExecution.state !== 'never'; }).length,
+      // studied: a current successful result exists; a later failed retry does not remove it.
+      studied: results.length,
+      signals: results.filter(function (item) { return item.currentResult.outcome === 'signals'; }).length,
+      needsContext: results.filter(function (item) { return item.currentResult.outcome === 'needs_context'; }).length,
+      noSignal: results.filter(function (item) { return item.currentResult.outcome === 'no_signal'; }).length,
+      researchable: allPlan.researchableCount,
+      waiting: allPlan.waitingCount,
+      activeComments: allPlan.activeCount,
+      failedComments: comments.filter(function (item) { return item.latestExecution.state === 'failed'; }).length,
+      works: works.length,
+      problems: problems.length,
+      formal: problems.filter(function (item) { return item.state === 'formal'; }).length,
+      candidate: problems.filter(function (item) { return item.state === 'candidate'; }).length,
+      activeRuns: runs.filter(function (item) { return item.state === 'running'; }).length,
+      attentionRuns: runs.filter(function (item) { return item.state === 'failed' || item.state === 'partial'; }).length,
+      runningNoResult: comments.filter(function (item) { return !item.currentResult && item.latestExecution.state === 'running'; }).length,
+      failedNoResult: comments.filter(function (item) { return !item.currentResult && item.latestExecution.state === 'failed'; }).length,
+      never: comments.filter(function (item) { return item.latestExecution.state === 'never'; }).length,
+      coverage: comments.length ? Math.round(results.length / comments.length * 1000) / 10 : 0
+    };
+  }
+
+  window.DemoData = { works, comments, problems, runs, derivePlan, get summary() { return summarize(); } };
+}());
+
+const PA_PIX={
+ "0":["11111","10001","10011","10101","11001","10001","11111"],"1":["00100","01100","00100","00100","00100","00100","01110"],
+ "2":["11110","00001","00001","01110","10000","10000","11111"],"3":["11110","00001","00001","01110","00001","00001","11110"],
+ "4":["10010","10010","10010","11111","00010","00010","00010"],"5":["11111","10000","10000","11110","00001","00001","11110"],
+ "6":["01111","10000","10000","11110","10001","10001","01110"],"7":["11111","00001","00010","00100","01000","01000","01000"],
+ "8":["01110","10001","10001","01110","10001","10001","01110"],"9":["01110","10001","10001","01111","00001","00001","11110"],
+ "A":["01110","10001","10001","11111","10001","10001","10001"],"B":["11110","10001","10001","11110","10001","10001","11110"],
+ "C":["01111","10000","10000","10000","10000","10000","01111"],"F":["11111","10000","10000","11110","10000","10000","10000"],
+ "K":["10001","10010","10100","11000","10100","10010","10001"]
+};
+function paPixelSVG(code){
+ const cell=6.1;let rects="";
+ [...code].forEach((ch,ci)=>{const rows=PA_PIX[ch]||PA_PIX["0"];rows.forEach((row,ri)=>{[...row].forEach((bit,bi)=>{if(bit==="1"){const x=ci*37.8+bi*cell,y=ri*cell;rects+=`<rect x="${x}" y="${y}" width="${cell-.7}" height="${cell-.7}" rx=".3"/>`;}});});});
+ const width=code.length*37.8-7.3;
+ return `<svg viewBox="0 0 ${width} 44" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><g style="fill:var(--lgi-cr-banner-pixel)" opacity=".96">${rects}</g></svg>`;
+}
+
+const PA_PARTICLE_DOTS = [
+ [250,26,1.0,'var(--lgi-cr-particle-dark)',.46],[253,34,.8,'var(--lgi-signal-mark)',.48],[256,20,.75,'var(--lgi-cr-particle-light)',.45],
+ [261,30,.95,'var(--lgi-cr-particle-dark)',.44],[266,23,.75,'var(--lgi-cr-particle-dark)',.38],[269,38,.8,'var(--lgi-cr-particle-light)',.38],
+ [275,18,.85,'var(--lgi-cr-particle-dark)',.42],[278,31,1.05,'var(--lgi-cr-particle-dark)',.48],[284,25,.8,'var(--lgi-signal-mark)',.42],
+ [290,37,.75,'var(--lgi-cr-particle-dark)',.36],[296,20,.9,'var(--lgi-cr-particle-dark)',.4],[301,29,.95,'var(--lgi-cr-particle-light)',.36],
+ [307,17,.8,'var(--lgi-cr-particle-dark)',.36],[312,34,.85,'var(--lgi-cr-particle-dark)',.42],[318,25,.75,'var(--lgi-signal-mark)',.4],
+ [324,39,.8,'var(--lgi-cr-particle-dark)',.32],[330,22,.85,'var(--lgi-cr-particle-light)',.34],[336,31,.75,'var(--lgi-cr-particle-dark)',.34],
+ [342,26,.7,'var(--lgi-cr-particle-dark)',.28],[348,36,.65,'var(--lgi-cr-particle-light)',.28],
+ [258,43,.65,'var(--lgi-cr-particle-light)',.3],[272,13,.65,'var(--lgi-cr-particle-dark)',.28],[287,44,.7,'var(--lgi-signal-mark)',.32],
+ [304,43,.65,'var(--lgi-cr-particle-dark)',.27],[321,13,.65,'var(--lgi-cr-particle-dark)',.28],[339,17,.6,'var(--lgi-cr-particle-light)',.27]
+];
+function paParticleWakeSVG(){
+ const dots=PA_PARTICLE_DOTS.map(([x,y,r,fill,opacity])=>`<circle cx="${x}" cy="${y}" r="${r}" style="fill:${fill}" opacity="${opacity}"/>`).join('');
+ return `<svg class="pa-particle-flow" viewBox="0 0 420 56" preserveAspectRatio="none" aria-hidden="true"><g>${dots}</g></svg>`;
+}
+/* Standalone local prototype. All interactions use the embedded synthetic dataset. */
+
+/* SelectField（与 apps/web/src/shared/SelectField 同一交互与样式；落地时直接用组件） */
+(function(){
+  const desc=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value');
+  Object.defineProperty(HTMLSelectElement.prototype,'value',{configurable:true,get(){return desc.get.call(this);},set(v){desc.set.call(this,v);if(this._sfSync)this._sfSync();}});
+  let open=null,seq=0;
+  function close(focus){if(!open)return;const o=open;open=null;o.menu.remove();o.trigger.setAttribute('aria-expanded','false');o.trigger.removeAttribute('aria-activedescendant');if(focus)o.trigger.focus({preventScroll:true});}
+  function choose(o,i){const opt=o.select.options[i];if(!opt||opt.disabled)return;if(o.select.value!==opt.value){o.select.value=opt.value;o.select.dispatchEvent(new Event('change',{bubbles:true}));}close(true);}
+  function paint(o){[...o.menu.children].forEach((n,i)=>n.dataset.active=String(i===o.active));const n=o.menu.children[o.active];if(n){o.trigger.setAttribute('aria-activedescendant',n.id);n.scrollIntoView({block:'nearest'});}}
+  function show(select,trigger){
+    close(false);const id='sf-'+(++seq),menu=document.createElement('div');menu.className='sf-menu';menu.id=id;menu.setAttribute('role','listbox');
+    const o={select,trigger,menu,active:Math.max(0,select.selectedIndex)};
+    [...select.options].forEach((opt,i)=>{const n=document.createElement('div');n.id=id+'-'+i;n.setAttribute('role','option');n.setAttribute('aria-selected',String(i===select.selectedIndex));if(opt.disabled)n.setAttribute('aria-disabled','true');n.innerHTML='<span></span><span aria-hidden="true"></span>';n.firstChild.textContent=opt.textContent;n.lastChild.textContent=i===select.selectedIndex?'✓':'';n.addEventListener('mousedown',e=>e.preventDefault());n.addEventListener('click',()=>choose(o,i));n.addEventListener('mousemove',()=>{o.active=i;paint(o);});menu.appendChild(n);});
+    (trigger.closest('dialog')||document.body).appendChild(menu);
+    const r=trigger.getBoundingClientRect();menu.style.minWidth=r.width+'px';
+    const below=window.innerHeight-r.bottom;menu.style.left=Math.min(r.left,window.innerWidth-menu.offsetWidth-12)+'px';
+    menu.style.top=(below<menu.offsetHeight+12&&r.top>menu.offsetHeight?r.top-menu.offsetHeight-4:r.bottom+4)+'px';
+    trigger.setAttribute('aria-expanded','true');trigger.setAttribute('aria-controls',id);open=o;paint(o);
+  }
+  function enhance(select){
+    if(select._sfSync||select.hidden)return;
+    const wrap=document.createElement('span');wrap.className='sf-select';if(select.closest('.search-shell'))wrap.dataset.compact='true';
+    const trigger=document.createElement('button');trigger.type='button';trigger.className='sf-trigger';trigger.setAttribute('role','combobox');trigger.setAttribute('aria-haspopup','listbox');trigger.setAttribute('aria-expanded','false');
+    trigger.innerHTML='<span class="sf-value"></span><span class="sf-chevron" aria-hidden="true">⌄</span>';
+    const label=select.id&&document.querySelector('label[for="'+select.id+'"]');
+    trigger.setAttribute('aria-label',select.getAttribute('aria-label')||(label?label.textContent.trim():''));
+    if(label&&select.id){trigger.id=select.id+'-trigger';label.htmlFor=trigger.id;}
+    select.after(wrap);wrap.append(trigger,select);select.classList.add('sf-native');select.tabIndex=-1;select.setAttribute('aria-hidden','true');
+    select._sfSync=()=>{const opt=select.options[select.selectedIndex];trigger.querySelector('.sf-value').textContent=opt?opt.textContent:'';trigger.querySelector('.sf-value').title=opt?opt.textContent:'';};
+    select.addEventListener('change',select._sfSync);select._sfSync();
+    trigger.addEventListener('click',()=>open&&open.trigger===trigger?close(true):show(select,trigger));
+    trigger.addEventListener('keydown',e=>{
+      if(!open||open.trigger!==trigger){if(['ArrowDown','ArrowUp','Enter',' '].includes(e.key)){e.preventDefault();show(select,trigger);}return;}
+      const o=open,n=select.options.length;
+      if(e.key==='ArrowDown'){e.preventDefault();o.active=(o.active+1)%n;paint(o);}
+      else if(e.key==='ArrowUp'){e.preventDefault();o.active=(o.active-1+n)%n;paint(o);}
+      else if(e.key==='Home'){e.preventDefault();o.active=0;paint(o);}else if(e.key==='End'){e.preventDefault();o.active=n-1;paint(o);}
+      else if(e.key==='Enter'||e.key===' '){e.preventDefault();choose(o,o.active);}
+      else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();close(true);}
+      else if(e.key==='Tab')close(false);
+    });
+  }
+  document.addEventListener('mousedown',e=>{if(open&&!open.menu.contains(e.target)&&!open.trigger.contains(e.target))close(false);},true);
+  document.addEventListener('scroll',e=>{if(open&&!open.menu.contains(e.target))close(false);},true);
+  window.addEventListener('resize',()=>close(false));
+  window.SelectField={enhanceAll(root=document){root.querySelectorAll('select').forEach(enhance);}};
+})();
+window.App = (function () {
+  'use strict';
+  const data = window.DemoData;
+  const el = id => document.getElementById(id);
+  const state = { view:'overview', selecting:false, selected:new Set(), workId:null, problemId:null, page:1, pageSize:10, filterSig:'', days:'fit', chartMode:'chart', word:'all', previewIds:new Set(), previewReturn:null, inspector:null, inspectorHistory:[], scroll:{overview:0,comments:0,problems:0}, currentEnd:'2026-11-20', updatedAt:'2026-11-20T18:39:00+08:00', simulation:null, submitting:false };
+  const modalMeta = new WeakMap();
+  let toastTimer, runSequence = 6;
+  const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt = n => Number(n || 0).toLocaleString('zh-CN');
+  function date(value) { const d=new Date(value);if(Number.isNaN(d.getTime()))return '—';const p=Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Taipei',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}).formatToParts(d).map(x=>[x.type,x.value]));return `${p.year}/${p.month}/${p.day} ${p.hour}:${p.minute}`; }
+  function icon(name) { return '<svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+(ICONS[name]||ICONS.Info).map(([tag,attrs])=>'<'+tag+' '+Object.entries(attrs).map(([k,v])=>k+'="'+escape(v)+'"').join(' ')+'></'+tag+'>').join('')+'</svg>'; }
+  function fillIcons(root=document) { root.querySelectorAll('span[data-icon]').forEach(n=>{n.innerHTML=icon(n.dataset.icon);n.removeAttribute('data-icon');}); }
+  const work = id => data.works.find(w=>w.id===id);
+  const comment = id => data.comments.find(c=>c.id===id);
+  const problem = id => data.problems.find(p=>p.id===id);
+  const selectedPlan = () => data.derivePlan(state.selected);
+  function focusDescriptor(node) {
+    if(!(node instanceof HTMLElement))return null;
+    if(node.id)return {id:node.id};
+    const keys=['data-select-id','data-comment-id','data-problem-id','data-mark-id','data-related-comment','data-related-problem','data-work-filter','data-word-query'];
+    const key=keys.find(k=>node.hasAttribute(k));return key?{key,value:node.getAttribute(key),tag:node.tagName}:null;
+  }
+  function resolveFocus(ref) {
+    if(!ref)return null;if(ref.id)return el(ref.id);
+    return [...document.querySelectorAll('['+ref.key+']')].find(n=>n.tagName===ref.tag&&n.getAttribute(ref.key)===ref.value&&!n.closest('.view:not(.active)')&&!n.closest('dialog:not([open])'))||null;
+  }
+  const visibleComments = () => {
+    const q=el('search').value.trim().toLowerCase(), scope=el('searchScope').value, status=el('statusFilter').value, tag=el('tagFilter').value, min=Math.max(0,Number(el('minLikes').value)||0), mark=el('markFilter').value;
+    return data.comments.filter(c=>{
+      const r=c.currentResult,s=c.latestExecution.state,t=scope==='work'?work(c.workId).title:c.text;
+      return (!q||t.toLowerCase().includes(q))&&(!state.workId||c.workId===state.workId)&&(!state.problemId||(r?.outcome==='signals'&&r.problemId===state.problemId))&&c.likes>=min&&(mark==='all'||(mark==='marked'?c.marked:!c.marked))&&
+        (tag==='all'||(tag==='no_signal'?r?.outcome==='no_signal':r?.kind===tag))&&
+        (status==='all'||(status==='result'?!!r:status==='needs_context'?r?.outcome==='needs_context':s===status));
+    }).sort((a,b)=>el('commentSort').value==='recent'?b.observedAt.localeCompare(a.observedAt):b.likes-a.likes);
+  };
+  function statusInfo(c) {
+    if(c.latestExecution.state==='running')return {label:c.currentResult?'研究中 · 有结果':'研究中',cls:'running'};
+    if(c.latestExecution.state==='failed')return {label:c.currentResult?'最近失败 · 有结果':'最近失败',cls:'bad'};
+    if(c.currentResult?.outcome==='needs_context')return {label:'需要语境',cls:'wait'};
+    if(c.currentResult?.outcome==='no_signal')return {label:'已研究 · 无信号',cls:'good'};
+    if(c.currentResult)return {label:'已有结果',cls:'good'};
+    return {label:'尚未研究',cls:''};
+  }
+  function recomputeProblems() {
+    data.problems.forEach(p=>{
+      const evidence=data.comments.filter(c=>c.currentResult?.outcome==='signals'&&c.currentResult.problemId===p.id);
+      p.evidenceIds=evidence.map(c=>c.id);p.authors=new Set(evidence.map(c=>c.authorId).filter(Boolean)).size;p.comments=evidence.length;p.works=new Set(evidence.map(c=>c.workId)).size;p.state=p.authors>=2?'formal':'candidate';
+    });
+  }
+  function toast(message) {
+    clearTimeout(toastTimer);const node=el('toast'), dialogs=[...document.querySelectorAll('dialog[open]')];(dialogs.at(-1)||document.body).appendChild(node);node.textContent=message;node.hidden=false;
+    toastTimer=setTimeout(()=>{node.hidden=true;document.body.appendChild(node);},3500);
+  }
+  function openModal(dialog,trigger) {
+    if(dialog.open)return;
+    document.querySelectorAll('dialog[open]').forEach(other=>closeModal(other,{restore:false}));
+    const focusTarget=trigger instanceof HTMLElement?trigger:document.activeElement;
+    modalMeta.set(dialog,{trigger:focusTarget,focusRef:focusDescriptor(focusTarget),restore:true});
+    document.body.classList.add('modal-open');dialog.showModal();
+    if(dialog.id==='recordsDialog')el('recordsEntry').setAttribute('aria-expanded','true');
+  }
+  function closeModal(dialog,options={}) {
+    if(!dialog.open)return;const meta=modalMeta.get(dialog);if(meta&&options.restore===false)meta.restore=false;dialog.close();
+  }
+  function initializeModals() {
+    document.querySelectorAll('dialog').forEach(dialog=>{
+      dialog.addEventListener('cancel',event=>{event.preventDefault();if(dialog.id==='previewDialog')closePreview();else closeModal(dialog);});
+      dialog.addEventListener('click',event=>{if(event.target!==dialog)return;const r=dialog.getBoundingClientRect();if(event.clientX<r.left||event.clientX>r.right||event.clientY<r.top||event.clientY>r.bottom){if(dialog.id==='previewDialog')closePreview();else closeModal(dialog);}});
+      dialog.addEventListener('close',()=>{
+        document.body.classList.toggle('modal-open',!!document.querySelector('dialog[open]'));
+        if(dialog.id==='recordsDialog')el('recordsEntry').setAttribute('aria-expanded','false');
+        if(dialog.contains(el('toast')))document.body.appendChild(el('toast'));
+        const meta=modalMeta.get(dialog);
+        if(meta?.restore&&!document.querySelector('dialog[open]')){
+          let target=meta.trigger?.isConnected?meta.trigger:resolveFocus(meta.focusRef);
+          if(!target?.isConnected||target.closest('dialog:not([open])')||target.closest('.view:not(.active)'))target=el('recordsEntry');
+          target.focus({preventScroll:true});
+        }
+      });
+    });
+  }
+  function switchView(view,opts={}) {
+    if(!['overview','comments','problems'].includes(view))return;
+    state.scroll[state.view]=document.getElementById('main').scrollTop;state.view=view;
+    document.querySelectorAll('.view').forEach(n=>n.classList.toggle('active',n.id===view));
+    document.querySelectorAll('[data-view]').forEach(b=>{const active=b.dataset.view===view;b.classList.toggle('active',active);if(active)b.setAttribute('aria-current','page');else b.removeAttribute('aria-current');});
+    el('crumbView').textContent=({overview:'概览',comments:'用户评论',problems:'用户问题'})[view];
+    document.title=el('crumbView').textContent+' · 评论研究 · Linggan Intelligence';
+    if(view==='comments')renderComments();if(view==='problems')renderProblems();
+    document.getElementById('main').scrollTo({top:opts.top?0:(state.scroll[view]||0),behavior:'instant'});
+  }
+  function renderOverview() {
+    const s=data.summary;
+    el('dataUpdatedAt').textContent=date(state.updatedAt);
+    el('metricEligible').textContent=fmt(s.eligible);el('metricRaw').textContent=`已有 ${fmt(s.total)} 条原始评论 · ${fmt(s.total-s.indexed)} 条待索引`;
+    el('metricEntered').textContent=fmt(s.entered);el('metricResults').textContent=`${fmt(s.studied)} 条已有结果`;el('metricCoverage').textContent=`结果覆盖 ${s.coverage}%`;
+    renderResearchBar(s);el('metricSignals').textContent=fmt(s.signals);el('metricProblems').textContent=fmt(data.problems.length);el('metricProblemState').textContent=`正式 ${s.formal} · 候选 ${s.candidate}`;
+    el('candidateText').textContent=`${s.candidate} 个候选问题等待独立支持`;
+    el('recentSignals').innerHTML=data.comments.filter(c=>c.currentResult?.outcome==='signals').slice().sort((a,b)=>b.observedAt.localeCompare(a.observedAt)).slice(0,3).map(c=>`<div class="signal-row"><div><p>${escape(c.currentResult.proposition)}</p><small>${escape(c.currentResult.kind)} · ${escape(c.author)}</small></div><button class="btn quiet small" data-comment-id="${c.id}" aria-label="查看${escape(c.author)}的原声">原声 ${icon('ArrowUpRight')}</button></div>`).join('');
+    el('overviewProblems').innerHTML=data.problems.slice().sort((a,b)=>b.authors-a.authors).slice(0,2).map(p=>`<div class="problem-row"><div><p>${escape(p.title)}</p><small>${p.state==='formal'?'正式问题':'候选问题'} · ${p.authors} 位作者 · ${p.works} 篇作品</small></div><button class="btn quiet small" data-problem-id="${p.id}" aria-label="查看${escape(p.title)}的证据">证据 ${icon('ArrowUpRight')}</button></div>`).join('');
+    renderTrend();renderWords();
+  }
+  function researchSegments(s) {
+    return [['有结果',s.studied,'done'],['研究中',s.runningNoResult,'running'],['最近失败',s.failedNoResult,'failed'],['未研究',s.never,'never']];
+  }
+  function renderResearchBar(s) {
+    const seg=researchSegments(s),total=Math.max(1,s.total);
+    el('researchBar').innerHTML=seg.map(([label,n,cls])=>n?`<i class="${cls}" style="width:${n/total*100}%" title="${label} ${fmt(n)} 条"></i>`:'').join('');
+    el('researchBar').setAttribute('aria-label',`可研究评论 ${fmt(s.total)} 条：`+seg.map(([label,n])=>`${label} ${fmt(n)} 条`).join('，'));
+    el('researchLegend').innerHTML=seg.map(([label,n,cls])=>`<span><i class="${cls}"></i>${label} <b>${fmt(n)}</b></span>`).join('');
+  }
+  function rangeDays() {
+    if(state.days!=='fit')return state.days;
+    const first=data.comments.map(c=>c.observedAt.slice(0,10)).sort()[0];
+    const span=Math.round((Date.parse(state.currentEnd)-Date.parse(first))/864e5)+1;
+    return Math.max(7,span+2);
+  }
+  function dayData() {
+    const end=new Date(state.currentEnd+'T00:00:00Z'),rows=[];
+    for(let i=rangeDays()-1;i>=0;i--){const day=new Date(end);day.setUTCDate(day.getUTCDate()-i);const key=day.toISOString().slice(0,10);rows.push({date:key,comments:data.comments.filter(c=>c.observedAt.slice(0,10)===key).length,signals:0,coverage:'无记录'});}
+    data.runs.forEach(r=>r.units.filter(u=>u.state==='completed').forEach(u=>{const day=date(u.finishedAt||r.createdAt).slice(0,10).replaceAll('/','-');const row=rows.find(x=>x.date===day);if(row)row.signals+=u.signalCount||0;}));
+    rows.forEach(row=>{const c=data.comments.filter(x=>x.observedAt.slice(0,10)===row.date);row.coverage=c.length?(c.every(x=>work(x.workId).l1Ready)?'完整':'部分'):'无记录';});return rows;
+  }
+  function renderTrend() {
+    const rows=dayData(),maxC=Math.max(2,...rows.map(x=>x.comments)),maxS=Math.max(2,...rows.map(x=>x.signals));
+    const ceilMax=n=>Math.ceil(n/2)*2,cMax=ceilMax(maxC),sMax=ceilMax(maxS),W=Math.max(320,Math.round(el('trendChart').clientWidth||1000)),H=Math.max(150,Math.round(el('trendChart').clientHeight||194)),left=40,right=W-40,top=30,bottom=H-46,w=right-left,h=bottom-top,step=w/rows.length,band=bottom+9,tick=H-10;
+    const points=rows.map((r,i)=>[left+(i+.5)*step,bottom-h*r.signals/sMax]);let path=`M${points[0][0]},${points[0][1]}`;
+    for(let i=1;i<points.length;i++){const a=points[i-1],b=points[i],mid=(a[0]+b[0])/2;path+=` C${mid},${a[1]} ${mid},${b[1]} ${b[0]},${b[1]}`;}
+    const area=path+` L${points.at(-1)[0]},${bottom} L${points[0][0]},${bottom} Z`;
+    const tickEvery=rows.length<=14?1:Math.ceil((rows.length-1)/6),tickIndexes=rows.map((_,i)=>i).filter(i=>(rows.length-1-i)%tickEvery===0);
+    const cTotal=rows.reduce((n,r)=>n+r.comments,0),sTotal=rows.reduce((n,r)=>n+r.signals,0);
+    el('trendChart').innerHTML=`<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" role="img" aria-label="${state.days==='fit'?'自最早数据起':'近'+state.days+'天'}，首次观察${cTotal}条评论，写入${sTotal}条研究信号。可切换表格查看逐日数据。"><defs><linearGradient id="signalFill" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" style="stop-color:var(--lgi-signal)" stop-opacity=".17"/><stop offset="100%" style="stop-color:var(--lgi-signal)" stop-opacity="0"/></linearGradient></defs><g class="chart-axis"><text x="0" y="12">评论</text><text x="${W}" y="12" text-anchor="end">信号</text>${[0,.5,1].map(f=>`<path d="M${left} ${bottom-h*f}H${right}" style="stroke:var(--lgi-hairline)" stroke-width="1"/><text x="${left-8}" y="${bottom-h*f+4}" text-anchor="end">${cMax*f}</text><text x="${right+8}" y="${bottom-h*f+4}">${sMax*f}</text>`).join('')}</g><path d="${area}" fill="url(#signalFill)"/>${rows.map((r,i)=>r.comments?`<rect x="${left+(i+.5)*step-Math.min(10,step*.42)/2}" y="${bottom-h*r.comments/cMax}" width="${Math.min(10,step*.42)}" height="${h*r.comments/cMax}" style="fill:var(--lgi-ink)"><title>${r.date} · 首次观察 ${r.comments} 条评论</title></rect>`:'').join('')}<path d="${path}" style="stroke:var(--lgi-signal)" stroke-width="2" fill="none"/>${rows.map((r,i)=>`<rect x="${left+i*step}" y="${band}" width="${Math.max(1,step-1)}" height="5" style="fill:${r.coverage==='完整'?'var(--lgi-body)':r.coverage==='部分'?'var(--lgi-warning-dot)':'var(--lgi-unknown-soft)'}" ><title>${r.date} · ${r.coverage}</title></rect>`).join('')}<g class="chart-axis">${tickIndexes.map(i=>`<text x="${left+(i+.5)*step}" y="${tick}" text-anchor="middle">${rows[i].date.slice(5)}</text>`).join('')}</g></svg>`;
+    el('trendTable').innerHTML=`<table><caption class="sr-only">每日评论与研究信号</caption><thead><tr><th scope="col">日期</th><th scope="col" class="num">首次观察评论</th><th scope="col" class="num">研究信号写入</th><th scope="col">完整性</th></tr></thead><tbody>${rows.slice().reverse().map(r=>`<tr><td>${r.date}</td><td class="num">${r.comments}</td><td class="num">${r.signals}</td><td>${r.coverage}</td></tr>`).join('')}</tbody></table>`;
+    el('trendChart').hidden=state.chartMode!=='chart';el('trendTable').hidden=state.chartMode!=='table';
+    el('chartStatus').textContent=`${rows[0].date.replaceAll('-','/')} — ${rows.at(-1).date.replaceAll('-','/')} · 按日汇总${state.days==='fit'?' · 从最早一条评论前两天开始':''}`;
+  }
+  function renderWords() {
+    // 设计稿示意：落地时由后端做短语级抽取并去掉虚词；这里用短语 + 命中关键词模拟。
+    const phrases=[['开始不了',['开始','第一题','动笔','空的']],['一遍遍提醒',['提醒','催','等人说']],['第一步小一点',['第一步','日期','三格','只写了三个']],['陪写两分钟',['陪他写','陪写']],['一响就断了',['一响','叫一下','接不回去','脚步声']],['不知道改哪里',['改哪里','哪一步','打一个叉','为什么改']],['反馈等太久',['三天','周末','攒到']],['换个问法就忘',['换了个方向','又不会','用上']],['陪到很累',['累','发火','气氛']],['固定放一个地方',['篮子','放进同一个']]];
+    const pool=data.comments.filter(c=>state.word==='all'||c.currentResult?.kind===state.word);
+    const counts=phrases.map(([word,keys])=>({word,count:pool.filter(c=>keys.some(k=>c.text.includes(k))).length})).filter(x=>x.count).sort((a,b)=>b.count-a.count).slice(0,10);
+    const max=Math.max(1,...counts.map(x=>x.count));
+    el('wordcloud').innerHTML=counts.length?counts.map((x,i)=>`<button type="button" data-word-query="${x.word}" data-rank="${i<3?'top':'rest'}" style="font-size:${Math.round(13+9*x.count/max)}px" title="${x.count} 条评论提到“${x.word}”">${x.word}<span class="word-count">${x.count}</span></button>`).join(''):'<span class="muted">当前分类没有足够的表达。</span>';
+  }
+  function renderComments() {
+    const rows=visibleComments();el('checkHead').hidden=!state.selecting;
+    const cols=state.selecting?'<col style="width:34px">':'';
+    el('commentCols').innerHTML=cols+[26,6,17,12,8,7,9,10,5].map(p=>'<col style="width:'+p+'%'+'">').join('');
+    const sig=[el('search').value,el('searchScope').value,el('statusFilter').value,el('tagFilter').value,el('commentSort').value,el('minLikes').value,el('markFilter').value,state.workId,state.problemId,state.pageSize].join('|');if(sig!==state.filterSig){state.filterSig=sig;state.page=1;}
+    const pages=Math.max(1,Math.ceil(rows.length/state.pageSize));state.page=Math.min(Math.max(1,state.page),pages);
+    const pageRows=rows.slice((state.page-1)*state.pageSize,state.page*state.pageSize);
+    el('commentRows').innerHTML=pageRows.map(c=>{const s=statusInfo(c),r=c.currentResult;return `<tr data-comment-id="${c.id}" class="${state.selected.has(c.id)?'selected':''}"><td class="check-cell" ${state.selecting?'':'hidden'}><input class="table-check" type="checkbox" data-select-id="${c.id}" value="${c.id}" aria-label="选择${escape(c.author)}的评论" ${state.selected.has(c.id)?'checked':''}></td><td><button type="button" class="voice-link" data-comment-id="${c.id}" title="${escape(c.text)}">${escape(c.text)}</button></td><td class="numeric" title="${fmt(c.likes)} 次点赞">${fmt(c.likes)}</td><td title="${escape(work(c.workId).title)}">${escape(work(c.workId).title)}</td><td title="${escape(s.label)}"><span class="state ${s.cls}">${escape(s.label)}</span></td><td>${r?.kind?`<span class="pill">${escape(r.kind)}</span>`:'<span class="muted">—</span>'}</td><td title="${escape(c.author)}">${escape(c.author)}</td><td class="date-cell">${c.likesDate.replaceAll('-','/')}</td><td class="date-cell" title="${date(c.observedAt)}">${date(c.observedAt).slice(5)}</td><td class="center"><button class="mark-button" data-mark-id="${c.id}" aria-pressed="${c.marked}" aria-label="${c.marked?'取消':'添加'}改帖标记：${escape(c.author)}">${c.marked?'已标':'标记'}</button></td></tr>`;}).join('')||`<tr><td colspan="${state.selecting?10:9}" class="empty"><strong>没有匹配的评论</strong><p>调整搜索词或筛选条件，再试一次。</p><button class="btn small" data-clear-filters>清除筛选</button></td></tr>`;
+    el('commentCount').innerHTML=`当前筛选 <b>${rows.length}</b> / ${data.comments.length} 条评论`;
+    el('commentContext').innerHTML=state.workId?`<span>限定作品：${escape(work(state.workId).title)}</span> <button class="text-action" id="clearWorkFilter" aria-label="取消作品筛选">移除</button>`:state.problemId?`<span>支持问题：${escape(problem(state.problemId)?.title||state.problemId)}</span> <button class="text-action" id="clearProblemFilter" aria-label="取消问题筛选">移除</button>`:'';
+    renderPager(rows.length);
+    {const n=(Number(el('minLikes').value)>0?1:0)+(el('markFilter').value!=='all'?1:0);el('advancedCount').hidden=!n;el('advancedCount').textContent=n;}
+    el('selectAll').disabled=rows.length===0;el('selectAll').checked=rows.length>0&&rows.every(c=>state.selected.has(c.id));el('selectAll').indeterminate=rows.some(c=>state.selected.has(c.id))&&!el('selectAll').checked;
+    updateSelection(rows);
+  }
+  function renderPager(total) {
+    const size=state.pageSize,pages=Math.max(1,Math.ceil(total/size)),p=state.page,from=total?(p-1)*size+1:0,to=Math.min(total,p*size);
+    el('pageRange').textContent=`第 ${from}–${to} 条 · 共 ${total} 条`;
+    const nums=[...new Set([1,p-1,p,p+1,pages].filter(n=>n>=1&&n<=pages))].sort((a,b)=>a-b);
+    let html=`<button type="button" class="page-btn" data-page="${p-1}" ${p<=1?'disabled':''} aria-label="上一页">‹</button>`,prev=0;
+    nums.forEach(n=>{if(n-prev>1)html+='<span class="page-gap" aria-hidden="true">…</span>';html+=`<button type="button" class="page-btn" data-page="${n}" ${n===p?'aria-current="page"':''} aria-label="第 ${n} 页">${n}</button>`;prev=n;});
+    html+=`<button type="button" class="page-btn" data-page="${p+1}" ${p>=pages?'disabled':''} aria-label="下一页">›</button>`;
+    el('pager').innerHTML=html;el('pageJump').max=pages;el('pageJump').placeholder=String(p);
+    el('pager').closest('.table-foot').hidden=!total;
+  }
+  function gotoPage(n){state.page=n;renderComments();const wrap=document.querySelector('.table-wrap');document.getElementById('main').scrollTo({top:Math.max(0,wrap.offsetTop-120),behavior:'smooth'});}
+  function updateSelection(rows=visibleComments()) {
+    const p=selectedPlan(),visible=rows.filter(c=>state.selected.has(c.id)).length;
+    el('selectionBar').hidden=!p.selectedCount;el('selectedSummary').textContent=`已选 ${p.selectedCount} 条评论`;
+    el('selectedScale').innerHTML=`将提交 <b>${p.researchableCount}</b> 条 · 预计调用 <b>${p.callCount}</b> 次`;
+    const notes=[];if(p.excludedCount)notes.push(`${p.excludedCount} 条不会提交（${[p.waitingCount?`${p.waitingCount} 条待作品语境`:'',p.activeCount?`${p.activeCount} 条正在研究`:''].filter(Boolean).join('、')}）`);if(p.rerunCount)notes.push(`${p.rerunCount} 条已有结果，将生成新结果`);if(p.selectedCount>visible)notes.push(`${p.selectedCount-visible} 条在当前筛选之外`);
+    el('selectedDetail').textContent=notes.join(' · ');el('previewButton').disabled=!p.selectedCount;
+    el('selectionAnnouncement').textContent=p.selectedCount?`已选择${p.selectedCount}条，将提交${p.researchableCount}条`:(state.announceClear||'');state.announceClear='';
+    document.getElementById('comments').classList.toggle('has-selection',!!p.selectedCount);
+  }
+  function clearFilters() { ['search','minLikes'].forEach(id=>el(id).value='');['statusFilter','tagFilter','markFilter'].forEach(id=>el(id).value='all');state.workId=null;state.problemId=null;renderComments(); }
+  function renderProblems() {
+    const q=el('problemSearch').value.trim().toLowerCase(),filter=el('problemStatus').value,sort=el('problemSort').value;
+    const rows=data.problems.filter(p=>(filter==='all'||p.state===filter)&&(!q||(p.title+p.desc+p.id).toLowerCase().includes(q))).sort((a,b)=>sort==='recent'?b.date.localeCompare(a.date)||a.id.localeCompare(b.id):b[sort]-a[sort]);
+    el('problemCount').textContent=q?`找到 ${rows.length} 个问题`:'';el('problemCount').hidden=!q;
+
+    {const f=data.problems.filter(x=>x.state==='formal').length,sel=el('problemStatus'),labels={all:`全部问题 · ${data.problems.length}`,formal:`正式问题 · ${f}`,candidate:`候选问题 · ${data.problems.length-f}`};[...sel.options].forEach(o=>o.textContent=labels[o.value]);sel._sfSync&&sel._sfSync();}
+    el('problemGrid').innerHTML=rows.map(p=>{
+      const filled=Math.min(8,p.authors);
+      return `<article class="pa-card" data-emblem="${p.emblem}" aria-labelledby="title-${p.id}"><div class="pa-banner" aria-hidden="true"><span class="pa-corner tl"></span><span class="pa-corner tr"></span><span class="pa-corner bl"></span><span class="pa-corner br"></span><div class="pa-banner-label"><i class="pa-signal-dot"></i><span>LI / PROBLEM ARCHIVE</span></div><div class="pa-orb"></div><div class="pa-pixel-code">${paPixelSVG(p.id.slice(-2))}</div>${paParticleWakeSVG()}<div class="pa-emblem-wrap"><span class="pa-emblem"></span><span class="pa-emblem-print"></span></div></div><div class="pa-card-body"><div class="pa-meta-row"><span class="pa-archive-id">ARCHIVE / ${p.id}</span><span class="pa-state ${p.state}">${p.state==='formal'?'正式':'候选'}</span></div><div class="pa-title-block"><div class="pa-title-line"><h2 class="pa-card-title" id="title-${p.id}">${escape(p.title)}</h2></div><p class="pa-card-desc" title="${escape(p.desc)}">${escape(p.desc)}</p></div><div class="pa-metrics"><div class="pa-author-count"><b>${String(p.authors).padStart(2,'0')}</b><span>独立作者</span></div><div class="pa-support" title="每格 1 位独立作者；第 2 格后的刻线是正式门槛"><div class="pa-support-label">正式门槛 2 位</div><div class="pa-support-bars" aria-hidden="true">${Array.from({length:8},(_,i)=>`<i class="${i<filled?'filled':''}${i===1?' threshold':''}"></i>`).join('')}</div></div><div class="pa-small-metric"><b>${String(p.comments).padStart(2,'0')}</b><span>评论</span></div><div class="pa-small-metric"><b>${String(p.works).padStart(2,'0')}</b><span>作品</span></div></div><div class="pa-card-footer"><span class="pa-last-research">最近研究 ${p.date.replaceAll('.','/')}</span><button class="pa-open-record" data-problem-id="${p.id}" aria-label="打开${escape(p.title)}档案">打开档案 <span class="arrow" aria-hidden="true">↗</span></button></div></div></article>`;
+    }).join('')||'<div class="pa-empty"><strong>没有找到匹配的问题</strong><p>调整搜索词或筛选条件。</p><button class="btn small" id="resetProblemFilters">清除筛选</button></div>';
+  }
+  function inspectorRootTrigger() { return modalMeta.get(el('inspector'))?.trigger||document.activeElement; }
+  function openComment(id,trigger=document.activeElement,related=false) { if(!comment(id)){toast('未找到这条评论。');return;}showInspector('comment',id,trigger,related); }
+  function openProblem(id,trigger=document.activeElement,related=false) { if(!problem(id)){toast('未找到这个问题。');return;}showInspector('problem',id,trigger,related); }
+  function showInspector(type,id,trigger,related) {
+    const d=el('inspector'),open=d.open;
+    if(open&&related&&state.inspector)state.inspectorHistory.push({...state.inspector});else if(!open)state.inspectorHistory=[];
+    state.inspector={type,id};renderInspector();
+    if(!open)openModal(d,trigger);else{el('inspectorBody').scrollTop=0;el('inspectorTitle').setAttribute('tabindex','-1');el('inspectorTitle').focus({preventScroll:true});}
+  }
+  function footerBack() {return state.inspectorHistory.length?'<button class="btn quiet small" id="inspectorBack">返回上一项</button>':'<span class="footer-note">'+(state.inspector.type==='comment'?escape(state.inspector.id):'证据可回到原始评论')+'</span>';}
+  function renderInspector() {
+    if(!state.inspector)return;
+    if(state.inspector.type==='comment'){
+      const c=comment(state.inspector.id),w=work(c.workId),r=c.currentResult,s=statusInfo(c),running=c.latestExecution.state==='running';
+      el('inspectorTitle').textContent='评论详情';
+      let result=r?`<div class="result-title"><span class="state ${r.outcome==='needs_context'?'wait':'good'}">${r.outcome==='signals'?'已有有效结果':r.outcome==='needs_context'?'研究完成 · 需要语境':'研究完成 · 无信号'}</span>${r.kind?`<span class="pill">${escape(r.kind)}</span>`:''}</div><div class="research-result"><p>${escape(r.proposition)}</p>${r.problemId?`<p>问题归属　<button class="text-action" data-related-problem="${r.problemId}">${escape(problem(r.problemId)?.title||r.problemId)} ${icon('ArrowUpRight')}</button></p>`:''}</div>`:'<p class="muted" style="font-size:13px;margin:0">尚未产生有效研究结果。</p>';
+      if(c.latestExecution.state==='failed')result=`<div class="notice" style="margin:0 0 13px"><strong>最近一次执行失败</strong><br>${escape(c.latestExecution.failure||'未取得新的研究结果。')}${r?'<br>以下仍显示此前的有效结果。':''}</div>`+result;
+      if(running)result='<div class="notice info" style="margin:0 0 13px">正在研究这条评论。'+(r?'已有有效结果继续保留。':'完成后会更新结果。')+'</div>'+result;
+      el('inspectorBody').innerHTML=`<section class="drawer-section"><h3>原始评论</h3><blockquote class="quote">${r?.quote&&c.text.includes(r.quote)?escape(c.text).replace(escape(r.quote),`<mark title="研究引用的证据原文">${escape(r.quote)}</mark>`):escape(c.text)}</blockquote>${r?.quote?'<p class="quote-note"><i></i>标出部分是研究引用的证据原文</p>':''}<div class="facts"><span>${escape(c.author)}</span><span>点赞 ${fmt(c.likes)}</span><span>观测 ${date(c.observedAt)}</span></div></section><section class="drawer-section"><h3>所属作品 · 作品语境</h3><div class="work-context"><strong>${escape(w.title)}</strong><p>${w.l1Ready?escape(w.context):'该作品的语境尚未就绪，补充后即可研究其评论。'}</p></div><button class="text-action" data-work-filter="${w.id}" style="margin-top:8px">查看该作品的评论 ${icon('ArrowRight')}</button></section><section class="drawer-section"><h3>评论研究</h3>${result}${r&&!running?'<p class="threshold-note">重新研究会生成新结果；现有结果保留到新结果完成为止。</p>':''}</section>`;
+      const action=!w.l1Ready?'<button class="btn primary" id="inspectorL1">补充作品语境</button>':(r&&!running?`<button class="btn" id="inspectorResearch">重新研究</button>`:`<button class="btn primary" id="inspectorResearch" ${running?'disabled':''}>${running?'研究中':c.latestExecution.state==='failed'?'重试研究':'研究此条'}</button>`);
+      el('inspectorFooter').innerHTML=footerBack()+`<div class="actions">${c.latestExecution.runId?`<button class="btn" id="inspectorRun" data-run-id="${c.latestExecution.runId}">查看研究记录</button>`:''}${action}</div>`;
+    }else{
+      const p=problem(state.inspector.id);el('inspectorTitle').textContent='用户问题档案';
+      const evidence=p.evidenceIds.map(comment).filter(Boolean);
+      el('inspectorBody').innerHTML=`<section class="drawer-section"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><span class="pa-archive-id">ARCHIVE / ${p.id}</span><span class="pa-state ${p.state}">${p.state==='formal'?'正式问题':'候选问题'}</span></div><h3 class="detail-title">${escape(p.title)}</h3><p class="detail-desc">${escape(p.desc)}</p><div class="detail-metrics"><div><b>${p.authors}</b><span>独立作者</span></div><div><b>${p.comments}</b><span>评论证据</span></div><div><b>${p.works}</b><span>相关作品</span></div></div><p class="threshold-note">${p.state==='candidate'?`目前 ${p.authors} 位独立作者支持；再有 ${Math.max(1,2-p.authors)} 位不同作者提到，就成为正式问题。`:`已有 ${p.authors} 位独立作者支持，超过正式门槛（2 位）。`}</p></section><section class="drawer-section"><h3>问题定义</h3><dl class="definition"><dt>谁</dt><dd>${escape(p.actor)}</dd><dt>目标</dt><dd>${escape(p.goal)}</dd><dt>阻碍</dt><dd>${escape(p.barrier)}</dd><dt>场景</dt><dd>${escape(p.context)}</dd></dl></section><section class="drawer-section"><h3>支持这一问题的原声 · ${evidence.length} 条</h3>${evidence.map(c=>`<article class="evidence"><p>${escape(c.currentResult.proposition)}</p><blockquote>${escape(c.currentResult.quote)}</blockquote><div class="evidence-source"><span>${escape(c.author)} · ${escape(work(c.workId).title)}</span><button class="text-action" data-related-comment="${c.id}" aria-label="查看${escape(c.author)}的完整评论">原声 ${icon('ArrowUpRight')}</button></div></article>`).join('')}</section><section class="drawer-section"><h3>归并历史</h3><p class="muted" style="font-size:12px;margin:0">暂无问题归并记录。</p></section>`;
+      el('inspectorFooter').innerHTML=footerBack()+`<div class="actions"><button class="btn" id="inspectorDone">关闭</button>${p.comments?`<button class="btn primary" id="inspectorProblemComments">查看全部支持评论 ${icon('ArrowRight')}</button>`:''}</div>`;
+    }
+  }
+  function backInspector() {const prev=state.inspectorHistory.pop();if(!prev)return;state.inspector=prev;renderInspector();el('inspectorBody').scrollTop=0;el('inspectorTitle').focus({preventScroll:true});}
+  function openPreview(ids=state.selected,trigger=document.activeElement,returnTo=null) {
+    state.previewIds=new Set(ids);state.previewReturn=returnTo;if(!state.previewIds.size){toast('请先选择评论。');return;}renderPreview();openModal(el('previewDialog'),trigger);
+  }
+  function renderPreview() {
+    const p=data.derivePlan(state.previewIds);
+    const submitGroups=p.groups.filter(g=>g.eligibleIds.length);
+    const excluded=[...p.waitingIds.map(id=>({id,why:'作品语境未就绪',act:`<button class="text-action" data-complete-one="${id}">补充作品语境</button>`})),...p.activeIds.map(id=>({id,why:'正在研究，不会重复提交',act:`<button class="text-action" data-active-run="${comment(id).latestExecution.runId}">查看进行中</button>`}))];
+    el('previewBody').innerHTML=`<div class="preview-lead"><strong>将提交 <b>${fmt(p.researchableCount)}</b> 条评论 · 预计调用 <b>${fmt(p.callCount)}</b> 次</strong><span>已选 ${fmt(p.selectedCount)} 条${p.excludedCount?`，其中 ${fmt(p.excludedCount)} 条不会提交`:''}</span></div>
+      <div class="preview-summary"><div><b>${fmt(p.researchableCount)}</b><span>将提交评论</span></div><div title="每个研究单元调用 1 次模型；同一作品的评论最多 20 条合成一个单元"><b>${fmt(p.callCount)}</b><span>预计调用</span></div><div><b>${fmt(submitGroups.length)}</b><span>涉及作品</span></div><div><b>${fmt(p.excludedCount)}</b><span>不会提交</span></div></div>
+      ${p.rerunCount?`<div class="notice info">其中 ${fmt(p.rerunCount)} 条已有研究结果：本次会生成新结果，现有结果保留到新结果完成为止。</div>`:''}
+      <h3 class="preview-h">将提交 · 按所属作品分组</h3>
+      ${submitGroups.map(g=>`<div class="plan-group"><div><strong>${escape(work(g.workId).title)}</strong><small>${g.eligibleIds.length} 条评论 · ${g.unitsCount} 个研究单元${(g.rerunIds||[]).length?` · ${g.rerunIds.length} 条已有结果`:''}</small></div><span class="state good">可进入研究</span></div>`).join('')||'<p class="muted preview-none">没有可提交的评论。</p>'}
+      ${excluded.length?`<details class="preview-excluded"${p.unitCount?'':' open'}><summary>不会提交 ${fmt(excluded.length)} 条 <span>查看原因与处理办法</span></summary>${excluded.map(x=>{const c=comment(x.id);return `<div class="excluded-row"><div><p>${escape(c.text)}</p><small>${escape(work(c.workId).title)} · ${x.why}</small></div>${x.act}</div>`;}).join('')}</details>`:''}`;
+    el('previewFootnote').textContent=p.unitCount?`提交后可在“研究记录”查看进度，关闭窗口不影响任务`:'当前没有可提交的研究单元';
+    el('startResearch').disabled=!p.unitCount||state.submitting;el('startResearch').textContent=state.submitting?'正在提交…':p.unitCount?`提交 ${p.researchableCount} 条研究`:'开始研究';
+  }
+  function closePreview() {
+    const back=state.previewReturn;state.previewReturn=null;
+    closeModal(el('previewDialog'),{restore:!back});
+    if(back)openComment(back.id,back.trigger);
+  }
+  function completeL1(ids) {
+    const works=new Set([...ids].map(comment).filter(Boolean).map(c=>c.workId));let count=0;
+    works.forEach(id=>{const w=work(id);if(w.l1Ready)return;w.l1Ready=true;w.context=id==='W-07'?'作品讨论家长陪伴作业中的情绪压力，以及在冲突升级前暂停、恢复沟通的方法。重点是维持关系与可持续的家庭支持。':'作品分享减少日常遗漏的准备方法，包括固定物品位置、提前整理和使用简单清单，并强调做法应易于持续。';count++;});
+    refreshAll();if(el('previewDialog').open)renderPreview();if(el('inspector').open)renderInspector();toast(count?`已补充 ${count} 篇作品的演示语境。`:'作品语境已经就绪。');
+  }
+  function createRun(units,sourceId=null) {
+    const stamp=new Date(),id='R-'+date(stamp).slice(5,10).replace('/','')+'-'+String(runSequence++).padStart(2,'0');
+    const run={id,createdAt:stamp.toISOString(),state:'running',retryOf:sourceId,units:units.map((u,i)=>({id:id+'-U'+String(i+1).padStart(2,'0'),workId:u.workId,commentIds:[...u.commentIds],state:i===0?'running':'queued',signalCount:0,contextCount:0,noSignalCount:0,error:null})),usage:{calls:1,inputTokens:820+units[0].commentIds.length*72,outputTokens:0}};
+    run.units[0].callStarted=true;data.runs.unshift(run);
+    units.flatMap(u=>u.commentIds).forEach(id=>{const c=comment(id);c.latestExecution={state:'running',runId:run.id};});
+    return run;
+  }
+  function submitPreview() {
+    if(state.submitting)return;const p=data.derivePlan(state.previewIds);if(!p.unitCount){renderPreview();return;}
+    state.submitting=true;el('startResearch').disabled=true;
+    const run=createRun(p.units);p.units.flatMap(u=>u.commentIds).forEach(id=>state.selected.delete(id));state.previewReturn=null;
+    closeModal(el('previewDialog'),{restore:false});state.submitting=false;refreshAll();ResearchRecords.open({runId:run.id,trigger:el('recordsEntry')});startSimulation();toast(`已提交 ${p.researchableCount} 条评论，共 ${p.unitCount} 个研究单元。`);
+  }
+  function retryRun(id) {
+    const source=data.runs.find(r=>r.id===id);if(!source)return false;
+    const units=source.units.filter(u=>u.state==='failed').map(u=>({workId:u.workId,commentIds:u.commentIds.filter(id=>comment(id)?.latestExecution.state!=='running')})).filter(u=>u.commentIds.length&&work(u.workId).l1Ready);
+    if(!units.length){toast('失败评论已在处理中，无需重复提交。');return false;}
+    const run=createRun(units,id);refreshAll();startSimulation();return run.id;
+  }
+  function ensureGeneratedProblem(id) {
+    if(problem(id))return;
+    const defs={ 'P-032':{title:'陪伴学习中的情绪压力',desc:'家长在长期陪伴作业中积累疲惫，沟通容易转为冲突，需要可持续的支持方式。',actor:'陪伴孩子学习的家长',goal:'在维持亲子关系的同时提供学习支持',barrier:'疲惫积累；反复催促；冲突升级',context:'晚间陪伴作业与家庭沟通',code:'2FA'},'P-033':{title:'日常物品容易遗漏',desc:'日常准备缺少稳定线索，容易反复寻找或遗漏物品。',actor:'需要管理日常准备的家庭',goal:'顺利完成每天的出门准备',barrier:'物品位置分散；准备步骤不固定',context:'早晨出门与前一晚准备',code:'3BC'} };
+    if(!defs[id])return;data.problems.push({id,...defs[id],date:date(new Date()).slice(0,10).replaceAll('/','.'),scan:String(data.problems.length+1).padStart(2,'0')+' / NEW',orbX:'34%',codeX:'42%',orbSize:72,orbY:-18,authors:0,comments:0,works:0,state:'candidate',evidenceIds:[]});
+  }
+  function syntheticResult(c) {
+    if(c.currentResult)return c.currentResult;
+    const plans={
+      'C-017':['P-032','情绪体验','持续陪伴作业积累了疲惫，短暂暂停有助于减少双方冲突。'],
+      'C-018':['P-032','情绪体验','家长希望先缓和亲子关系，再讨论作业效率。'],
+      'C-019':['P-033','办法与经历','前一晚把物品放在固定位置，减少了次日反复寻找。'],
+      'C-021':['P-008','困难场景','完整任务量带来启动压力，减少眼前任务范围可能有助于开始。'],
+      'C-022':['P-014','困难场景','关闭提醒后，环境声音仍会中断正在进行的学习。'],
+      'C-023':['P-021','困难场景','只有对错标记时，孩子难以区分理解错误与计算错误。'],
+      'C-024':['P-008','办法与经历','可见的步骤清单帮助孩子启动任务并看到自己的进展。']
+    };
+    const p=plans[c.id];if(!p)return {outcome:'no_signal',kind:null,proposition:'评论表达了对方法的认可，但没有提供足以单独归纳的具体场景。',quote:'',problemId:null};
+    ensureGeneratedProblem(p[0]);return {outcome:'signals',problemId:p[0],kind:p[1],proposition:p[2],quote:c.text};
+  }
+  function deriveRunState(run) {const active=run.units.some(u=>u.state==='running'||u.state==='queued'),failed=run.units.filter(u=>u.state==='failed').length,complete=run.units.filter(u=>u.state==='completed').length;run.state=active?'running':failed?(complete?'partial':'failed'):'completed';}
+  function advanceRuns() {
+    const active=data.runs.filter(r=>r.units.some(u=>u.state==='running'||u.state==='queued'));
+    if(!active.length)return false;
+    active.forEach(run=>{
+      const unit=run.units.find(u=>u.state==='running')||run.units.find(u=>u.state==='queued');
+      if(!unit.callStarted){unit.callStarted=true;run.usage.calls=Math.max(run.usage.calls,run.units.filter(u=>u.callStarted).length);}
+      unit.state='completed';unit.finishedAt=new Date().toISOString();unit.error=null;
+      unit.commentIds.forEach(id=>{const c=comment(id);c.currentResult=syntheticResult(c);c.latestExecution={state:'succeeded',runId:run.id};if(c.currentResult.problemId){const p=problem(c.currentResult.problemId);if(p)p.date=date(new Date()).slice(0,10).replaceAll('/','.');}});
+      const outcomes=unit.commentIds.map(id=>comment(id).currentResult.outcome);unit.signalCount=outcomes.filter(o=>o==='signals').length;unit.contextCount=outcomes.filter(o=>o==='needs_context').length;unit.noSignalCount=outcomes.filter(o=>o==='no_signal').length;
+      run.usage.outputTokens+=180+unit.commentIds.length*94;
+      const next=run.units.find(u=>u.state==='queued');if(next){next.state='running';next.callStarted=true;run.usage.calls++;run.usage.inputTokens+=780+next.commentIds.length*72;}
+      deriveRunState(run);
+    });
+    state.updatedAt=new Date().toISOString();state.currentEnd=date(state.updatedAt).slice(0,10).replaceAll('/','-');refreshAll();return true;
+  }
+  function startSimulation() {
+    if(state.simulation)return;
+    state.simulation=setInterval(()=>{
+      if(!advanceRuns()){clearInterval(state.simulation);state.simulation=null;return;}
+      if(!data.runs.some(r=>r.state==='running')){clearInterval(state.simulation);state.simulation=null;toast('本轮研究已结束，结果已更新。');}
+    },4500);
+  }
+  function updateRecordBadge() {
+    const active=data.runs.filter(r=>r.units.some(u=>u.state==='running'||u.state==='queued')).length;
+    const failed=data.runs.filter(r=>r.units.some(u=>u.state==='failed')).length;
+    const node=el('recordBadge');node.hidden=!active&&!failed;node.textContent=active?`${active} 项进行中`:failed?`${failed} 项有失败`:'';
+    el('recordsEntry').setAttribute('aria-label','研究记录'+(active?`，${active}项进行中`:'')+(failed?`，${failed}项有失败`:''));
+  }
+  function refreshAll() {
+    const oldFocus=document.activeElement,focusRef=focusDescriptor(oldFocus),inspectorScroll=el('inspectorBody').scrollTop;
+    recomputeProblems();renderOverview();renderComments();renderProblems();updateRecordBadge();
+    if(el('recordsDialog').open)ResearchRecords.render();if(el('previewDialog').open)renderPreview();if(el('inspector').open){renderInspector();el('inspectorBody').scrollTop=inspectorScroll;}
+    if(oldFocus&&!oldFocus.isConnected){const restored=resolveFocus(focusRef);if(restored)restored.focus({preventScroll:true});}
+  }
+  function init() {
+    fillIcons();initializeModals();ResearchRecords.init();SelectField.enhanceAll();
+    document.querySelectorAll('[data-view]').forEach(b=>b.addEventListener('click',()=>switchView(b.dataset.view)));
+    el('recordsEntry').addEventListener('click',()=>{ResearchRecords.open({trigger:el('recordsEntry')});startSimulation();});
+    el('candidateShortcut').addEventListener('click',()=>{el('problemStatus').value='candidate';el('problemSearch').value='';switchView('problems',{top:true});});
+    el('problemSearchButton').addEventListener('click',()=>{renderProblems();el('problemSearch').focus();});
+
+    document.querySelectorAll('[data-range]').forEach(b=>b.addEventListener('click',()=>{state.days=b.dataset.range==='fit'?'fit':Number(b.dataset.range);document.querySelectorAll('[data-range]').forEach(n=>{const on=n===b;n.classList.toggle('active',on);n.setAttribute('aria-pressed',String(on));});renderTrend();}));
+    document.querySelectorAll('[data-chart-mode]').forEach(b=>b.addEventListener('click',()=>{state.chartMode=b.dataset.chartMode;document.querySelectorAll('[data-chart-mode]').forEach(n=>{const on=n===b;n.classList.toggle('active',on);n.setAttribute('aria-pressed',String(on));});renderTrend();}));
+    document.querySelectorAll('[data-word]').forEach(b=>b.addEventListener('click',()=>{state.word=b.dataset.word;document.querySelectorAll('[data-word]').forEach(n=>{const on=n===b;n.classList.toggle('active',on);n.setAttribute('aria-pressed',String(on));});renderWords();}));
+    ['search','minLikes'].forEach(id=>el(id).addEventListener('input',renderComments));['searchScope','statusFilter','tagFilter','commentSort','markFilter'].forEach(id=>el(id).addEventListener('change',renderComments));
+    el('searchButton').addEventListener('click',()=>{renderComments();el('search').focus();});
+    const pop=el('advancedFilters'),popBtn=el('advancedButton');
+    const setPop=open=>{pop.hidden=!open;popBtn.setAttribute('aria-expanded',String(open));if(open)el('minLikes').focus();};
+    popBtn.addEventListener('click',()=>setPop(pop.hidden));
+    el('advancedDone').addEventListener('click',()=>{setPop(false);popBtn.focus();});
+    pop.addEventListener('keydown',e=>{if(e.key==='Escape'&&!document.querySelector('.sf-menu')){e.preventDefault();setPop(false);popBtn.focus();}});
+    document.addEventListener('mousedown',e=>{if(!pop.hidden&&!pop.contains(e.target)&&!popBtn.contains(e.target)&&!e.target.closest('.sf-menu'))setPop(false);});
+    el('pageJump').addEventListener('change',()=>{const n=Math.round(Number(el('pageJump').value));el('pageJump').value='';if(n>=1)gotoPage(Math.min(n,Number(el('pageJump').max)||1));});
+    el('pageJump').addEventListener('keydown',e=>{if(e.key==='Enter')el('pageJump').dispatchEvent(new Event('change'));});
+    el('pageSize').addEventListener('change',()=>{state.pageSize=Number(el('pageSize').value);renderComments();});
+    el('clearFilters').addEventListener('click',clearFilters);
+    el('selectMode').addEventListener('click',()=>{state.selecting=!state.selecting;if(!state.selecting&&state.selected.size){state.announceClear=`已退出选择，清空了 ${state.selected.size} 条已选评论`;toast(state.announceClear);state.selected.clear();}el('selectMode').innerHTML=icon('ListChecks')+(state.selecting?'退出选择':'选择评论');el('selectMode').setAttribute('aria-pressed',String(state.selecting));renderComments();});
+    el('selectAll').addEventListener('change',()=>{visibleComments().forEach(c=>{if(el('selectAll').checked)state.selected.add(c.id);else state.selected.delete(c.id);});renderComments();});
+    el('commentRows').addEventListener('change',event=>{const input=event.target.closest('[data-select-id]');if(!input)return;if(input.checked)state.selected.add(input.dataset.selectId);else state.selected.delete(input.dataset.selectId);input.closest('tr').classList.toggle('selected',input.checked);const rows=visibleComments();el('selectAll').checked=rows.length>0&&rows.every(c=>state.selected.has(c.id));el('selectAll').indeterminate=rows.some(c=>state.selected.has(c.id))&&!el('selectAll').checked;updateSelection(rows);});
+    el('clearSelection').addEventListener('click',()=>{state.selected.clear();renderComments();});
+    el('previewButton').addEventListener('click',()=>openPreview());
+    el('previewClose').addEventListener('click',closePreview);el('previewBack').addEventListener('click',closePreview);el('startResearch').addEventListener('click',submitPreview);
+    el('inspectorClose').addEventListener('click',()=>closeModal(el('inspector')));
+    ['problemSearch','problemStatus','problemSort'].forEach(id=>el(id).addEventListener(id==='problemSearch'?'input':'change',renderProblems));
+    document.addEventListener('click',event=>{
+      const b=event.target.closest('button');if(!b)return;
+      if(b.dataset.commentId)openComment(b.dataset.commentId,b);
+      else if(b.dataset.problemId)openProblem(b.dataset.problemId,b);
+      else if(b.dataset.relatedComment)openComment(b.dataset.relatedComment,b,true);
+      else if(b.dataset.relatedProblem)openProblem(b.dataset.relatedProblem,b,true);
+      else if(b.dataset.markId){const c=comment(b.dataset.markId);c.marked=!c.marked;renderComments();document.querySelector(`[data-mark-id="${c.id}"]`)?.focus({preventScroll:true});toast(c.marked?'已添加改帖标记。':'已取消改帖标记。');}
+      else if(b.dataset.wordQuery){clearFilters();el('search').value=b.dataset.wordQuery;state.phrase=b.dataset.wordQuery;el('searchScope').value='comment';switchView('comments',{top:true});el('search').focus({preventScroll:true});}
+      else if(b.hasAttribute('data-clear-filters'))clearFilters();
+      else if(b.dataset.workFilter){const trigger=inspectorRootTrigger();closeModal(el('inspector'),{restore:false});clearFilters();state.workId=b.dataset.workFilter;switchView('comments',{top:true});el('search').focus({preventScroll:true});}
+      else if(b.id==='clearWorkFilter'){state.workId=null;renderComments();}
+      else if(b.id==='clearProblemFilter'){state.problemId=null;renderComments();}
+      else if(b.classList.contains('page-btn')&&!b.disabled)gotoPage(Number(b.dataset.page));
+      else if(b.id==='inspectorProblemComments'){const id=state.inspector.id;closeModal(el('inspector'),{restore:false});clearFilters();state.problemId=id;switchView('comments',{top:true});}
+      else if(b.id==='resetProblemFilters'){el('problemSearch').value='';el('problemStatus').value='all';renderProblems();el('problemSearch').focus();}
+      else if(b.id==='inspectorBack')backInspector();
+      else if(b.id==='inspectorDone')closeModal(el('inspector'));
+      else if(b.id==='inspectorResearch'){const c=comment(state.inspector.id),trigger=inspectorRootTrigger();closeModal(el('inspector'),{restore:false});openPreview([c.id],trigger,{id:c.id,trigger});}
+      else if(b.id==='inspectorL1')completeL1([state.inspector.id]);
+      else if(b.id==='completeL1')completeL1(state.previewIds);
+      else if(b.dataset.completeOne)completeL1([b.dataset.completeOne]);
+      else if(b.dataset.activeRun){closeModal(el('previewDialog'),{restore:false});ResearchRecords.open({runId:b.dataset.activeRun,trigger:el('recordsEntry')});startSimulation();}
+      else if(b.id==='inspectorRun'){const trigger=inspectorRootTrigger();closeModal(el('inspector'),{restore:false});ResearchRecords.open({runId:b.dataset.runId,trigger});startSimulation();}
+    });
+    refreshAll();
+    if('ResizeObserver' in window){let last=0;new ResizeObserver(entries=>{const w=Math.round(entries[0].contentRect.width);if(w&&w!==last){last=w;if(state.chartMode==='chart')renderTrend();}}).observe(el('trendChart'));}
+  }
+  return {data,state,escape,fmt,date,icon,toast,openModal,closeModal,retryRun,advanceRuns,updateRecordBadge,init,renderComments,renderProblems,renderOverview,openComment,openProblem,openPreview,refreshAll};
+}());
+
+(function () {
+  'use strict';
+  const expanded = new Set();
+  let initialized = false;
+  const el = id => document.getElementById(id);
+  const escape = value => App.escape(String(value == null ? '' : value));
+  const fmt = value => App.fmt(Number(value) || 0);
+  const statusLabels = { running: '进行中', completed: '已完成', partial: '部分失败', failed: '失败', queued: '等待执行' };
+  function unitState(unit) { return unit.state || 'queued'; }
+  function summarize(run) {
+    const units = run.units || [];
+    const completed = units.filter(u => unitState(u) === 'completed').length;
+    const failed = units.filter(u => unitState(u) === 'failed').length;
+    const pending = units.length - completed - failed;
+    const state = pending ? 'running' : failed ? (completed ? 'partial' : 'failed') : 'completed';
+    return {
+      units, state, completed, failed, pending,
+      workCount: new Set(units.map(u => u.workId)).size,
+      commentCount: units.reduce((n, u) => n + (u.commentIds || []).length, 0),
+      signals: units.reduce((n, u) => n + (unitState(u) === 'completed' ? Number(u.signalCount) || 0 : 0), 0),
+      context: units.reduce((n, u) => n + (unitState(u) === 'completed' ? Number(u.contextCount) || 0 : 0), 0),
+      noSignal: units.reduce((n, u) => n + (unitState(u) === 'completed' ? Number(u.noSignalCount) || 0 : 0), 0)
+    };
+  }
+  function workTitle(id) {
+    const work = App.data.works.find(w => w.id === id);
+    return work ? work.title : '未命名作品';
+  }
+  function detailId(id) { return 'record-details-' + String(id).replace(/[^a-zA-Z0-9_-]/g, '_'); }
+  function statusBadge(state) { return '<span class="records-status is-' + escape(state) + '">' + escape(statusLabels[state] || state) + '</span>'; }
+  function unitDetails(run, summary) {
+    const usage = run.usage || {};
+    return '<tr class="records-details-row"><td colspan="6"><section class="records-details" id="' + detailId(run.id) + '" aria-label="' + escape(run.id) + ' 的研究单元">' +
+      '<div class="records-details-heading"><h3>研究单元</h3><span>' + fmt(summary.units.length) + ' 个单元 · 按所属作品组织</span></div>' +
+      '<table class="records-units"><colgroup><col style="width:32%"><col style="width:9%"><col style="width:13%"><col style="width:46%"></colgroup><thead><tr><th scope="col">所属作品 / 单元</th><th scope="col" class="records-num">评论数</th><th scope="col">状态</th><th scope="col">结果 / 原因</th></tr></thead><tbody>' +
+      summary.units.map(unit => {
+        const state = unitState(unit);
+        const message = state === 'completed'
+          ? '<span class="records-unit-results">有信号 ' + fmt(unit.signalCount) + ' · 需要语境 ' + fmt(unit.contextCount) + ' · 无信号 ' + fmt(unit.noSignalCount) + '</span>'
+          : state === 'failed'
+            ? '<span class="records-unit-error">' + escape(unit.error || '该单元未完成，可重试失败项。') + '</span>'
+            : '<span class="records-unit-muted">' + (state === 'running' ? '正在研究该作品的评论，结果生成后会更新。' : '等待执行，尚未生成本次研究结果。') + '</span>';
+        return '<tr><td><span class="records-unit-work">' + escape(workTitle(unit.workId)) + '</span><span class="records-unit-id">' + escape(unit.id) + '</span></td><td class="records-num">' + fmt((unit.commentIds || []).length) + '</td><td>' + statusBadge(state) + '</td><td>' + message + '</td></tr>';
+      }).join('') + '</tbody></table><div class="records-usage"><span>模型调用 <b>' + fmt(usage.calls) + '</b> 次</span><span>输入 <b>' + fmt(usage.inputTokens) + '</b> Token</span><span>输出 <b>' + fmt(usage.outputTokens) + '</b> Token</span>' + (summary.pending ? '<span>执行中的用量将在结束后更新</span>' : '') + '</div></section></td></tr>';
+  }
+  function row(run) {
+    const s = summarize(run), open = expanded.has(run.id), total = s.units.length || 1;
+    const progressLabel = s.pending ? s.pending + ' 待完成' : s.failed ? s.failed + ' 失败' : '全部完成';
+    const progressAria = '共 ' + s.units.length + ' 个单元，已完成 ' + s.completed + ' 个，失败 ' + s.failed + ' 个，待完成 ' + s.pending + ' 个';
+    const results = s.completed ? '<div class="records-results"><div><b>' + fmt(s.signals) + '</b><span>有信号</span></div><div><b>' + fmt(s.context) + '</b><span>需要语境</span></div><div><b>' + fmt(s.noSignal) + '</b><span>无信号</span></div></div>' : '<span class="records-no-result">' + (s.failed && !s.pending ? '本次未产生结果' : '等待研究结果') + '</span>';
+    return '<tr class="records-row' + (open ? ' is-expanded' : '') + '" data-record-row="' + escape(run.id) + '"><td><span class="records-batch">' + escape(run.id) + '</span><time class="records-time" datetime="' + escape(run.createdAt) + '">' + escape(App.date(run.createdAt)) + '</time></td><td>' + statusBadge(s.state) + '</td><td><div class="records-size-main"><b>' + fmt(s.commentCount) + '</b><span>条评论</span></div><span class="records-subline">' + fmt(s.workCount) + ' 篇作品 · ' + fmt(s.units.length) + ' 个单元</span></td><td><div class="records-progress-label"><b>' + fmt(s.completed) + ' / ' + fmt(s.units.length) + ' 完成</b><span>' + progressLabel + '</span></div><div class="records-progress" role="img" aria-label="' + progressAria + '"><i class="complete" style="width:' + (s.completed / total * 100) + '%"></i><i class="failed" style="width:' + (s.failed / total * 100) + '%"></i></div><span class="records-progress-note">' + (s.pending ? '关闭窗口不影响任务' : s.failed ? '仅重试失败的单元' : '结果已写入评论') + '</span></td><td>' + results + '</td><td><div class="records-row-actions"><button type="button" class="btn small records-expand" data-record-action="toggle" data-run-id="' + escape(run.id) + '" aria-label="' + (open ? '收起' : '展开') + '批次 ' + escape(run.id) + '" aria-expanded="' + open + '" aria-controls="' + detailId(run.id) + '">' + (open ? '收起' : '展开') + '<span class="records-disclosure" aria-hidden="true">›</span></button>' + (s.failed && !s.pending ? '<button type="button" class="btn small records-retry" data-record-action="retry" data-run-id="' + escape(run.id) + '" aria-label="重试批次 ' + escape(run.id) + ' 中失败的单元">重试失败</button>' : '') + '</div></td></tr>' + (open ? unitDetails(run, s) : '<tr class="records-details-row" hidden><td colspan="6"><section id="' + detailId(run.id) + '"></section></td></tr>');
+  }
+  function render() {
+    if (!el('recordsRows')) return;
+    const focusedButton = document.activeElement && document.activeElement.closest('button[data-record-action][data-run-id]');
+    const focusSnapshot = focusedButton && el('recordsRows').contains(focusedButton)
+      ? { runId: focusedButton.dataset.runId, action: focusedButton.dataset.recordAction }
+      : null;
+    const scrollTop = el('recordsScroll').scrollTop;
+    const all = App.data.runs || [];
+    const query = el('recordsSearch').value.trim().toLocaleLowerCase();
+    const filter = el('recordsState').value;
+    const sort = el('recordsSort').value;
+    const rows = all.filter(run => {
+      const summary = summarize(run);
+      const matchesState = filter === 'all' || (filter === 'errors' ? summary.failed > 0 : summary.state === filter);
+      const text = [run.id, ...(run.units || []).map(u => workTitle(u.workId))].join(' ').toLocaleLowerCase();
+      return matchesState && (!query || text.includes(query));
+    }).sort((a, b) => (sort === 'oldest' ? 1 : -1) * (new Date(a.createdAt) - new Date(b.createdAt)));
+    el('recordsRows').innerHTML = rows.length ? rows.map(row).join('') : '<tr class="records-empty-row"><td colspan="6"><strong>' + (all.length ? '没有匹配的研究记录' : '还没有研究记录') + '</strong><p>' + (all.length ? '试试其他批次编号、作品标题或执行状态。' : '从用户评论中选择评论并发起研究后，记录会出现在这里。') + '</p>' + (all.length ? '<button type="button" class="btn small" data-record-action="reset">清除筛选</button>' : '') + '</td></tr>';
+    const active = all.filter(r => summarize(r).pending > 0).length;
+    const errors = all.filter(r => summarize(r).failed > 0).length;
+    el('recordsActivity').innerHTML = active || errors ? (active ? '<strong>' + fmt(active) + '</strong> 项进行中' : '') + (active && errors ? ' · ' : '') + (errors ? '<strong>' + fmt(errors) + '</strong> 项有失败' : '') : all.length ? '所有批次已结束' : '暂无研究批次';
+    el('recordsCount').textContent = '显示 ' + rows.length + ' / ' + all.length + ' 个批次';
+    if (focusSnapshot) {
+      const buttons = Array.from(el('recordsRows').querySelectorAll('button[data-record-action][data-run-id]'));
+      const replacement = buttons.find(button => button.dataset.runId === focusSnapshot.runId && button.dataset.recordAction === focusSnapshot.action)
+        || buttons.find(button => button.dataset.runId === focusSnapshot.runId && button.dataset.recordAction === 'toggle')
+        || el('recordsState');
+      replacement.focus({ preventScroll: true });
+    }
+    el('recordsScroll').scrollTop = scrollTop;
+  }
+  function init() {
+    if (initialized) return;
+    initialized = true;
+    el('recordsClose').addEventListener('click', () => App.closeModal(el('recordsDialog')));
+    el('recordsSearch').addEventListener('input', render);
+    el('recordsState').addEventListener('change', render);
+    el('recordsSort').addEventListener('change', render);
+    el('recordsRows').addEventListener('click', event => {
+      const button = event.target.closest('button[data-record-action]');
+      if (!button) return;
+      const action = button.dataset.recordAction, id = button.dataset.runId;
+      let focusId = id;
+      if (action === 'reset') { el('recordsSearch').value = ''; el('recordsState').value = 'all'; render(); el('recordsSearch').focus(); return; }
+      if (action === 'retry') {
+        const retry = App.retryRun(id);
+        if (retry === false) { render(); return; }
+        focusId = typeof retry === 'string' ? retry : retry && retry.id ? retry.id : id;
+        expanded.add(focusId);
+        el('recordsSearch').value = ''; el('recordsState').value = 'all';
+        render(); App.updateRecordBadge(); App.toast('已提交失败单元的重试，成功结果保留。');
+      }
+      else if (action === 'toggle') { if (expanded.has(id)) expanded.delete(id); else expanded.add(id); render(); }
+      const replacement = Array.from(el('recordsRows').querySelectorAll('button[data-record-action="toggle"]')).find(b => b.dataset.runId === focusId);
+      if (replacement) { replacement.focus({ preventScroll: true }); if (action === 'retry') replacement.scrollIntoView({ block: 'nearest' }); }
+    });
+    el('recordsRefresh').addEventListener('click', () => {
+      const hadActive = (App.data.runs || []).some(r => summarize(r).pending > 0);
+      App.advanceRuns(); render(); App.updateRecordBadge();
+      const time = new Intl.DateTimeFormat('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Taipei' }).format(new Date());
+      el('recordsUpdated').textContent = '刚刚更新 · ' + time;
+      App.toast(hadActive ? '研究进度已更新。' : '记录已是最新状态。');
+    });
+  }
+  function open(options = {}) {
+    init();
+    const { runId, trigger } = options;
+    if (runId) { el('recordsSearch').value = ''; el('recordsState').value = 'all'; expanded.add(runId); }
+    render();
+    App.openModal(el('recordsDialog'), trigger || document.activeElement);
+    if (runId) {
+      const rowElement = Array.from(el('recordsRows').querySelectorAll('[data-record-row]')).find(node => node.dataset.recordRow === runId);
+      if (rowElement) rowElement.scrollIntoView({ block: 'nearest' });
+    }
+  }
+  window.ResearchRecords = { init, open, render };
+}());
+
+App.init();
+</script>
