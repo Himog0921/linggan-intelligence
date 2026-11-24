@@ -70,8 +70,6 @@ const DISPATCH_RECONCILIATION_JOIN: &str = "
        'requestRef',r.request_ref,'invocationRef',c.invocation_ref,
        'materialSnapshotIdentity',r.material_snapshot_identity,'methodVersion',r.method_version)
      AND reconciliation.receipt->>'disposition'='not_dispatched'
-     AND NOT EXISTS (SELECT 1 FROM linggan_ai_late_usage_receipt usage
-                     WHERE usage.invocation_ref=c.invocation_ref)
 ";
 
 async fn reasons(
@@ -131,23 +129,32 @@ async fn reasons(
             reasons.push("input_too_large".into());
         }
     }
-    let unresolved_sql = format!(
+    if prior_dispatch_unresolved_in(tx, p).await? {
+        reasons.push("ai_prior_dispatch_unresolved".into());
+    }
+    Ok(reasons)
+}
+
+pub(crate) async fn prior_dispatch_unresolved_in(
+    tx: &mut Transaction<'_, Postgres>,
+    p: &Packet,
+) -> Result<bool, FoundationError> {
+    let sql = format!(
         "SELECT EXISTS(SELECT 1 FROM linggan_content_understanding_request r
         JOIN linggan_ai_batch_item_control c USING(item_ref)
         {DISPATCH_RECONCILIATION_JOIN}
+          AND NOT EXISTS (SELECT 1 FROM linggan_ai_late_usage_receipt usage
+                          WHERE usage.invocation_ref=c.invocation_ref)
         WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3
           AND c.failure_code='ai_dispatch_unknown' AND reconciliation.command_ref IS NULL)"
     );
-    let unknown: bool = sqlx::query_scalar(&unresolved_sql)
+    let unresolved = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
         .bind(p.snapshot.work_ref)
         .bind(&p.snapshot.material_snapshot_identity)
         .bind(METHOD)
         .fetch_one(&mut **tx)
         .await?;
-    if unknown {
-        reasons.push("ai_prior_dispatch_unresolved".into());
-    }
-    Ok(reasons)
+    Ok(unresolved)
 }
 pub async fn preview(db: &Database, domain: Uuid, work: Uuid) -> Result<Value, FoundationError> {
     let mut tx = db.pool().begin().await?;
@@ -316,6 +323,8 @@ pub async fn latest(
         deeps.list AS deep_analyses
         FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref)
         {DISPATCH_RECONCILIATION_JOIN}
+          AND NOT EXISTS (SELECT 1 FROM linggan_ai_late_usage_receipt usage
+                          WHERE usage.invocation_ref=c.invocation_ref AND usage.received_at<=$5::timestamptz)
         LEFT JOIN linggan_content_understanding_saved_core result ON result.request_ref=r.request_ref
           AND (NOT result.offline_recovery OR result.created_at<=$5::timestamptz)
         LEFT JOIN LATERAL (
@@ -339,7 +348,7 @@ pub async fn latest(
         ) deeps ON true
         WHERE r.work_ref=$1 AND r.method_version=$3
         ORDER BY (result.result IS NOT NULL) DESC,(r.material_snapshot_identity=$2) DESC,r.created_at DESC,r.request_ref DESC");
-    let row = sqlx::query(&latest_sql)
+    let row = sqlx::query(sqlx::AssertSqlSafe(latest_sql))
         .bind(work)
         .bind(&p.snapshot.material_snapshot_identity)
         .bind(METHOD)
