@@ -101,13 +101,15 @@ pub(super) async fn execute(
                 .first()
                 .map(String::as_str)
                 .unwrap_or("admission_denied");
-            if matches!(
-                reason,
-                "ai_source_unavailable" | "ai_prior_dispatch_unresolved"
-            ) {
-                item.skip_unattempted(db, reason).await?;
-            } else {
-                item.defer(db, reason).await?;
+            match reason {
+                "ai_source_unavailable" => {
+                    item.skip_unattempted(db, "ai_source_unavailable").await?
+                }
+                "ai_prior_dispatch_unresolved" => {
+                    item.skip_unattempted(db, "ai_prior_dispatch_unresolved")
+                        .await?;
+                }
+                _ => item.defer(db, reason).await?,
             }
             return Ok(());
         }
