@@ -512,3 +512,122 @@ async fn content_workbench_http_desk_card_positions_round_trip() {
     .await;
     assert!(status.is_client_error());
 }
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof; no shared database"]
+async fn content_workbench_http_opens_one_draft_per_account_all_or_none() {
+    let db = proof("creation_http_open_drafts").await;
+    let (first, _) = work_fixture::ops_seed(&db).await;
+    let mut accounts = vec![];
+    for name in ["合成第二号", "合成第三号", "合成第四号"] {
+        let account = Uuid::new_v4();
+        sqlx::query("INSERT INTO linggan_ops_account(account_ref,source_system,source_record_id,domain_ref,ledger_state,platform,account_name,status,is_retained,review_status,profile_link_state,source_created_at,source_updated_at,first_batch_ref,last_changed_batch_ref) SELECT $1,source_system,$3,domain_ref,ledger_state,platform,$3,status,is_retained,review_status,'missing',source_created_at,source_updated_at,first_batch_ref,last_changed_batch_ref FROM linggan_ops_account WHERE account_ref=$2")
+            .bind(account).bind(first).bind(name).execute(db.pool()).await.unwrap();
+        accounts.push(account);
+    }
+    let app = super::creation_members_tests::admin_app(db).await;
+    let idea = Uuid::new_v4();
+    let mut anchor = WorkDocument::default();
+    anchor.title = "独立的笔记标题".into();
+    anchor.account_ref = Some(first);
+    anchor.idea_ref = Some(idea);
+    anchor.idea_name = Some("合成选题".into());
+    anchor.angle = "这篇想说的合成意图".into();
+    let (status, _) = call(
+        app.clone(),
+        "/ops/api/creation/works",
+        Some(json!({"requestId":Uuid::new_v4(),"domainRef":dossier::DOMAIN,"document":anchor})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let route = format!("/ops/api/creation/idea-boxes/{idea}/drafts");
+    let open = |accounts: &[Uuid]| json!({"requestId":Uuid::new_v4(),"accountRefs":accounts});
+    let works = |app: Router| async move {
+        let (_, works) = call(
+            app,
+            &format!("/ops/api/creation/works?domainRef={}", dossier::DOMAIN),
+            None,
+        )
+        .await;
+        works["items"].as_array().unwrap().len()
+    };
+
+    // An account the ledger does not know is refused while there is room, and the valid one beside it is not opened.
+    let (status, _) = call(
+        app.clone(),
+        &route,
+        Some(open(&[accounts[0], Uuid::new_v4()])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(works(app.clone()).await, 1);
+
+    let (status, opened) = call(app.clone(), &route, Some(open(&[accounts[0], accounts[1]]))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(opened["ideaRef"], idea.to_string());
+    assert_eq!(opened["skippedExcerpts"], 0);
+    assert_eq!(opened["replayed"], false);
+    let drafts = opened["drafts"].as_array().unwrap();
+    assert_eq!(drafts.len(), 2);
+    assert!(drafts.iter().all(|draft| draft["created"] == true));
+    assert_eq!(drafts[0]["accountRef"], accounts[0].to_string());
+    assert_eq!(works(app.clone()).await, 3);
+    // The new draft is an ordinary draft: it reads through the ordinary route, linked to the idea.
+    let (status, read) = call(
+        app.clone(),
+        &format!(
+            "/ops/api/creation/works/{}",
+            drafts[0]["workId"].as_str().unwrap()
+        ),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(read["revision"]["document"]["ideaRef"], idea.to_string());
+    assert_eq!(
+        read["revision"]["document"]["accountRef"],
+        accounts[0].to_string()
+    );
+    assert_eq!(
+        read["revision"]["document"]["ideaName"],
+        serde_json::Value::Null
+    );
+
+    // Asking again opens nothing; the idea already has its three accounts.
+    let (status, again) = call(app.clone(), &route, Some(open(&[accounts[0]]))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(again["drafts"][0]["created"], false);
+    assert_eq!(again["replayed"], false);
+    assert_eq!(again["drafts"][0]["workId"], drafts[0]["workId"]);
+    assert_eq!(works(app.clone()).await, 3);
+
+    // A fourth account, none, too many, an unknown field, an unknown idea: each refused with nothing opened.
+    let (status, body) = call(app.clone(), &route, Some(open(&[accounts[2]]))).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "creation_idea_account_limit");
+    let (status, _) = call(app.clone(), &route, Some(open(&[]))).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        app.clone(),
+        &route,
+        Some(open(&[first, accounts[0], accounts[1], accounts[2]])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    let (status, _) = call(
+        app.clone(),
+        &route,
+        Some(json!({"requestId":Uuid::new_v4(),"accountRefs":[accounts[0]],"domainRef":dossier::DOMAIN})),
+    )
+    .await;
+    assert!(status.is_client_error());
+    let (status, body) = call(
+        app.clone(),
+        &format!("/ops/api/creation/idea-boxes/{}/drafts", Uuid::new_v4()),
+        Some(open(&[accounts[0]])),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(body["code"], "creation_idea_not_found");
+    assert_eq!(works(app).await, 3);
+}

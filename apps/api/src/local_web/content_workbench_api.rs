@@ -10,6 +10,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
         .route("/ops/api/creation/works", get(list).post(create))
         .route("/ops/api/creation/idea-boxes", get(ideas))
         .route(
+            "/ops/api/creation/idea-boxes/{idea}/drafts",
+            post(open_idea_drafts),
+        )
+        .route(
             "/ops/api/creation/desk/positions",
             get(desk_positions).post(place_desk_frame),
         )
@@ -150,6 +154,29 @@ async fn create(
         return error(err.into());
     }
     receipt(result)
+}
+/// 一题多号: one draft per account under an idea, all or none; see `core::open_idea_drafts_as_in`.
+async fn open_idea_drafts(
+    State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
+    Path(idea): Path<Uuid>,
+    Json(r): Json<OpenIdeaDraftsRequest>,
+) -> Response {
+    let db = database!(state);
+    let mut tx = match db.pool().begin().await {
+        Ok(tx) => tx,
+        Err(err) => return error(err.into()),
+    };
+    if let Err(response) = super::creation_members::require_active(&mut tx, &member).await {
+        return response;
+    }
+    let result = core::open_idea_drafts_as_in(&mut tx, idea, &r, Some(member.member_ref)).await;
+    if result.is_ok()
+        && let Err(err) = tx.commit().await
+    {
+        return error(err.into());
+    }
+    reply(result)
 }
 async fn read(State(state): State<LocalWebState>, Path(id): Path<Uuid>) -> Response {
     reply(core::read_work(database!(state), id).await)
