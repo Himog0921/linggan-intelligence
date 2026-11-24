@@ -76,7 +76,7 @@ describe('B-04 用户评论', () => {
   expect(filteredPages).toEqual(['first', '100', '200']);
   await user.click(screen.getByRole('button', { name: /预览研究计划/ }));
   const dialog = await screen.findByRole('dialog', { name: '本次研究预览' });
-  await within(dialog).findByText('将提交 · 按所属作品分组');
+  await within(dialog).findByText('按所属作品分组');
   expect(dialog.querySelector('strong')).toHaveTextContent('将提交 280 条评论 · 预计调用 14 次');
   expect(within(dialog).getByText('不会提交 19 条')).toBeInTheDocument();
   expect(within(dialog).getByText('已有研究结果，本次跳过')).toBeInTheDocument();

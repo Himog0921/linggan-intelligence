@@ -122,7 +122,7 @@ describe('B-04 研究预览', () => {
   await user.click(screen.getAllByRole('checkbox', { name: '选择这条评论' })[0]!);
   await user.click(screen.getByRole('button', { name: /预览研究计划/ }));
   const dialog = await screen.findByRole('dialog', { name: '本次研究预览' });
-  await within(dialog).findByText('将提交 · 按所属作品分组');
+  await within(dialog).findByText('按所属作品分组');
   expect(dialog.querySelector('strong')).toHaveTextContent('将提交 1 条评论 · 预计调用 1 次');
   expect(within(dialog).getByText('已选 2 条，其中 1 条不会提交')).toBeInTheDocument();
   expect(within(dialog).getByText('合成作品')).toBeInTheDocument();

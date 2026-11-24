@@ -138,7 +138,7 @@ export function ResearchPreview({ domain, selected, initialRerun, nav, close, su
             <div><b>{num(excludedCount)}</b><span>不会提交</span></div>
           </div>
           {rerun && plan.researched ? <div className={c('notice info')}>其中 {num(plan.researched)} 条已有研究结果：本次会生成新结果，现有结果保留到新结果完成为止。</div> : null}
-          <h3 className={c('preview-h')}>将提交 · 按所属作品分组</h3>
+          <h3 className={c('preview-h')}>按所属作品分组</h3>
           {plan.groups ? plan.groups.length ? plan.groups.map(group => { const state = groupState(group); return <div key={group.workRef} className={c('plan-group')}>
             <div><strong>{titleOf(group.workRef)}</strong><small>{[`将提交 ${num(group.researchable)} 条`, `${num(group.units)} 个研究单元`,
               group.researched ? `已有结果 ${num(group.researched)} 条` : '', group.selected !== group.researchable ? `已选 ${num(group.selected)} 条` : ''].filter(Boolean).join(' · ')}</small></div>
