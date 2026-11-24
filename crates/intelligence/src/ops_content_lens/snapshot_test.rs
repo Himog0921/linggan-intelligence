@@ -232,7 +232,8 @@ async fn record_views(db: &Database, publication: Uuid, seq: i64, count: Option<
 #[ignore = "requires the disposable ops ledger proof database"]
 async fn native_refresh_tracks_pending_and_reactivates_prior_snapshot() {
     use crate::ops_content_lens::{
-        SnapshotLookup, build_snapshot, label::IncrementalLabels, read_snapshot, refresh_pending,
+        SnapshotLookup, board_status, build_snapshot, label::IncrementalLabels, read_snapshot,
+        refresh_pending,
     };
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let db = isolated_proof_schema(&url, "ops_content_lens_refresh", fixture::FULL_MIGRATIONS)
@@ -326,6 +327,14 @@ async fn native_refresh_tracks_pending_and_reactivates_prior_snapshot() {
     let restored = refresh_pending(&db).await.unwrap();
     assert!(restored.snapshots[0].reused);
     assert_eq!(lookup(None).await.unwrap().snapshot.unwrap(), before_revoke);
+    let status = board_status(&db, None).await.unwrap();
+    assert_eq!(
+        status.latest_snapshot_ref,
+        Some(restored.snapshots[0].snapshot_ref)
+    );
+    assert!(status.run.is_none());
+    let another_scope = board_status(&db, Some(Uuid::new_v4())).await.unwrap();
+    assert_eq!(another_scope.latest_snapshot_ref, None);
     let batches: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_ai_batch")
         .fetch_one(db.pool())
         .await

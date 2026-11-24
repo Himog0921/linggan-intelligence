@@ -117,7 +117,7 @@ pub async fn start(db: &Database, command_ref: Uuid) -> Result<RunReceipt, Found
     }
     lock_primary(&mut command.tx).await?;
     let s = Settings::current(&mut command.tx).await?;
-    let (titles, plan) = titles_in(&mut command.tx, &s).await?;
+    let (titles, mut plan) = titles_in(&mut command.tx, &s).await?;
     // Manual starts remain available, but they must leave titles already in an
     // automatic primary or its independent audit to that pipeline.
     let scheduled: Vec<String> = sqlx::query_scalar(
@@ -147,6 +147,9 @@ pub async fn start(db: &Database, command_ref: Uuid) -> Result<RunReceipt, Found
         .into_iter()
         .filter(|t| !scheduled.contains(&t.title_key))
         .collect();
+    plan.shards = titles
+        .len()
+        .div_ceil(s.definition.label_batch_size as usize);
     let (run_ref, batch_ref) = if titles.is_empty() {
         (None, None)
     } else {

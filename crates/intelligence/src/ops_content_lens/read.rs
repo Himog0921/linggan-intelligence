@@ -39,6 +39,21 @@ async fn latest_snapshot_ref(
     db: &Database,
     scope: &SnapshotScope,
 ) -> Result<Option<Uuid>, sqlx::Error> {
+    if scope.from.is_none() && scope.to.is_none() {
+        return sqlx::query_scalar(
+            "SELECT COALESCE(
+                (SELECT snapshot_ref FROM linggan_ops_lens_snapshot_current
+                 WHERE (domain_ref=$1::uuid OR (domain_ref IS NULL AND $1 IS NULL))
+                   AND published_from IS NULL AND published_to IS NULL),
+                (SELECT snapshot_ref FROM linggan_ops_lens_snapshot
+                 WHERE COALESCE(analysis_input->>'domainRef','')=COALESCE($1::uuid::text,'')
+                   AND analysis_input->>'from' IS NULL AND analysis_input->>'to' IS NULL
+                 ORDER BY as_of DESC,created_at DESC,snapshot_ref DESC LIMIT 1))",
+        )
+        .bind(scope.domain_ref)
+        .fetch_one(db.pool())
+        .await;
+    }
     sqlx::query_scalar(
         "SELECT COALESCE(
             (SELECT snapshot_ref FROM linggan_ops_lens_snapshot_current
