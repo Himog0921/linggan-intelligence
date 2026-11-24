@@ -627,3 +627,7 @@ body:has(.study-results-comments) :global(#comment-detail-body).study-detail-bod
   .study-word-tabs {flex-wrap:wrap}
   .study-word-foot {flex-wrap:wrap}
 }
+
+.study-automation-fields{display:grid;gap:var(--lgi-space-3);border:0;padding:0;margin:0}
+.study-automation-fields label{display:flex;align-items:center;gap:var(--lgi-space-2)}
+.study-automation-fields input:not([type=checkbox]){min-height:var(--lgi-space-8);padding:0 var(--lgi-space-2);background:var(--lgi-canvas);border:1px solid var(--lgi-border-strong);color:var(--lgi-ink)}

@@ -141,3 +141,45 @@ export async function submitL1(plan: Awaited<ReturnType<typeof planL1>>, command
     body: { domainRef, workRef, commandRef, knowledgeCutoff, taskConfigRef, taskRevision, inputHash } }),
   row => ({ reused: bool(row, 'reused'), requestRef: str(row, 'requestRef') }));
 }
+
+function automationSetting(row: Record<string, unknown>) {
+  return {
+    domainRef: str(row, 'domainRef'), enabled: bool(row, 'enabled'), revision: num(row, 'revision'),
+    minuteOfDay: num(row, 'minuteOfDay'), timeZone: str(row, 'timeZone'), selectionLimit: num(row, 'selectionLimit'),
+    enabledFrom: optStr(row, 'enabledFrom'), nextRunAt: optStr(row, 'nextRunAt'),
+  };
+}
+export type CommentAutomationSetting = ReturnType<typeof automationSetting>;
+export async function readAutomation(domain: string, before: string | null, signal?: AbortSignal) {
+  return decode(await read('/automation', domain, before ? { before } : {}, signal), row => {
+    const setting = automationSetting(obj(row, 'setting'));
+    if (setting.domainRef !== domain) throw new Error('自动化设置领域不一致');
+    return {
+      setting, nextBefore: optStr(row, 'nextBefore'),
+      selections: list(row, 'selections', item => ({
+        selectionRef: str(item, 'selectionRef'), scheduledAt: str(item, 'scheduledAt'),
+        generatedAt: str(item, 'generatedAt'), targetCount: num(item, 'targetCount'),
+      })),
+    };
+  });
+}
+export interface CommentAutomationChange {
+  commandRef: string; domainRef: string; expectedRevision: number; enabled: boolean;
+  minuteOfDay: number; timeZone: string; selectionLimit: number;
+}
+export async function changeAutomation(change: CommentAutomationChange) {
+  return decode(await post('/automation', change), row => {
+    const setting = automationSetting(row);
+    if (setting.domainRef !== change.domainRef) throw new Error('自动化设置回执领域不一致');
+    return setting;
+  });
+}
+export async function readAutomationSelection(domain: string, selectionRef: string, signal?: AbortSignal): Promise<SelectedComment[]> {
+  return decode(await read(`/automation/selections/${encodeURIComponent(selectionRef)}`, domain, {}, signal), row => {
+    if (str(row, 'domainRef') !== domain || str(row, 'selectionRef') !== selectionRef) throw new Error('自动清单范围不一致');
+    return list(row, 'selections', item => ({
+      sourceRef: str(item, 'sourceRef'), observationRole: str(item, 'observationRole'),
+      commentKey: { workRef: str(item, 'workRef'), commentExternalId: str(item, 'commentExternalId') },
+    }));
+  });
+}

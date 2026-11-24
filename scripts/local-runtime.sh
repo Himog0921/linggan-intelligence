@@ -550,6 +550,7 @@ migrate() {
   apply_migration_once "0236_ops_lens_settled_primary" "$project_root/database/migrations/0236_ops_lens_settled_primary.sql"
   apply_migration_once "0237_creation_member_authorship" "$project_root/database/migrations/0237_creation_member_authorship.sql"
   apply_migration_once "0238_creation_publication_member" "$project_root/database/migrations/0238_creation_publication_member.sql"
+  apply_migration_once "0239_comment_research_automation" "$project_root/database/migrations/0239_comment_research_automation.sql"
 }
 
 case "$command_name" in

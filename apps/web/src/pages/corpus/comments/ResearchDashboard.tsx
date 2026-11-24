@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRef, useState } from 'react';
 import { ActionButton } from '../../../shared/ActionButton';
 import { StudyDialog } from './StudyDialog';
+import { CommentAutomation } from './CommentAutomation';
 import { CommentResearchSelection } from './CommentResearchSelection';
 import { studyTime } from './format';
 import { STATES } from './researchModel';
@@ -21,6 +22,7 @@ export function ResearchDashboard({ domain, view, nav, runRef, problemRef }: { d
 function Runs({ domain, nav, runRef }: { domain: string; nav: StudyNavigation; runRef?: string | null }) {
   const [notice, setNotice] = useState('');
   const [busy, setBusy] = useState(false);
+  const [showingSettings, setShowingSettings] = useState(false);
   const command = useRef<{ revision: number; id: string } | null>(null);
   const runs = useQuery({
     queryKey: ['comment-understanding', domain, 'runs'],
@@ -44,9 +46,11 @@ function Runs({ domain, nav, runRef }: { domain: string; nav: StudyNavigation; r
   return <section className={c('study-detail-section')} aria-label="评论研究进度">
     <h2>研究记录</h2>
     <div className={c('study-link-actions')}>
+      <ActionButton type="button" onClick={() => setShowingSettings(true)}>自动化设置</ActionButton>
       <ActionButton type="button" disabled={runs.isFetching} onClick={() => void runs.refetch()}>刷新研究记录</ActionButton>
       {runs.data && !runs.isError ? <ActionButton type="button" disabled={busy} onClick={() => void consolidate()}>整理候选</ActionButton> : null}
     </div>
+    <CommentAutomation key={domain} domain={domain} nav={nav} showingSettings={showingSettings} closeSettings={() => setShowingSettings(false)} />
     {runs.isPending ? <p>正在读取研究记录…</p> : runs.isError ? <p role="alert">研究记录读取失败，请重试刷新。</p> : <>
       {!runs.data.runs.length ? <p>尚无评论理解运行。</p> : <ul>{runs.data.runs.map(run => <li key={run.batchRef}>
         <button className={c('study-link')} type="button" aria-current={runRef === run.batchRef || undefined} onClick={() => nav.run?.(run.batchRef)}>

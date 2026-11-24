@@ -4,6 +4,7 @@
 //! The model proposes meaning only. Which evidence is accepted, which catalog entries exist, who
 //! counts as a distinct author and whether a Problem is formal are decided by this crate.
 mod accept;
+pub mod automation;
 pub mod catalog;
 mod consolidation;
 pub(crate) mod consolidation_queue;

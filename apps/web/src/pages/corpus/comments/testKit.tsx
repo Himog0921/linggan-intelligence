@@ -33,6 +33,11 @@ export function defaultReply(url: URL) {
  if (endpoint === 'comments') return { domainRef: domain, items: [comment(), comment('c2', false)], summary: { displayableCommentCount: 200, eligibleCommentCount: 100 }, indexCoverage: { indexedCount: 200, pendingCount: null }, page: { nextCursor: null } };
  if (endpoint === 'works') return { domainRef: domain, items: [{ workRef: WORK, displayTitle: '合成作品', displayTitleSource: 'platform_title', observationRole: 'primary', eligibleCommentCount: 100 }], totalWorkCount: 1, indexCoverage: { indexedCount: 100, pendingCount: null }, page: { nextCursor: null } };
  if (url.pathname === '/api/local/comment-research/v2/overview') return overview(url.searchParams.get('domainRef') || DOMAIN);
+ if (url.pathname === '/api/local/comment-research/v2/automation') return {
+  setting: { domainRef: url.searchParams.get('domainRef') || DOMAIN, enabled: false, minuteOfDay: 540, timeZone: 'Asia/Shanghai',
+   selectionLimit: 300, revision: 0, enabledFrom: null, nextRunAt: null },
+  selections: [], nextBefore: null,
+ };
  if (url.pathname === '/api/local/comment-research/v2/runs') return { domainRef: domain, runs: [], consolidationTaskRevision: 1, consolidations: [] };
  if (url.pathname === '/api/local/comment-research/v2/problems') return { domainRef: domain, problems: [], candidates: [] };
  throw new Error('Unexpected test endpoint ' + url.pathname);
