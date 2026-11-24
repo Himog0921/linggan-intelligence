@@ -6,7 +6,7 @@ use linggan_storage_postgres::Database;
 use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 #[path = "comment_study_catalog/cursor.rs"]
@@ -57,7 +57,7 @@ pub(crate) fn like_heads_sql() -> &'static str {
     include_str!("comment_study_catalog/like_heads.sql")
 }
 
-const MAX_REFRESH_LIMIT: i64 = 200;
+pub(super) const MAX_REFRESH_LIMIT: i64 = 200;
 const MAX_QUERY_CHARS: usize = 200;
 
 #[derive(Debug, thiserror::Error)]
@@ -156,11 +156,25 @@ pub async fn refresh_clean_cache(
     if !exists {
         return Err(StudyCatalogError::UnsupportedDomain);
     }
+    let report = refresh_clean_cache_in(&mut transaction, domain_ref, limit, None).await?;
+    transaction.commit().await?;
+    Ok(report)
+}
+
+pub(super) async fn refresh_clean_cache_in(
+    transaction: &mut Transaction<'_, Postgres>,
+    domain_ref: Uuid,
+    limit: i64,
+    window: Option<(&str, &str)>,
+) -> Result<CleanCacheRefresh, StudyCatalogError> {
+    let (after, as_of) = window.unzip();
     let rows = sqlx::query(include_str!("comment_study_catalog/refresh_candidates.sql"))
         .bind(CLEANER_VERSION)
         .bind(limit)
         .bind(domain_ref)
-        .fetch_all(&mut *transaction)
+        .bind(after)
+        .bind(as_of)
+        .fetch_all(&mut **transaction)
         .await?;
     let invalid: i64 = rows
         .first()
@@ -186,7 +200,7 @@ pub async fn refresh_clean_cache(
             .bind(&item.clean_state)
             .bind(json!(item.clean_reasons))
             .bind(domain_ref)
-            .execute(&mut *transaction)
+            .execute(&mut **transaction)
             .await?;
         if written.rows_affected() == 1 {
             report.inserted_count += 1;
@@ -199,7 +213,7 @@ pub async fn refresh_clean_cache(
         )
         .bind(source_ref)
         .bind(CLEANER_VERSION)
-        .fetch_optional(&mut *transaction)
+        .fetch_optional(&mut **transaction)
         .await?;
         match existing {
             Some(existing) => {
@@ -215,7 +229,6 @@ pub async fn refresh_clean_cache(
             None => report.skipped_count += 1, // source became unavailable before insertion
         }
     }
-    transaction.commit().await?;
     Ok(report)
 }
 

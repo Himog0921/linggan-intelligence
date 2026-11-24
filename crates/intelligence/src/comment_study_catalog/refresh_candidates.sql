@@ -11,8 +11,16 @@ WITH observations AS MATERIALIZED (
     WHERE EXISTS (
         SELECT 1 FROM linggan_material_domain_usage usage
         WHERE usage.content_public_ref = content.public_ref AND usage.domain_ref = $3
-    ) AND package.accepted_at <= scope_001_now()
-      AND comment.created_at <= scope_001_now()
+          AND ($4::timestamptz IS NULL OR (usage.use_kind = 'domain_research' AND usage.role = 'primary'))
+    ) AND package.accepted_at <= COALESCE($5::timestamptz, scope_001_now())
+      AND comment.created_at <= COALESCE($5::timestamptz, scope_001_now())
+      AND ($4::timestamptz IS NULL OR EXISTS (
+          SELECT 1 FROM linggan_material_comment_first_admission first
+          JOIN linggan_runtime_capture_package admitted ON admitted.package_ref = first.first_package_ref
+          WHERE first.content_public_ref = comment.content_public_ref
+            AND first.comment_external_id = comment.comment_external_id
+            AND admitted.accepted_at >= $4::timestamptz
+      ))
 ), latest AS MATERIALIZED (
     SELECT DISTINCT ON (content_public_ref, comment_external_id) * FROM observations
     WHERE parsed_observed_at IS NOT NULL

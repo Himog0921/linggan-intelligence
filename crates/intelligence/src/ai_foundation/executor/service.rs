@@ -103,6 +103,7 @@ async fn work_loop(
 ) -> Result<(), ExecutorError> {
     let mut tasks = JoinSet::new();
     let mut opportunity_jobs = JoinSet::new();
+    let mut selection_jobs = JoinSet::new();
     let mut failure = None;
     let mut poll = tokio::time::interval(Duration::from_millis(200));
     poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -113,12 +114,18 @@ async fn work_loop(
     let lens_enabled = crate::ops_content_lens::enabled_from_env();
     loop {
         if drain.is_requested() && tasks.is_empty() {
+            selection_jobs.shutdown().await;
             return failure.map_or(Ok(()), Err);
         }
         tokio::select! {
             result=opportunity_jobs.join_next(),if !opportunity_jobs.is_empty()=>{
                 if let Some(Err(error))=result {
                     if let Some(sync)=&opportunity_sync { sync.defer(&error); }
+                }
+            },
+            result=selection_jobs.join_next(),if !selection_jobs.is_empty()=>{
+                if let Some(Err(error))=result {
+                    eprintln!("comment research selection scan interrupted: {error}");
                 }
             },
             result=tasks.join_next(),if !tasks.is_empty()=>{
@@ -153,6 +160,14 @@ async fn work_loop(
                     }
                     if lens_enabled && let Err(error) = crate::ops_content_lens::label::advance(db).await {
                         eprintln!("content lens follow-up deferred: {error}");
+                    }
+                    if selection_jobs.is_empty() {
+                        let selection_db = db.clone();
+                        selection_jobs.spawn(async move {
+                            if let Err(error) = crate::ai_foundation::comment_understanding::automation::tick(&selection_db).await {
+                                eprintln!("comment research selection scan deferred: {error}");
+                            }
+                        });
                     }
                     if let Err(error) = crate::ai_foundation::comment_understanding::consolidation_queue::tick(db).await {
                         eprintln!("comment consolidation scan deferred: {error}");

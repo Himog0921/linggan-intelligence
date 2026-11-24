@@ -35,6 +35,34 @@ try {
   await page.getByRole('button',{name:'近 56 天',exact:true}).click();await page.getByRole('button',{name:'图表',exact:true}).click();
   await hero.getByRole('img',{name:'评论柱状与研究信号渐变曲线，共同横轴及采集覆盖',exact:true}).waitFor();
  });
+ await step('save, reload and pause comment research scheduling without creating a run', async () => {
+  await page.getByRole('link', { name: '研究记录', exact: true }).click();
+  const settings = page.getByRole('button', { name: '自动化设置', exact: true });
+  const dialog = page.getByRole('dialog', { name: '评论研究自动化设置', exact: true });
+  const enabled = dialog.getByRole('checkbox', { name: '启用定时生成清单', exact: true });
+  const limit = dialog.getByRole('spinbutton', { name: '每份清单最多评论数', exact: true });
+  const save = dialog.getByRole('button', { name: '保存设置', exact: true });
+  await settings.click();
+  await enabled.waitFor();
+  assert.equal(await enabled.isChecked(), false);
+  await enabled.check();
+  await limit.fill('25');
+  const configured = await post(save, commentV2 + '/automation');
+  assert.equal(configured.enabled, true);
+  assert.equal(configured.selectionLimit, 25);
+  assert.ok(configured.nextRunAt);
+  await page.reload();
+  await settings.click();
+  await enabled.waitFor();
+  assert.equal(await enabled.isChecked(), true);
+  assert.equal(await limit.inputValue(), '25');
+  await enabled.uncheck();
+  const paused = await post(save, commentV2 + '/automation');
+  assert.equal(paused.enabled, false);
+  assert.equal(paused.enabledFrom, configured.enabledFrom);
+  assert.equal(paused.nextRunAt, null);
+  assert.equal((await get(`${commentV2}/runs?domainRef=${domain}`)).runs.length, 0);
+ });
  await step('freeze a filtered catalog selection and reuse L1 from the preview',async()=>{
   await page.goto(`${origin}/corpus/comments?domain=${domain}&view=comments`);
   await page.getByRole('button',{name:'选择评论',exact:true}).click();

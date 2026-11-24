@@ -630,6 +630,163 @@ async fn comments_of_a_work_without_l1_wait_and_are_not_planned() {
 }
 
 #[tokio::test]
+#[ignore = "owned isolated PostgreSQL only"]
+async fn scheduled_selections_are_ordered_bounded_and_do_not_enqueue_models() {
+    use super::automation;
+    let (db, _) = support::setup("cu_scheduled_selections").await;
+    let domain = support::D;
+    let work = support::work(&db, "schedule-work", "合成正文").await;
+    let before_enabling = support::comments::comment_with_author(
+        &db,
+        "schedule-work",
+        "before-enabling",
+        "之前收录的评论有很具体的家庭作业困难",
+        Some("reader-old"),
+        "2026-10-14T00:00:00Z",
+    )
+    .await;
+    assert_eq!(
+        automation::read(&db, domain, None).await.unwrap()["setting"]["enabled"],
+        false
+    );
+    let change = automation::Change {
+        command_ref: Uuid::new_v4(),
+        domain_ref: domain,
+        expected_revision: 0,
+        enabled: true,
+        minute_of_day: 540,
+        time_zone: "Asia/Shanghai".into(),
+        selection_limit: 1,
+    };
+    let receipt = automation::change(&db, &change).await.unwrap();
+    assert_eq!(receipt["revision"], 1);
+    assert_eq!(automation::change(&db, &change).await.unwrap(), receipt);
+
+    let set_due = |seconds: i32| {
+        sqlx::query(
+            "UPDATE linggan_comment_research_automation
+             SET next_run_at=scope_001_now()-make_interval(secs=>$1::int)
+             WHERE domain_ref=$2",
+        )
+        .bind(seconds)
+        .bind(domain)
+        .execute(db.pool())
+    };
+    let earlier = support::comments::comment_with_author(
+        &db,
+        "schedule-work",
+        "z-first",
+        "我家孩子每天都要提醒才愿意动笔",
+        Some("reader-a"),
+        "2026-10-14T00:00:00Z",
+    )
+    .await;
+    let later = support::comments::comment_with_author(
+        &db,
+        "schedule-work",
+        "a-second",
+        "孩子到了睡前总是想起来没有完成作业",
+        Some("reader-b"),
+        "2026-10-14T00:00:00Z",
+    )
+    .await;
+    set_due(60).await.unwrap();
+    let (first_tick, competing_tick) = tokio::join!(automation::tick(&db), automation::tick(&db));
+    first_tick.unwrap();
+    competing_tick.unwrap();
+    let indexed: Vec<Uuid> = sqlx::query_scalar(
+        "SELECT source_ref FROM linggan_comment_clean_cache WHERE source_ref=ANY($1)",
+    )
+    .bind([before_enabling, earlier, later].as_slice())
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(indexed.len(), 2);
+    assert!(!indexed.contains(&before_enabling));
+    let rows = automation::read(&db, domain, None).await.unwrap();
+    let items = rows["selections"].as_array().unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["targetCount"], 1);
+    let first_ref: Uuid = serde_json::from_value(items[0]["selectionRef"].clone()).unwrap();
+    let first = automation::read_selection(&db, domain, first_ref)
+        .await
+        .unwrap();
+    assert_eq!(first["selections"][0]["sourceRef"], json!(earlier));
+    assert!(matches!(
+        automation::read_selection(&db, Uuid::new_v4(), first_ref).await,
+        Err(crate::ai_foundation::store::FoundationError::NotFound)
+    ));
+    let reobserved = support::comments::comment_with_author(
+        &db,
+        "schedule-work",
+        "z-first",
+        "我家孩子每天都要提醒才愿意动笔",
+        Some("reader-a"),
+        "2026-10-15T00:00:00Z",
+    )
+    .await;
+    assert_ne!(earlier, reobserved);
+    let first = automation::read_selection(&db, domain, first_ref)
+        .await
+        .unwrap();
+    let source = serde_json::from_value(first["selections"][0]["sourceRef"].clone()).unwrap();
+    assert_eq!(source, reobserved);
+    let recorded: Uuid = sqlx::query_scalar(
+        "SELECT source_ref FROM linggan_comment_research_selection_target WHERE selection_ref=$1",
+    )
+    .bind(first_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(recorded, earlier);
+    let plan = preview(&db, domain, &[selection(work, source)], false)
+        .await
+        .unwrap();
+    assert_eq!(plan["waitingL1"]["targetCount"], 1);
+
+    set_due(30).await.unwrap();
+    automation::tick(&db).await.unwrap();
+    let rows = automation::read(&db, domain, None).await.unwrap();
+    let items = rows["selections"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["targetCount"], 1);
+    let second_ref = serde_json::from_value(items[0]["selectionRef"].clone()).unwrap();
+    let second = automation::read_selection(&db, domain, second_ref)
+        .await
+        .unwrap();
+    assert_eq!(second["selections"][0]["sourceRef"], json!(later));
+
+    sqlx::query(
+        "INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason)
+         VALUES($1,'z-first','synthetic restriction')",
+    )
+    .bind(work)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let first = automation::read_selection(&db, domain, first_ref)
+        .await
+        .unwrap();
+    assert_eq!(first["selections"], json!([]));
+    let off = automation::Change {
+        command_ref: Uuid::new_v4(),
+        expected_revision: 1,
+        enabled: false,
+        ..change
+    };
+    let paused = automation::change(&db, &off).await.unwrap();
+    assert_eq!(paused["enabledFrom"], receipt["enabledFrom"]);
+    assert!(paused["nextRunAt"].is_null());
+    let (batches, calls): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM linggan_ai_batch), (SELECT count(*) FROM linggan_model_invocation)",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!((batches, calls), (0, 0));
+}
+
+#[tokio::test]
 #[ignore = "owned isolated PostgreSQL and loopback provider only"]
 async fn downstream_readers_see_v2_research_and_stop_at_a_restricted_comment() {
     let env = environment("cu_readers", "normal").await;

@@ -72,6 +72,64 @@ describe('D3 actual four-view React boundary', () => {
   expect(starts[0]?.body).toMatchObject({ expectedPlanHash: planHash, selections: preview[0]?.body?.selections });
  });
 
+ it('saves the daily schedule from research records and leaves launch to the operator', async () => {
+  const time = '2026-11-20T01:00:00Z';
+  let enabled = false;
+  let sourceRef = 'source-c1';
+  installFetch((url, request) => {
+    if (url.pathname.endsWith('/v2/automation')) {
+      if (request.method === 'POST') enabled = true;
+      const setting = { domainRef: DOMAIN, enabled, minuteOfDay: 540, timeZone: 'Asia/Shanghai',
+        selectionLimit: enabled ? 25 : 300, revision: enabled ? 1 : 0,
+        enabledFrom: enabled ? time : null, nextRunAt: enabled ? time : null };
+      if (request.method === 'POST') return json(setting);
+      return json({ setting, nextBefore: null, selections: enabled
+        ? [{ selectionRef: 'daily-1', scheduledAt: time, generatedAt: time, targetCount: 1 }] : [] });
+    }
+    if (url.pathname.endsWith('/automation/selections/daily-1')) return json({
+      domainRef: DOMAIN, selectionRef: 'daily-1',
+      selections: [{ workRef: WORK, sourceRef, commentExternalId: 'c1', observationRole: 'primary' }],
+    });
+    if (url.pathname.endsWith('/v2/preview')) return json({
+      domainRef: DOMAIN, knowledgeCutoff: time, planHash: 'e'.repeat(64), taskConfigRef: 'config', taskRevision: 2,
+      selectedCount: 1, researchableCount: 1, workCount: 1, unitCount: 1, expectedModelCalls: 1,
+      waitingL1: { targetCount: 0, workRefs: [] }, alreadyResearchedCount: 0, alreadyQueuedCount: 0,
+      dispatchUnresolvedCount: 0, excludedCounts: {},
+    });
+    return undefined;
+  });
+  renderPage(`domain=${DOMAIN}&view=runs`);
+  const user = userEvent.setup();
+  await user.click(await screen.findByRole('button', { name: '自动化设置' }));
+  const dialog = within(screen.getByRole('dialog', { name: '评论研究自动化设置' }));
+  await user.click(await dialog.findByRole('checkbox', { name: '启用定时生成清单' }));
+  const limit = dialog.getByRole('spinbutton', { name: '每份清单最多评论数' });
+  await user.clear(limit);
+  await user.type(limit, '25');
+  await user.click(dialog.getByRole('button', { name: '保存设置' }));
+  await screen.findByText('自动化设置已保存。');
+  await user.click(await screen.findByRole('button', { name: '查看清单' }));
+  const preview = await screen.findByRole('button', { name: '预览所选评论' });
+  expect(calls.filter(call => call.method === 'POST').map(call => call.url.pathname)).toEqual(['/api/local/comment-research/v2/automation']);
+  expect(calls.find(call => call.method === 'POST')?.body).toMatchObject({
+    domainRef: DOMAIN, enabled: true, minuteOfDay: 540, selectionLimit: 25, expectedRevision: 0, timeZone: 'Asia/Shanghai',
+  });
+  await user.click(preview);
+  expect(await screen.findByRole('button', { name: '开始所选评论研究' })).toBeVisible();
+  expect(calls.filter(call => call.method === 'POST').map(call => call.url.pathname)).toEqual([
+    '/api/local/comment-research/v2/automation', '/api/local/comment-research/v2/preview',
+  ]);
+
+  sourceRef = 'source-c1-reobserved';
+  await user.click(screen.getByRole('button', { name: '刷新清单' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: '开始所选评论研究' })).toBeNull());
+  await user.click(screen.getByRole('button', { name: '预览所选评论' }));
+  expect(await screen.findByRole('button', { name: '开始所选评论研究' })).toBeVisible();
+  const previews = calls.filter(call => call.method === 'POST' && call.url.pathname.endsWith('/v2/preview'));
+  expect(previews.at(-1)?.body?.selections).toEqual([{ workRef: WORK, sourceRef, observationRole: 'primary' }]);
+  expect(calls.some(call => call.method === 'POST' && call.url.pathname.endsWith('/v2/runs'))).toBe(false);
+ });
+
  it('does not expose a partial selection when a later directory page fails', async () => {
   installFetch(url => {
     if (!url.pathname.endsWith('/comments') || url.searchParams.get('limit') !== '100') return undefined;

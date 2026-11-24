@@ -30,6 +30,8 @@
 
 迁移 `0232` 退役三个旧任务，关闭旧开关，取消尚未派发的项。迁移先确认三个旧阶段表为空，再移除它们。共享调用账本继续保留。旧写入口和三阶段处理器已从候选代码移除。V2 的任务设置仍由普通 AI 设置管理，迁移不设置启用、模型或预算。详细数据和输出规则见[评论理解合同](comment-understanding.md)。
 
+研究记录提供按领域配置的每日清单。执行器按首次接纳时间选择新增评论，运营从清单进入现有预览和确认启动。设置和清单合同见[评论理解合同](comment-understanding.md#研究记录的自动化设置)。
+
 ## 主题研究
 
 `POST /api/local/topic-research` 显式选择最多 10 篇作品、最多 50 个完整底稿/评论窗口。`GET /api/local/topic-research/runs?domainRef=...` 返回最近 30 个 run、窗口及实际阶段回执；summary 是当前领域完整研究历史的阶段合计。`POST /api/local/topic-research/cancel` 只取消精确 run 的余下阶段。

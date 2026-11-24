@@ -13,6 +13,11 @@ use uuid::Uuid;
 pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/preview", post(preview))
+        .route("/automation", get(automation).post(change_automation))
+        .route(
+            "/automation/selections/{selection}",
+            get(automation_selection),
+        )
         .route("/overview", get(overview))
         .route("/runs", get(runs).post(start))
         .route("/runs/{batch}", get(run))
@@ -37,6 +42,44 @@ struct Preview {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Domain {
     domain_ref: Uuid,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct AutomationQuery {
+    domain_ref: Uuid,
+    before: Option<Uuid>,
+}
+
+async fn automation(
+    State(state): State<LocalWebState>,
+    Query(q): Query<AutomationQuery>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return ai_settings::unavailable();
+    };
+    ai_settings::respond(owner::automation::read(db, q.domain_ref, q.before).await)
+}
+
+async fn change_automation(
+    State(state): State<LocalWebState>,
+    Json(body): Json<owner::automation::Change>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return ai_settings::unavailable();
+    };
+    ai_settings::respond(owner::automation::change(db, &body).await)
+}
+
+async fn automation_selection(
+    State(state): State<LocalWebState>,
+    Query(q): Query<Domain>,
+    Path(selection): Path<Uuid>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return ai_settings::unavailable();
+    };
+    ai_settings::respond(owner::automation::read_selection(db, q.domain_ref, selection).await)
 }
 
 #[derive(Deserialize)]
