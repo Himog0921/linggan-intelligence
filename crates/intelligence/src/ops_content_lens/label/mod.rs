@@ -1,6 +1,9 @@
 //! Blind title-only labeling, independent primary/audit runs and versioned agreement.
 mod advance;
 mod contract;
+mod incremental;
+pub use incremental::IncrementalLabels;
+pub(super) use incremental::start_pending;
 mod progress;
 pub use progress::{RunProgress, read_run};
 mod run;

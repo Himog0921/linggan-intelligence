@@ -82,6 +82,8 @@ function publication(r: R) {
     title: sn(r, "title"),
     body: sn(r, "body"),
     creation: r.creation === undefined ? null : optional(r, "creation", draft => ({
+      linkRef: d.optStr(draft, "linkRef"),
+      registeredWithDraft: d.optBool(draft, "registeredWithDraft"),
       workId: s(draft, "workId"),
       domainRef: s(draft, "domainRef"),
       revisionId: s(draft, "revisionId"),

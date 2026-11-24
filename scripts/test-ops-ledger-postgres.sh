@@ -84,6 +84,7 @@ cargo test -p linggan-intelligence --test ops_ledger_read_postgres --locked -- -
 cargo test -p linggan-intelligence --test ops_overview_postgres --locked -- --ignored --nocapture --test-threads=1
 cargo test -p linggan-intelligence --lib --locked ops_content_lens::taxonomy::tests::definitions_and_shared_publication_example -- --ignored --exact
 cargo test -p linggan-intelligence --lib --locked ops_content_lens::taxonomy::tests::snapshot_test::snapshot_generation_reuses_input_and_preserves_frozen_members -- --ignored --exact
+cargo test -p linggan-intelligence --lib --locked ops_content_lens::taxonomy::tests::snapshot_test::native_refresh_tracks_pending_and_reactivates_prior_snapshot -- --ignored --exact
 AI_FOUNDATION_PROOF_NODE="$(command -v node)" LINGGAN_OPS_CONTENT_LENS=enabled cargo test -p linggan-intelligence --lib --locked ops_content_lens::label::tests::synthetic_executor_runs_primary_audit_and_withholds_invalid_shard -- --ignored --exact
 cargo test -p linggan-api --locked --bins -- ops_auth_tests::title_run_route_respects_flag_and_admin_session --ignored
 echo "OPS-MIGRATION-001 PostgreSQL proof passed"

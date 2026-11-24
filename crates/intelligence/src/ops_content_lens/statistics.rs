@@ -160,10 +160,15 @@ pub(super) fn summarize(
         }
         let mut counts = Vec::new();
         let mut effect_rows = Vec::new();
-        let passed = agreements
-            .iter()
-            .filter(|a| a.dimension == name)
-            .all(|a| a.meets_threshold);
+        let mut dimension_agreements = agreements.iter().filter(|a| a.dimension == name).peekable();
+        let unavailable_reason = if dimension_agreements.peek().is_none() {
+            Some("no_data")
+        } else if !dimension_agreements.all(|a| a.meets_threshold) {
+            Some("agreement_below_threshold")
+        } else {
+            None
+        };
+        let passed = unavailable_reason.is_none();
         for entry in entries {
             let group = groups.remove(entry.key.as_str()).unwrap_or_default();
             counts.push(json!({"key":entry.key,"name":entry.name,"publications":group.len(),"share":(!rows.is_empty()).then(||group.len() as f64/rows.len() as f64)}));
@@ -178,7 +183,7 @@ pub(super) fn summarize(
         }
         structure[name] = json!(counts);
         if name != "situation" {
-            effects[name] = json!({"available":passed,"unavailableReason":(!passed).then_some("agreement_below_threshold"),"rows":passed.then_some(effect_rows)});
+            effects[name] = json!({"available":passed,"unavailableReason":unavailable_reason,"rows":passed.then_some(effect_rows)});
             if passed {
                 for within in [false, true] {
                     variances.push(variance(&rows, name, within, &residual, m));

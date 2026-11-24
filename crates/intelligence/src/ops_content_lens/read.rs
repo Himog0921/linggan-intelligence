@@ -35,6 +35,44 @@ pub struct SnapshotRead {
     pub freshness: Option<Freshness>,
 }
 
+async fn latest_snapshot_ref(
+    db: &Database,
+    scope: &SnapshotScope,
+) -> Result<Option<Uuid>, sqlx::Error> {
+    if scope.from.is_none() && scope.to.is_none() {
+        return sqlx::query_scalar(
+            "SELECT COALESCE(
+                (SELECT snapshot_ref FROM linggan_ops_lens_snapshot_current
+                 WHERE (domain_ref=$1::uuid OR (domain_ref IS NULL AND $1 IS NULL))
+                   AND published_from IS NULL AND published_to IS NULL),
+                (SELECT snapshot_ref FROM linggan_ops_lens_snapshot
+                 WHERE COALESCE(analysis_input->>'domainRef','')=COALESCE($1::uuid::text,'')
+                   AND analysis_input->>'from' IS NULL AND analysis_input->>'to' IS NULL
+                 ORDER BY as_of DESC,created_at DESC,snapshot_ref DESC LIMIT 1))",
+        )
+        .bind(scope.domain_ref)
+        .fetch_one(db.pool())
+        .await;
+    }
+    sqlx::query_scalar(
+        "SELECT COALESCE(
+            (SELECT snapshot_ref FROM linggan_ops_lens_snapshot_current
+             WHERE domain_ref IS NOT DISTINCT FROM $1::uuid
+               AND published_from IS NOT DISTINCT FROM $2::text::date
+               AND published_to IS NOT DISTINCT FROM $3::text::date),
+            (SELECT snapshot_ref FROM linggan_ops_lens_snapshot
+             WHERE COALESCE(analysis_input->>'domainRef','')=COALESCE($1::uuid::text,'')
+               AND analysis_input->>'from' IS NOT DISTINCT FROM $2::text
+               AND analysis_input->>'to' IS NOT DISTINCT FROM $3::text
+             ORDER BY as_of DESC,created_at DESC,snapshot_ref DESC LIMIT 1))",
+    )
+    .bind(scope.domain_ref)
+    .bind(&scope.from)
+    .bind(&scope.to)
+    .fetch_one(db.pool())
+    .await
+}
+
 pub async fn read_snapshot(
     db: &Database,
     request: SnapshotLookup,
@@ -52,14 +90,16 @@ pub async fn read_snapshot(
     scope.validate()?;
     // Freshness is relative to the day of reading. The recorded body and its historical
     // staleDays remain exactly as generated; the range always matches all three bounds.
+    let reference = match request.snapshot_ref {
+        Some(reference) => Some(reference),
+        None => latest_snapshot_ref(db, &scope).await?,
+    };
     let result:Option<(Value,Option<i32>,i64)>=sqlx::query_as("SELECT s.body,
         (transaction_timestamp() AT TIME ZONE 'Asia/Shanghai')::date - (s.body#>>'{quality,latestPublishedDate}')::date,
         (d.body->>'stale_after_days')::bigint FROM linggan_ops_lens_snapshot s
         JOIN linggan_ops_lens_definition d ON d.definition_ref=s.metric_ref
-        WHERE s.snapshot_ref=$1 OR ($1 IS NULL AND s.analysis_input->>'domainRef' IS NOT DISTINCT FROM $2::text
-            AND s.analysis_input->>'from' IS NOT DISTINCT FROM $3 AND s.analysis_input->>'to' IS NOT DISTINCT FROM $4)
-        ORDER BY s.as_of DESC,s.created_at DESC,s.snapshot_ref DESC LIMIT 1")
-        .bind(request.snapshot_ref).bind(scope.domain_ref.map(|d|d.to_string())).bind(scope.from).bind(scope.to)
+        WHERE s.snapshot_ref=$1")
+        .bind(reference)
         .fetch_optional(db.pool()).await?;
     match result {
         Some((body, stale_days, threshold)) => Ok(SnapshotRead {

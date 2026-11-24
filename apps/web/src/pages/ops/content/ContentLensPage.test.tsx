@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
+import { newDocument } from '../../workbench/workbenchModel';
 import { ContentLensPage } from './ContentLensPage';
 
 const rate = { numerator:1, denominator:1, value:null, low:null, high:null, reason:'below_min_n' };
@@ -14,13 +15,13 @@ const body = { schemaVersion:'ops-content-lens.snapshot.v1', snapshotRef:'snapsh
   coverage:{ cells:[{ row:'method',column:'method',publications:2,state:'sparse' }],top10Share:1,emptyCells:0,sparseCells:1 },
   effect:{ grade:'hypothesis',byDimension:{offer:{available:true,rows:[row]},moment:{available:false,rows:null}}, varianceShare:[] },
 };
-function show(answer:(url:URL, init?:RequestInit)=>Response, allowWrite = false) {
+function show(answer:(url:URL, init?:RequestInit)=>Response, allowWrite = false,
+  client = new QueryClient({defaultOptions:{queries:{retry:false}}})) {
   const requests:URL[] = [];
   vi.stubGlobal('fetch',vi.fn(async (path:string,init?:RequestInit) => {
     if (!allowWrite) expect(init?.method ?? 'GET').toBe('GET');
     const url = new URL(path,'http://localhost'); requests.push(url); return answer(url,init);
   }));
-  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
   render(<QueryClientProvider client={client}><ContentLensPage domain="d-1" /></QueryClientProvider>);
   return requests;
 }
@@ -48,16 +49,107 @@ it('uses the frozen ref, dimension, metric and subset for both sides of a suppre
   fireEvent.click(within(screen.getByRole('navigation',{name:'效果维度'})).getByRole('button',{name:'选题内容'}));
   expect(await screen.findByText(/复标一致率不足/)).toBeVisible();
 });
-it('keeps disabled and in-progress routes from requesting a snapshot', async () => {
+it.each([
+  { state: '登记时关联一致', currentLink: 'frozen-link', currentRef: 'pub-2', visible: '登记时保存的正文' },
+  { state: '解除后重新关联同一版本', currentLink: 'new-link', currentRef: 'pub-2', visible: '快照中的稿件关联在当前台账已不可用。' },
+  { state: '台账只有同名其他记录', currentLink: 'frozen-link', currentRef: 'pub-1', visible: '此快照中的发布记录在当前台账已不可用。' },
+])('按发布与关联身份下钻：$state', async ({ currentLink, currentRef, visible }) => {
+  const workId = '00000000-0000-4000-8000-000000000001';
+  const revisionId = '00000000-0000-4000-8000-000000000002';
+  const frozenLink = { linkRef: 'frozen-link', workId, revisionId };
+  const revisionPath = `/ops/api/creation/works/${workId}/revisions/${revisionId}`;
+  const requests = show(url => {
+    if (url.pathname.endsWith('/status')) return Response.json({enabled:true,run:null});
+    if (url.pathname.endsWith('/snapshot')) return Response.json({snapshot:body,freshness:{staleDays:0,isStale:false}});
+    if (url.pathname.endsWith('/content-lens/publications')) {
+      return Response.json({snapshotRef:'snapshot-1',offset:0,limit:25,total:2,items:['pub-1','pub-2'].map(publicationRef => ({
+        publicationRef, title:'同名发布', accountName:'账号甲', businessDate:'2026-01-01', views:1200, comments:null,
+        creationLinks: publicationRef === 'pub-2' ? [frozenLink] : [],
+      }))});
+    }
+    if (url.pathname === '/api/local/ops/publications') {
+      expect(Object.fromEntries(url.searchParams)).toEqual({ domain: 'd-1', publication_ref: 'pub-2' });
+      return Response.json({asOf:null,page:1,pageSize:50,total:1,totalPages:1,operators:[],items:[{
+        ref: currentRef, source:'native', businessDate:'2026-01-01', dateState:'as_recorded', platform:'xhs',
+        title:'同名发布', body:'台账正文', url:'https://example.com/post', account:null, publisher:null,
+        creation: { ...frozenLink, linkRef: currentLink, domainRef: 'd-1', registeredWithDraft: true },
+        views:{state:'value',value:1500,overdue:false,hit:false}, likes:null, collects:null, comments:null, coverClickRate:null,
+        systemCheck:'not_checked', sync:{requestRef:null,decision:null,state:'not_requested'},
+        media:{state:'not_requested',observed:0,available:0,failed:0,unavailable:0},
+        fieldAdoption:{title:'adopted',body:'adopted',likes:'not_provided',collects:'not_provided',comments:'not_provided',publishedAt:'adopted'},
+        duplicates:[], cover:{available:false},
+      }]});
+    }
+    expect(url.pathname).toBe(revisionPath);
+    return Response.json({id:revisionId,number:1,savedAt:'2026-01-01T00:00:00Z',document:{
+      ...newDocument('登记时标题'),
+      paragraphs:[{id:'00000000-0000-4000-8000-000000000003',text:'登记时保存的正文'}],
+    }});
+  });
+  fireEvent.click(await screen.findByRole('button', {name:'操作方法过千率分母 1'}));
+  const list = within(await screen.findByRole('dialog', {name:'快照笔记列表'}));
+  fireEvent.click((await list.findAllByRole('button', {name:'查看发布记录：同名发布'}))[1]!);
+  const detail = () => within(screen.getByRole('dialog', {name:'发布记录详情'}));
+  if (currentRef === 'pub-2' && currentLink === 'frozen-link') {
+    await screen.findByText('当前台账详情 · 看板指标取自快照');
+    fireEvent.click(detail().getByRole('button', {name:'查看登记时稿件'}));
+    await detail().findByText(visible);
+    expect(detail().getByRole('heading', {name:'登记时稿件'})).toBeVisible();
+    expect(detail().queryByText('台账正文')).not.toBeInTheDocument();
+    expect(requests.some(url => url.pathname === revisionPath)).toBe(true);
+    fireEvent.click(detail().getByRole('button', {name:'返回发布记录详情'}));
+    expect(detail().getByText('台账正文')).toBeVisible();
+  } else {
+    await screen.findByText(visible);
+    expect(detail().queryByRole('button', {name:'查看登记时稿件'})).not.toBeInTheDocument();
+    expect(requests.some(url => url.pathname.includes('/revisions/'))).toBe(false);
+  }
+  fireEvent.click(detail().getByRole('button', {name:'关闭详情'}));
+  expect(list.getAllByRole('button', {name:'查看发布记录：同名发布'})).toHaveLength(2);
+});
+
+it('keeps the disabled route from requesting a snapshot', async () => {
   const requests = show(() => Response.json({ enabled:false,run:null }));
   expect(await screen.findByText('内容回溯未启用。')).toBeVisible();
   expect(requests.every(u => u.pathname.endsWith('status'))).toBe(true);
 });
-it('shows the server progress and never presents effects while labelling is in progress', async () => {
-  const requests = show(() => Response.json({ enabled:true,run:{inProgress:true,progress:0.25,primary:{state:'running',succeededShards:1,totalShards:4},audit:null} }));
+const running = {inProgress:true,progress:0.25,primary:{state:'running',succeededShards:1,totalShards:4},audit:null};
+
+it('shows the server progress while no snapshot has been built', async () => {
+  const requests = show(url => url.pathname.endsWith('/status')
+    ? Response.json({enabled:true,run:running,latestSnapshotRef:null})
+    : Response.json({snapshot:null,freshness:null}));
   expect(await screen.findByText('25%')).toBeVisible();
+  await waitFor(() => expect(requests.some(u => u.pathname.endsWith('/snapshot'))).toBe(true));
   expect(screen.queryByText('发布效果')).not.toBeInTheDocument();
-  expect(requests.every(u => u.pathname.endsWith('status'))).toBe(true);
+});
+
+it('keeps the current board readable during a run and refreshes only when the scope receipt changes', async () => {
+  const client = new QueryClient({defaultOptions:{queries:{retry:false}}});
+  let ref = 'snapshot-1';
+  let run: typeof running | null = running;
+  const requests = show(url => {
+    expect(url.searchParams.get('domainRef')).toBe('d-1');
+    if (url.pathname.endsWith('/status')) return Response.json({enabled:true,run,latestSnapshotRef:ref});
+    return Response.json({snapshot:{...body,snapshotRef:ref,quality:{...body.quality,titled:ref === 'snapshot-1' ? 2 : 3}},
+      freshness:{staleDays:0,isStale:false}});
+  }, false, client);
+  expect(await screen.findByText('25%')).toBeVisible();
+  expect(await screen.findByText('发布效果')).toBeVisible();
+  const count = () => requests.filter(u => u.pathname.endsWith('/snapshot')).length;
+  const statusKey = ['ops', 'content-lens', 'status', 'd-1'];
+  expect(count()).toBe(1);
+  run = null;
+  await client.invalidateQueries({queryKey:statusKey});
+  await waitFor(() => expect(screen.queryByText('25%')).not.toBeInTheDocument());
+  expect(screen.getByText('发布效果')).toBeVisible();
+  expect(count()).toBe(1);
+  ref = 'snapshot-2';
+  await client.invalidateQueries({queryKey:statusKey});
+  await waitFor(() => expect(count()).toBe(2));
+  await waitFor(() => expect(screen.getByRole('button',{name:'查看有标题的发布记录'})).toHaveTextContent('3'));
+  await client.invalidateQueries({queryKey:statusKey});
+  expect(count()).toBe(2);
 });
 it('reports a read failure and allows retry to an empty scope', async () => {
   let fail = true;
