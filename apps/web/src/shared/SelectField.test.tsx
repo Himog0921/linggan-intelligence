@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SelectField } from './SelectField';
 
@@ -120,4 +121,52 @@ it('紧凑形态只改尺寸，仍以 combobox 暴露当前值', () => {
   const trigger = screen.getByRole('combobox', { name: '演示范围' });
   expect(trigger).toHaveTextContent('创作者资料');
   expect(trigger.parentElement).toHaveAttribute('data-compact');
+});
+
+const pair = [{ value: 'a', label: '选项甲' }, { value: 'b', label: '选项乙' }] as const;
+function InsideLabel() {
+  const [value, setValue] = useState<'a' | 'b'>('a');
+  return <label>所属账号<SelectField label="所属账号" value={value} options={pair} onChange={setValue} /></label>;
+}
+
+it('被 label 包着时，点选项只提交一次并保持收起；浏览器不会把这次点击转给触发按钮', async () => {
+  const user = userEvent.setup();
+  render(<InsideLabel />);
+  await user.click(screen.getByRole('combobox', { name: '所属账号' }));
+  await user.click(screen.getByRole('option', { name: /选项乙/ }));
+  expect(screen.queryByRole('listbox')).toBeNull();
+  expect(screen.getByRole('combobox', { name: '所属账号' })).toHaveTextContent('选项乙');
+  // The click that chose the option has its default action (the label's forwarding) cancelled at the menu.
+  render(<InsideLabel />);
+  const second = screen.getAllByRole('combobox', { name: '所属账号' })[1]!;
+  fireEvent.click(second);
+  expect(fireEvent.click(screen.getByRole('option', { name: /选项乙/ }))).toBe(false);
+});
+
+it('被 label 包着时，点菜单的空白处不会误关菜单', async () => {
+  const user = userEvent.setup();
+  render(<InsideLabel />);
+  await user.click(screen.getByRole('combobox', { name: '所属账号' }));
+  await user.click(screen.getByRole('listbox'));
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+});
+
+it('被 label 包着时，菜单展开后点标题文字是收起，不是先收起又被转发的点击重新打开', async () => {
+  const user = userEvent.setup();
+  render(<InsideLabel />);
+  await user.click(screen.getByRole('combobox', { name: '所属账号' }));
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+  await user.click(screen.getByText('所属账号', { selector: 'label' }));
+  expect(screen.queryByRole('listbox')).toBeNull();
+  // Closed, the caption opens it again, as a label does.
+  await user.click(screen.getByText('所属账号', { selector: 'label' }));
+  expect(screen.getByRole('listbox')).toBeInTheDocument();
+});
+
+it('点到标题以外的地方仍然收起菜单', async () => {
+  const user = userEvent.setup();
+  render(<><InsideLabel /><p>别处</p></>);
+  await user.click(screen.getByRole('combobox', { name: '所属账号' }));
+  await user.click(screen.getByText('别处'));
+  expect(screen.queryByRole('listbox')).toBeNull();
 });

@@ -7,6 +7,7 @@ import { ApiError } from '../../shared/api';
 import { IdeaDraftsAction, IdeaDraftsBody, type DraftOutcome, type IdeaDraftRow } from './IdeaDrafts';
 import { openedText } from './ideaDraftsText';
 import { cardsOf, kindDot, kindLabel, softRole, type Card } from './deskCards';
+import { fitSize, nearestFree, placeFrames, type Spot } from './deskLayout';
 import styles from './WorkbenchPage.module.css';
 import { SelectField } from '../../shared/SelectField';
 
@@ -23,6 +24,9 @@ const FRAME_GAP = 48;
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 2;
 const SHELF_LIMIT = 40;
+const FRAME_MIN = { w: 320, h: 220 };
+// Everything that floats over the canvas. The wheel scrolls these; only the bare canvas is moved by it.
+const OVERLAYS = '.d-insp, .d-search, .desk-tools, .focus-bar, .desk-editor, [role="listbox"]';
 
 const shelfFilters = [
   { id: '', label: '全部' },
@@ -43,10 +47,6 @@ interface Frame {
   prepared: boolean;
   accountName: string | null;
   title: string;
-}
-interface Spot {
-  x: number;
-  y: number;
 }
 interface SpotBox { left: number; right: number; top: number }
 interface Props {
@@ -81,9 +81,9 @@ function layout(
   spots: Record<string, Spot>,
   sizes: Record<string, { w: number; h: number }>,
   positions: Record<string, Spot>,
+  held: string | null,
 ): Frame[] {
-  const bottoms: [number, number] = [0, 0];
-  return works.map((work, index) => {
+  const measured = works.map((work, index) => {
     const manual = sizes[work.workId];
     const cards = cardsOf(documents[index]).map(card => ({ ...card, ...(spots[card.id] ?? {}) }));
     const cols = Math.max(FRAME_COLS, Math.floor((Math.max(manual?.w ?? 0, FRAME_W) - FRAME_INSET) / CARD_COL));
@@ -107,23 +107,20 @@ function layout(
       right = Math.max(right, card.x + CARD_W + FRAME_INSET);
       bottom = Math.max(bottom, card.y + (heights[card.id] ?? CARD_ESTIMATE));
     }
-    const w = Math.max(right, manual?.w ?? 0);
-    const h = Math.max(FRAME_MIN_H, bottom + FRAME_INSET, manual?.h ?? 0);
-    const column = bottoms[0] <= bottoms[1] ? 0 : 1;
-    const frame: Frame = {
+    return {
       work,
-      x: positions[work.workId]?.x ?? column * (FRAME_W + FRAME_GAP),
-      y: positions[work.workId]?.y ?? bottoms[column],
-      w,
-      h,
+      w: Math.max(right, manual?.w ?? 0),
+      h: Math.max(FRAME_MIN_H, bottom + FRAME_INSET, manual?.h ?? 0),
       cards,
       prepared: (documents[index]?.materials ?? []).some(item => item.addedBy === 'prepared'),
       accountName: accountOf(documents[index]?.accountRef),
       title: documents[index]?.title ?? work.title,
     };
-    bottoms[column] += h + FRAME_GAP;
-    return frame;
   });
+  // Two frames never overlap, whatever put them there: a new frame beside a stretched one, a frame grown by new cards,
+  // or positions saved before this rule. The frame being dragged or resized is the one exception, until it is released.
+  const at = placeFrames(measured.map(item => ({ id: item.work.workId, w: item.w, h: item.h, pinned: positions[item.work.workId] ?? null })), FRAME_W, FRAME_GAP, held);
+  return measured.map(item => ({ ...item, x: at[item.work.workId]?.x ?? 0, y: at[item.work.workId]?.y ?? 0 }));
 }
 
 function Editable({ value, editable, className, label, onCommit }: {
@@ -225,6 +222,8 @@ export function MaterialDesk({
   const [cardMoved, setCardMoved] = useState<Record<string, Spot>>({});
   const [heights, setHeights] = useState<Record<string, number>>({});
   const [draggingId, setDraggingId] = useState<string | null>(null);
+  // The frame being dragged or resized; it stays under the pointer and settles clear of the others when released.
+  const [held, setHeld] = useState<string | null>(null);
   const [saveFailed, setSaveFailed] = useState(false);
   const [editor, setEditor] = useState<{ kind: 'memo' | 'role' | 'source'; blockId: string; anchor: SpotBox | null } | null>(null);
   const [settingsFor, setSettingsFor] = useState<string | null>(null);
@@ -250,7 +249,7 @@ export function MaterialDesk({
   const spots: Record<string, Spot> = { ...savedSpots, ...cardMoved };
   const sizes: Record<string, { w: number; h: number }> = { ...savedSizes, ...sized };
   const positions: Record<string, Spot> = { ...framePositions, ...moved };
-  const frames = layout(works, works.map(docOf), accountOf, heights, spots, sizes, positions);
+  const frames = layout(works, works.map(docOf), accountOf, heights, spots, sizes, positions, held);
   // The drafts that already write under this idea, one account each; they decide who can still be picked.
   const drafted: IdeaDraftRow[] = idea ? works.flatMap((work, index) => {
     const document = docOf(work, index);
@@ -330,7 +329,10 @@ export function MaterialDesk({
     const box = viewport.current;
     const frame = frames.find(item => item.work.workId === currentWorkId) ?? frames[0];
     if (!frame) return;
-    setView({ zoom: 1, x: Math.max(24, (box.clientWidth - frame.w) / 2) - frame.x, y: 72 - frame.y });
+    // A frame stretched wider than the window would open with its buttons out of sight: show all of its width instead.
+    // A desk mounted while hidden (a frame just made, opened later) has no width yet and opens at full size.
+    const zoom = box.clientWidth > 0 ? Math.min(1, Math.max(MIN_ZOOM, (box.clientWidth - 48) / frame.w)) : 1;
+    setView({ zoom, x: Math.max(24, (box.clientWidth - frame.w * zoom) / 2) - frame.x * zoom, y: 72 - frame.y * zoom });
   }, [ready, frames, currentWorkId]);
 
   const focusFrame = (frame: Frame) => {
@@ -348,12 +350,57 @@ export function MaterialDesk({
     });
   };
 
+  // Zooms around a point of the viewport (the pointer, or the middle for the buttons) so that point stays where it is.
+  const zoomAt = useCallback((clientX: number, clientY: number, factor: number) => {
+    const rect = viewport.current?.getBoundingClientRect();
+    setView(currentView => {
+      const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number((currentView.zoom * factor).toFixed(3))));
+      if (zoom === currentView.zoom) return currentView;
+      const px = clientX - (rect?.left ?? 0);
+      const py = clientY - (rect?.top ?? 0);
+      const ratio = zoom / currentView.zoom;
+      return { zoom, x: px - (px - currentView.x) * ratio, y: py - (py - currentView.y) * ratio };
+    });
+  }, []);
   const zoomBy = (step: number) => {
-    setView(currentView => ({
-      ...currentView,
-      zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Number((currentView.zoom * step).toFixed(3)))),
-    }));
+    const rect = viewport.current?.getBoundingClientRect();
+    if (rect) zoomAt(rect.left + rect.width / 2, rect.top + rect.height / 2, step);
   };
+
+  // As on the demo's desk: the wheel moves the canvas and Ctrl/⌘ with it (a pinch on a trackpad sends the same) zooms.
+  // Whatever floats over the canvas — settings, search, the tool bar, an open menu — scrolls its own content instead,
+  // so reaching for a long settings panel never moves or resizes the canvas behind it. The listener is attached
+  // natively because React's wheel listeners are passive and cannot cancel the page's own scrolling.
+  const hasWorks = works.length > 0;
+  useEffect(() => {
+    const box = viewport.current;
+    if (!box) return;
+    const onWheel = (event: WheelEvent) => {
+      if (event.target instanceof Element && event.target.closest(OVERLAYS)) return;
+      event.preventDefault();
+      // The panels are anchored to where they were opened; they would be left behind by a moving canvas.
+      setEditor(null);
+      setSettingsFor(null);
+      if (event.ctrlKey || event.metaKey) zoomAt(event.clientX, event.clientY, Math.exp(-event.deltaY * 0.01));
+      else setView(currentView => ({ ...currentView, x: currentView.x - event.deltaX, y: currentView.y - event.deltaY }));
+    };
+    box.addEventListener('wheel', onWheel, { passive: false });
+    return () => box.removeEventListener('wheel', onWheel);
+  }, [hasWorks, zoomAt]);
+
+  // Escape puts away the panel that is open. A menu open inside it (or a field that keeps the key for itself) takes the
+  // key first and cancels the event, so one Escape closes only the innermost thing.
+  const panelOpen = editor !== null || settingsFor !== null;
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || event.isComposing) return;
+      setEditor(null);
+      setSettingsFor(null);
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [panelOpen]);
 
   const beginPan = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return;
@@ -364,6 +411,7 @@ export function MaterialDesk({
   const movePan = (event: React.PointerEvent<HTMLDivElement>) => {
     const start = drag.current;
     if (!start) return;
+    if (Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) > 3) { setEditor(null); setSettingsFor(null); }
     setView(currentView => ({ ...currentView, x: start.panX + event.clientX - start.x, y: start.panY + event.clientY - start.y }));
   };
   const endPan = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -376,11 +424,10 @@ export function MaterialDesk({
     return rect ? { x: (clientX - rect.left - view.x) / view.zoom, y: (clientY - rect.top - view.y) / view.zoom } : null;
   };
 
-  const saveFrame = async (frame: Frame) => {
-    const size = sizes[frame.work.workId] ?? null;
+  const saveFrame = async (frame: Frame, at: Spot = frame, size: { w: number; h: number } | null = sizes[frame.work.workId] ?? null) => {
     try {
       await api.saveDeskPosition({
-        domainRef: domain, workId: frame.work.workId, x: frame.x, y: frame.y,
+        domainRef: domain, workId: frame.work.workId, x: at.x, y: at.y,
         width: size?.w ?? null, height: size?.h ?? null,
       });
       setSaveFailed(false);
@@ -399,6 +446,7 @@ export function MaterialDesk({
     if (!start) return;
     if (!start.moved && Math.abs(event.clientX - start.x) + Math.abs(event.clientY - start.y) < 3) return;
     start.moved = true;
+    setHeld(start.id);
     const spot = {
       x: Math.round(start.x0 + (event.clientX - start.x) / view.zoom),
       y: Math.round(start.y0 + (event.clientY - start.y) / view.zoom),
@@ -412,9 +460,14 @@ export function MaterialDesk({
     frameDrag.current = null;
     frameDragged.current = start.moved;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (!start.spot) return;
+    if (!start.spot) { setHeld(null); return; }
     const frame = frames.find(item => item.work.workId === start.id);
-    if (frame) await saveFrame(frame);
+    if (!frame) { setHeld(null); return; }
+    // Released on another frame: it settles at the nearest place that is clear, and that is where it is saved.
+    const landed = nearestFree({ ...start.spot, w: frame.w, h: frame.h }, frames.filter(item => item.work.workId !== start.id).map(({ x, y, w, h }) => ({ x, y, w, h })));
+    setMoved(previous => ({ ...previous, [start.id]: landed }));
+    setHeld(null);
+    await saveFrame(frame, landed);
   };
 
   const beginCardDrag = (event: React.PointerEvent<HTMLElement>, frame: Frame, card: Card) => {
@@ -468,14 +521,15 @@ export function MaterialDesk({
     setEditor(null);
     setSettingsFor(null);
     resizeDrag.current = { id: frame.work.workId, px: event.clientX, py: event.clientY, w: frame.w, h: frame.h };
+    setHeld(frame.work.workId);
     event.currentTarget.setPointerCapture?.(event.pointerId);
   };
   const moveResize = (event: React.PointerEvent<HTMLElement>) => {
     const start = resizeDrag.current;
     if (!start) return;
     const next = {
-      w: Math.max(320, Math.round(start.w + (event.clientX - start.px) / view.zoom)),
-      h: Math.max(220, Math.round(start.h + (event.clientY - start.py) / view.zoom)),
+      w: Math.max(FRAME_MIN.w, Math.round(start.w + (event.clientX - start.px) / view.zoom)),
+      h: Math.max(FRAME_MIN.h, Math.round(start.h + (event.clientY - start.py) / view.zoom)),
     };
     start.spot = next;
     setSized(previous => ({ ...previous, [start.id]: next }));
@@ -485,9 +539,13 @@ export function MaterialDesk({
     if (!start) return;
     resizeDrag.current = null;
     if (event.currentTarget.hasPointerCapture?.(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
-    if (!start.spot) return;
     const frame = frames.find(item => item.work.workId === start.id);
-    if (frame) await saveFrame(frame);
+    if (!start.spot || !frame) { setHeld(null); return; }
+    // A frame cannot be stretched over its neighbour: it stops short of it, or goes back to the size it had.
+    const fitted = fitSize(frame, frames.filter(item => item.work.workId !== start.id).map(({ x, y, w, h }) => ({ x, y, w, h })), FRAME_MIN) ?? { w: start.w, h: start.h };
+    setSized(previous => ({ ...previous, [start.id]: fitted }));
+    setHeld(null);
+    await saveFrame(frame, frame, fitted);
   };
 
   const place = async (item: SourceItem) => {
@@ -571,8 +629,7 @@ export function MaterialDesk({
       </div>
     </aside> : null}
     <div className="viewport" ref={viewport}
-      onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan}
-      onWheel={event => { event.preventDefault(); zoomBy(event.deltaY > 0 ? 0.9 : 1.1); }}>
+      onPointerDown={beginPan} onPointerMove={movePan} onPointerUp={endPan} onPointerCancel={endPan}>
       <div className="viewport-grid" style={{
         backgroundSize: `${56 * view.zoom}px ${56 * view.zoom}px, ${14 * view.zoom}px ${14 * view.zoom}px`,
         backgroundPosition: `${view.x}px ${view.y}px, ${view.x}px ${view.y}px`,

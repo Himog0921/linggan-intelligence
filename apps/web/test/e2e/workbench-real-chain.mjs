@@ -41,13 +41,13 @@ const stage = async (name, surface = page) => {
   const label = ({材料:'选题与材料',画布:'创作画布'})[name] ?? name;
   const id = ({'选题与材料':'desk','创作画布':'canvas','正文':'body','封面':'cover','内页':'inner','预览与导出':'export'})[label];
   await surface.locator('[data-view]:visible').first().waitFor();
-  // Each attempt must let the previous click render before deciding: the desk's own 返回写稿 button would
+  // Each attempt must let the previous click render before deciding: the desk's own 去稿件 button would
   // otherwise bounce the view straight back and burn the whole attempt budget.
   const arrive = async () => surface.locator(`[data-view="${id}"]:visible`).waitFor({timeout:2_000}).then(()=>true,()=>false);
   for (let attempt = 0; attempt < 5; attempt++) {
     if (await arrive()) return;
-    // The desk and the body view hide the step menu; the desk returns through 返回写稿, the body reaches the image pages through its footer.
-    const back = surface.getByRole('button', {name:'返回写稿',exact:true});
+    // The desk and the body view hide the step menu; the desk returns through the current frame's 去稿件, the body reaches the image pages through its footer.
+    const back = surface.locator('.desk .frame.sel').getByRole('button', {name:'去稿件',exact:true});
     if (await back.count()) { await robustClick(back); continue; }
     await openWritingTools(surface);
     const workflow = surface.locator('details:not([open]) > summary').filter({hasText:'创作步骤'});

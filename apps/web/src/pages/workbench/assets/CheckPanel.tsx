@@ -17,7 +17,6 @@ import { PreviewTab } from './PreviewTab';
 import { TitlesTab, type TitleTools } from './TitlesTab';
 import styles from './Assets.module.css';
 import { SelectField } from '../../../shared/SelectField';
-import { FieldLabel } from '../FieldLabel';
 
 export type PanelView = 'checks' | 'materials' | 'titles' | 'preview';
 type SaveState = 'saved' | 'dirty' | 'saving' | 'failed' | 'unknown' | 'conflict';
@@ -374,9 +373,9 @@ export function CheckPanel({ workId, domainRef, document, revision, saveState, c
       </>}
     </section>
     <details ref={settings}><summary>账号与衔接设置 · {bridgeSummary}</summary><div ref={slotTop}>
-      <FieldLabel>所属账号
+      <label>所属账号
         <span ref={accountSelect}><SelectField label="所属账号" disabled={locked || accounts.isPending} value={document.accountRef ?? ''} options={[{ value: '', label: '还没选' }, ...(document.accountRef && !account && !accounts.isPending ? [{ value: document.accountRef, label: '当前账号（不在可写稿的小红书账号里）' }] : []), ...(accounts.data ?? []).map(item => ({ value: item.accountRef, label: item.accountName }))]} onChange={value => edit({ ...document, accountRef: value || null })} /></span>
-      </FieldLabel>
+      </label>
       {accounts.isError ? <p role="alert" className={styles.problem}>账号读取失败，可以<ActionButton variant="quiet" onClick={() => void accounts.refetch()}>重试</ActionButton></p> : null}
       {account ? <p className={styles.hint}>{account.identity ? '' : '这个号的身份还没有填写。'}<ActionButton variant="quiet" disabled={locked} onClick={() => setIdentityOpen(true)}>编辑账号身份</ActionButton></p> : null}
     </div>
