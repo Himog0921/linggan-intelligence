@@ -9,10 +9,20 @@ import { c } from './styles';
 
 type L1Intent = { plan: Awaited<ReturnType<typeof planL1>>; commandRef: string };
 const workName = (item: SelectedComment) => item.workTitle || `作品 ${shortRef(item.commentKey.workRef)}`;
+/** 逐条排除原因（CONTRACT 第二轮 §6）；其余沿用现有排除原因码的中文。 */
+const EXCLUDED_REASON: Record<string, string> = { waiting_l1: '作品语境未就绪', already_queued: '正在研究，不会重复提交', already_researched: '已有研究结果，本次跳过' };
+const excludedReason = (code: string) => EXCLUDED_REASON[code] ?? why(code);
+type GroupRow = NonNullable<PreviewPlan['groups']>[number];
+function groupState(group: GroupRow): { label: string; tone: string } {
+  if (group.waitingL1) return { label: '待作品语境', tone: 'wait' };
+  if (group.researchable > 0) return { label: group.active ? `可进入研究 · ${group.active} 条进行中` : '可进入研究', tone: 'good' };
+  if (group.active) return { label: `${group.active} 条进行中`, tone: 'running' };
+  return { label: '本次不提交', tone: '' };
+}
 
 /**
- * B-04 研究预览：只用现有 /preview 回执字段。按作品分组来自所选评论本身（预览接口不返回逐作品计划），
- * 「不会提交」中待作品语境的评论可逐条列出（waitingL1.workRefs），其余原因只有计数，按原因列出。
+ * B-04 研究预览。服务返回 groups / excludedTargets（CONTRACT 第二轮 §6）时按逐作品计划与逐条排除显示；
+ * 旧服务缺失这些字段时降级：按所选评论自身分组，待作品语境逐条列出（waitingL1.workRefs），其余原因按计数列出。
  */
 export function ResearchPreview({ domain, selected, initialRerun, nav, close, submitted }: {
   domain: string; selected: SelectedComment[]; initialRerun: boolean; nav: StudyNavigation;
@@ -85,6 +95,13 @@ export function ResearchPreview({ domain, selected, initialRerun, nav, close, su
   }
 
   const missing = new Set(plan?.missingWorks ?? []);
+  const byKey = new Map(selected.map(item => [`${item.commentKey.workRef}\u0000${item.commentKey.commentExternalId}`, item]));
+  const titles = new Map<string, string>();
+  for (const item of selected) if (item.workTitle && !titles.has(item.commentKey.workRef)) titles.set(item.commentKey.workRef, item.workTitle);
+  for (const group of plan?.groups ?? []) if (group.workTitle) titles.set(group.workRef, group.workTitle);
+  const titleOf = (workRef: string) => titles.get(workRef) || `作品 ${shortRef(workRef)}`;
+  const openActive = <button type="button" className={c('text-action')} onClick={() => { close(); nav.records(); }}>查看进行中</button>;
+  const supplementButton = (workRef: string) => <button type="button" className={c('text-action')} disabled={busy || unknown || acceptedWorks.includes(workRef)} onClick={() => void supplement([workRef])}>{acceptedWorks.includes(workRef) ? '已提交补充' : '补充作品语境'}</button>;
   const groups = new Map<string, { title: string; count: number }>();
   for (const item of selected) {
     if (missing.has(item.commentKey.workRef)) continue;
@@ -93,7 +110,11 @@ export function ResearchPreview({ domain, selected, initialRerun, nav, close, su
   }
   const waitingRows = selected.filter(item => missing.has(item.commentKey.workRef));
   const excludedCount = plan ? Math.max(0, plan.selected - plan.researchable) : 0;
-  const reasonRows = plan ? [
+  const targetRows = plan?.excludedTargets ?? null;
+  const reasonRows = plan && targetRows ? [
+    ...(plan.researched && !rerun ? [{ key: 'researched', label: '已有研究结果，本次跳过', count: plan.researched, action: <button type="button" className={c('text-action')} disabled={busy} onClick={() => setRerun(true)}>改为重新研究</button> }] : []),
+    ...(plan.unresolved ? [{ key: 'unresolved', label: '上一次调用结果未确认', count: plan.unresolved, action: null }] : []),
+  ] : plan ? [
     ...(plan.active ? [{ key: 'active', label: '正在研究，不会重复提交', count: plan.active, action: <button type="button" className={c('text-action')} onClick={() => { close(); nav.records(); }}>查看进行中</button> }] : []),
     ...(plan.researched && !rerun ? [{ key: 'researched', label: '已有研究结果，本次跳过', count: plan.researched, action: <button type="button" className={c('text-action')} disabled={busy} onClick={() => setRerun(true)}>改为重新研究</button> }] : []),
     ...(plan.unresolved ? [{ key: 'unresolved', label: '上一次调用结果未确认', count: plan.unresolved, action: null }] : []),
@@ -118,16 +139,30 @@ export function ResearchPreview({ domain, selected, initialRerun, nav, close, su
           </div>
           {rerun && plan.researched ? <div className={c('notice info')}>其中 {num(plan.researched)} 条已有研究结果：本次会生成新结果，现有结果保留到新结果完成为止。</div> : null}
           <h3 className={c('preview-h')}>将提交 · 按所属作品分组</h3>
-          {plan.researchable && groups.size ? [...groups].map(([work, group]) => <div key={work} className={c('plan-group')}>
+          {plan.groups ? plan.groups.length ? plan.groups.map(group => { const state = groupState(group); return <div key={group.workRef} className={c('plan-group')}>
+            <div><strong>{titleOf(group.workRef)}</strong><small>{[`将提交 ${num(group.researchable)} 条`, `${num(group.units)} 个研究单元`,
+              group.researched ? `已有结果 ${num(group.researched)} 条` : '', group.selected !== group.researchable ? `已选 ${num(group.selected)} 条` : ''].filter(Boolean).join(' · ')}</small></div>
+            <span className={c('plan-group-side')}><span className={c('state', state.tone)}>{state.label}</span>{group.waitingL1 ? supplementButton(group.workRef) : group.active && !group.researchable ? openActive : null}</span>
+          </div>; }) : <p className={c('muted preview-none')}>没有可提交的评论。</p>
+          : plan.researchable && groups.size ? [...groups].map(([work, group]) => <div key={work} className={c('plan-group')}>
             <div><strong>{group.title}</strong><small>已选 {group.count} 条评论</small></div><span className={c('state good')}>可进入研究</span>
           </div>) : <p className={c('muted preview-none')}>没有可提交的评论。</p>}
-          {excludedCount || waitingRows.length ? <details className={c('preview-excluded')} open={!plan.units}>
+          {excludedCount || waitingRows.length || targetRows?.length ? <details className={c('preview-excluded')} open={!plan.units}>
             <summary>不会提交 {num(excludedCount)} 条 <span>查看原因与处理办法</span></summary>
-            {waitingRows.map(item => <div key={item.sourceRef} className={c('excluded-row')}>
+            {reasonRows.length && targetRows ? reasonRows.map(row => <div key={row.key} className={c('excluded-row')}><div><p>{row.label}</p><small>{num(row.count)} 条</small></div>{row.action}</div>) : null}
+            {targetRows ? targetRows.map(target => {
+              const item = byKey.get(`${target.workRef}\u0000${target.commentExternalId}`), reason = excludedReason(target.reason);
+              return <div key={`${target.workRef}\u0000${target.commentExternalId}`} className={c('excluded-row')}>
+                <div><p>{item?.text || titleOf(target.workRef)}</p><small>{item?.text ? `${titleOf(target.workRef)} · ${reason}` : reason}</small></div>
+                {target.reason === 'waiting_l1' ? supplementButton(target.workRef) : target.reason === 'already_queued' ? openActive : null}
+              </div>;
+            }) : null}
+            {targetRows && plan.excludedTruncated ? <p className={c('excluded-more')}>仅列出前 200 条</p> : null}
+            {targetRows ? null : waitingRows.map(item => <div key={item.sourceRef} className={c('excluded-row')}>
               <div><p>{item.text || `评论 ${item.commentKey.commentExternalId}`}</p><small>{workName(item)} · 作品语境未就绪</small></div>
-              <button type="button" className={c('text-action')} disabled={busy || unknown || acceptedWorks.includes(item.commentKey.workRef)} onClick={() => void supplement([item.commentKey.workRef])}>{acceptedWorks.includes(item.commentKey.workRef) ? '已提交补充' : '补充作品语境'}</button>
+              {supplementButton(item.commentKey.workRef)}
             </div>)}
-            {reasonRows.map(row => <div key={row.key} className={c('excluded-row')}><div><p>{row.label}</p><small>{num(row.count)} 条</small></div>{row.action}</div>)}
+            {targetRows ? null : reasonRows.map(row => <div key={row.key} className={c('excluded-row')}><div><p>{row.label}</p><small>{num(row.count)} 条</small></div>{row.action}</div>)}
           </details> : null}
           {acceptedWorks.length ? <div className={c('notice info')}>作品语境补充已提交。就绪后 <button type="button" className={c('text-action')} disabled={busy} onClick={() => setRound(n => n + 1)}>重新预览</button></div> : null}
         </> : null}

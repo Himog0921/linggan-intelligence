@@ -47,9 +47,9 @@ function RunDetail({ domain, batch, nav, refreshList }: { domain: string; batch:
     <table className={c('records-units')}><colgroup><col style={{ width: '32%' }} /><col style={{ width: '9%' }} /><col style={{ width: '13%' }} /><col style={{ width: '46%' }} /></colgroup>
       <thead><tr><th scope="col">所属作品 / 单元</th><th scope="col" className={c('records-num')}>评论数</th><th scope="col">状态</th><th scope="col">结果 / 原因</th></tr></thead>
       <tbody>{data.units.map(unit => { const status = UNIT_STATUS[unit.state] ?? 'unknown'; return <tr key={unit.unitRef}>
-        <td><span className={c('records-unit-work')}>作品 {shortRef(unit.workRef)}</span><span className={c('records-unit-id')}>{shortRef(unit.unitRef)}</span></td>
+        <td><span className={c('records-unit-work')} title={unit.workTitle ?? undefined}>{unit.workTitle || `作品 ${shortRef(unit.workRef)}`}</span><span className={c('records-unit-id')}>{shortRef(unit.unitRef)}</span></td>
         <td className={c('records-num')}>{num(unit.targetCount)}</td><td><Status status={status} label={status === 'cancelled' ? STATES[unit.state] : undefined} /></td>
-        <td>{status === 'completed' ? <span className={c('records-unit-results')}>结果已写入评论</span>
+        <td>{status === 'completed' ? <span className={c('records-unit-results')}>{unit.outcomes ? `有信号 ${num(unit.outcomes.signals)} · 需要语境 ${num(unit.outcomes.needsContext)} · 无信号 ${num(unit.outcomes.noSignal)}` : '结果已写入评论'}</span>
           : status === 'failed' ? <span className={c('records-unit-error')}>{unit.failureCode ? why(unit.failureCode) : '该单元未完成，可重试失败项。'}</span>
           : status === 'cancelled' ? <span className={c('records-unit-muted')}>{STATES[unit.state] ?? '未执行'}</span>
           : <span className={c('records-unit-muted')}>{status === 'running' ? '正在研究该作品的评论，结果生成后会更新。' : '等待执行，尚未生成本次研究结果。'}</span>}</td>

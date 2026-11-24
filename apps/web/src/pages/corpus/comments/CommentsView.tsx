@@ -1,23 +1,23 @@
-import { useQueries, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { ActionButton } from '../../../shared/ActionButton';
 import { SelectField } from '../../../shared/SelectField';
 import { PostUsageControl } from './CommentCells';
-import { parseCommentDetail, parseComments, type CommentItem } from './commentDtos';
+import { parseComments, type CommentItem } from './commentDtos';
 import { commentEligibility, commentFilters, commentStatus, commentStatusInfo, PAGE_SIZES, shortBeijingDate, type CommentFilters, type PageSize } from './commentModel';
 import { CrIcon } from './CrIcon';
 import { errorText, num, studyTime } from './format';
 import { signalKindLabel, workTitleSourceLabel } from './labels';
 import { parseWorkCatalog } from './methodDtos';
-import { commentIdentity, studyKey, studyRead, useStudyRead, type SelectedComment, type StudyNavigation } from './studyApi';
+import { commentIdentity, studyRead, useStudyRead, type SelectedComment, type StudyNavigation } from './studyApi';
 import { previewSelection, readProblem, type PreviewPlan } from './understandingApi';
 import { c } from './styles';
 
 const BULK_SIZES = ['100', '300', '500', '1000'] as const;
 type BulkSize = typeof BULK_SIZES[number];
 const COLUMNS = [26, 6, 17, 12, 8, 7, 9, 10, 5];
-const MAX_SELECTED = 50, MAX_WORKS = 100, SUPPORT_LIMIT = 50;
+const MAX_SELECTED = 50, MAX_WORKS = 100;
 const STATE_OPTIONS = [
   { value: 'all', label: '全部状态' }, { value: 'never_studied', label: '尚未研究' }, { value: 'in_progress', label: '进行中' },
   { value: 'studied', label: '已有结果' }, { value: 'needs_context', label: '需要语境' }, { value: 'failed', label: '最近失败' },
@@ -92,32 +92,22 @@ export function CommentsView({ domain, nav, selected, onSelected, requestRefs }:
   const apply = (changes: Partial<CommentFilters>) => route({ ...changes, ...reset });
 
   const queryParams = new URLSearchParams({ q: filter.searchScope === 'comment' ? filter.q : '', studyState: filter.studyState, voiceRole: filter.voiceRole, sort: filter.sort, postUsage: filter.postUsage, limit: filter.size });
-  for (const [key, value] of [['workRef', filter.workRef], ['signalKind', filter.signalKind], ['minLikes', filter.minLikes]] as const) if (value) queryParams.set(key, value);
+  // supportOf（地址参数）→ problemRef（评论接口参数，CONTRACT 第二轮 §5）：与其他筛选、offset 分页同用。
+  for (const [key, value] of [['workRef', filter.workRef], ['signalKind', filter.signalKind], ['minLikes', filter.minLikes], ['problemRef', filter.supportOf]] as const) if (value) queryParams.set(key, value);
   const pageParams = new URLSearchParams(queryParams);
   // Numbered paging (CONTRACT §4) only sends offset after the server has reported totalCount; page 1 stays compatible with cursor-only servers.
   if (filter.page > 1) pageParams.set('offset', String((filter.page - 1) * Number(filter.size)));
   else if (filter.cursor) pageParams.set('cursor', filter.cursor);
-  const listQuery = useStudyRead(domain, `comments?${pageParams}`, parseComments, !filter.supportOf);
-
-  // 按问题筛选：现有评论接口没有问题参数，用问题详情里的 evidence 逐条读取评论（最多 SUPPORT_LIMIT 条）。
+  const listQuery = useStudyRead(domain, `comments?${pageParams}`, parseComments);
+  // 筛选条只需要问题名称；与问题抽屉共用同一缓存读取。
   const support = useQuery({ queryKey: ['comment-understanding', domain, 'problem', filter.supportOf], enabled: Boolean(filter.supportOf),
     queryFn: ({ signal }) => readProblem(domain, filter.supportOf!, signal), retry: false });
-  const supportKeys = useMemo(() => {
-    const seen = new Map<string, { workRef: string; commentExternalId: string }>();
-    for (const entry of support.data?.evidence ?? []) seen.set(commentIdentity(entry), { workRef: entry.workRef, commentExternalId: entry.commentExternalId });
-    return [...seen.values()];
-  }, [support.data]);
-  const supportDetails = useQueries({ queries: supportKeys.slice(0, SUPPORT_LIMIT).map(key => {
-    const path = `comments/detail?${new URLSearchParams({ ...key })}`;
-    return { queryKey: studyKey(domain, path), queryFn: ({ signal }: { signal: AbortSignal }) => studyRead(domain, path, parseCommentDetail, signal), retry: false };
-  }) });
 
   const supportMode = Boolean(filter.supportOf);
-  const rows: CommentItem[] = supportMode ? supportDetails.flatMap(entry => entry.data?.comment ? [entry.data.comment] : []) : listQuery.data?.items ?? [];
-  const pending = supportMode ? support.isPending || supportDetails.some(entry => entry.isPending) : listQuery.isPending;
-  const failure = supportMode ? (support.error ?? supportDetails.find(entry => entry.error)?.error ?? null) : listQuery.isError ? listQuery.error : null;
+  const rows: CommentItem[] = listQuery.data?.items ?? [];
+  const pending = listQuery.isPending, failure = listQuery.isError ? listQuery.error : null;
   const stats = listQuery.data?.summary, coverage = listQuery.data?.indexCoverage;
-  const totalCount = supportMode ? null : listQuery.data?.page.totalCount ?? null;
+  const totalCount = listQuery.data?.page.totalCount ?? null;
   const numbered = totalCount != null;
 
   const selectedIds = new Set(selected.map(item => commentIdentity(item.commentKey))), selectedWorks = new Set(selected.map(item => item.commentKey.workRef));
@@ -129,9 +119,9 @@ export function CommentsView({ domain, nav, selected, onSelected, requestRefs }:
   }
   function submitSearch() {
     if (draft.searchScope === 'work' && queryDraft.trim() && !draft.workRef) { void searchWorks(queryDraft.trim()); setWorkError('请从作品候选中选择一篇作品'); return; }
-    apply({ q: queryDraft.trim(), searchScope: draft.searchScope, workRef: draft.searchScope === 'work' ? draft.workRef : null, workLabel: draft.searchScope === 'work' ? draft.workLabel : '', workChoices: draft.workChoices, supportOf: null });
+    apply({ q: queryDraft.trim(), searchScope: draft.searchScope, workRef: draft.searchScope === 'work' ? draft.workRef : null, workLabel: draft.searchScope === 'work' ? draft.workLabel : '', workChoices: draft.workChoices });
   }
-  const saved = async (message: string) => { nav.toast(message); const result = supportMode ? null : await listQuery.refetch(); if (result?.error) throw result.error; for (const entry of supportDetails) void entry.refetch(); };
+  const saved = async (message: string) => { nav.toast(message); const result = await listQuery.refetch(); if (result.error) throw result.error; };
 
   const extraCount = Number(filter.voiceRole !== 'reader_and_unknown') + Number(Boolean(filter.minLikes)) + Number(filter.postUsage !== 'all');
   function closePopover(applyChanges: boolean) {
@@ -232,11 +222,11 @@ export function CommentsView({ domain, nav, selected, onSelected, requestRefs }:
           <button type="button" role="option" aria-selected={draft.workRef === work.workRef} key={work.workRef} onClick={() => {
             const label = work.displayTitle || '未命名作品';
             setQueryDraft(label); setWorkError('');
-            apply({ q: label, searchScope: 'work', workRef: work.workRef, workLabel: label, workChoices: draft.workChoices, supportOf: null });
+            apply({ q: label, searchScope: 'work', workRef: work.workRef, workLabel: label, workChoices: draft.workChoices });
           }}>{work.displayTitle || '未命名作品'}</button>)}</div> : null}
       </div>
-      <div className={c('field')}><SelectField label="研究状态" value={filter.studyState} onChange={studyState => apply({ studyState, supportOf: null })} options={STATE_OPTIONS} /></div>
-      <div className={c('field')}><SelectField label="研究标签" value={filter.signalKind || ''} onChange={signalKind => apply({ signalKind: signalKind || null, supportOf: null })} options={TAG_OPTIONS} /></div>
+      <div className={c('field')}><SelectField label="研究状态" value={filter.studyState} onChange={studyState => apply({ studyState })} options={STATE_OPTIONS} /></div>
+      <div className={c('field')}><SelectField label="研究标签" value={filter.signalKind || ''} onChange={signalKind => apply({ signalKind: signalKind || null })} options={TAG_OPTIONS} /></div>
       <div className={c('field')}><SelectField label="排序" value={filter.sort} onChange={sort => apply({ sort })} options={SORT_OPTIONS} /></div>
       <div className={c('filter-anchor')}>
         <ActionButton ref={filterButton} className={c('icon-gap')} aria-haspopup="dialog" aria-expanded={popover} aria-controls="comment-advanced-filters" onClick={() => popover ? closePopover(true) : setPopover(true)}>
@@ -257,20 +247,19 @@ export function CommentsView({ domain, nav, selected, onSelected, requestRefs }:
     {workError ? <p className={c('inline-alert')} role="status">{workError}</p> : null}
     <div className={c('result-line')}>
       <span role="status" aria-live="polite" title={coverage ? `已索引 ${num(coverage.indexedCount)} 条；待索引 ${num(coverage.pendingCount)} 条` : undefined}>
-        {supportMode ? <>支持该问题的评论 <b>{num(rows.length)}</b> 条{supportKeys.length > SUPPORT_LIMIT ? `（只读取前 ${SUPPORT_LIMIT} 条）` : ''}</>
-          : stats?.displayableCommentCount == null ? '评论范围待读取' : <>当前筛选 <b>{num(stats.displayableCommentCount)}</b> 条评论 · 可研究 {num(stats.eligibleCommentCount)} 条</>}
+        {stats?.displayableCommentCount == null ? '评论范围待读取' : <>当前筛选 <b>{num(stats.displayableCommentCount)}</b> 条评论 · 可研究 {num(stats.eligibleCommentCount)} 条</>}
       </span>
       <span>
-        {supportMode ? <><span>支持问题：{supportLabel}</span> <button type="button" className={c('text-action')} aria-label="取消问题筛选" onClick={() => apply({ supportOf: null })}>移除</button></>
-          : filter.workRef ? <><span>限定作品：{filter.workLabel || filter.q || '所选作品'}</span> <button type="button" className={c('text-action')} aria-label="取消作品筛选" onClick={() => { setQueryDraft(''); apply({ workRef: null, workLabel: '', q: '', searchScope: 'comment' }); }}>移除</button></> : null}
-        {selecting && !selected.length && !supportMode ? <span className={c('bulk-pick')}>
+        {supportMode ? <span className={c('filter-chip')}><span>支持问题：{supportLabel}</span> <button type="button" className={c('text-action')} aria-label="取消问题筛选" onClick={() => apply({ supportOf: null })}>移除</button></span> : null}
+        {filter.workRef ? <span className={c('filter-chip')}><span>限定作品：{filter.workLabel || filter.q || '所选作品'}</span> <button type="button" className={c('text-action')} aria-label="取消作品筛选" onClick={() => { setQueryDraft(''); apply({ workRef: null, workLabel: '', q: '', searchScope: 'comment' }); }}>移除</button></span> : null}
+        {selecting && !selected.length ? <span className={c('bulk-pick')}>
           <span><SelectField compact label="检查当前筛选结果的前几条" value={bulkSize} disabled={bulkLoading} onChange={setBulkSize} options={BULK_SIZES.map(value => ({ value, label: `前 ${value} 条` }))} /></span>
           <ActionButton variant="quiet" className={c('quiet-small')} disabled={bulkLoading || !rows.length} onClick={() => void prepareFilteredSelection()}>{bulkLoading ? '正在生成清单' : '按当前筛选生成研究清单'}</ActionButton>
         </span> : null}
         {selecting && bulkNotice ? <span role="status"> {bulkNotice}</span> : null}
       </span>
     </div>
-    {pending ? <p className={c('view-status')}>正在读取用户评论…</p> : failure ? <p className={c('view-status')} role="alert">评论目录读取失败：{errorText(failure)} <button type="button" className={c('text-action')} onClick={() => { if (supportMode) { void support.refetch(); for (const entry of supportDetails) void entry.refetch(); } else void listQuery.refetch(); }}>重试</button></p> : <>
+    {pending ? <p className={c('view-status')}>正在读取用户评论…</p> : failure ? <p className={c('view-status')} role="alert">评论目录读取失败：{errorText(failure)} <button type="button" className={c('text-action')} onClick={() => void listQuery.refetch()}>重试</button></p> : <>
       <div className={c('table-wrap')}><table className={c('comment-table')}><caption className="v7-sr-only">评论原声与研究结果</caption>
         <colgroup>{selecting ? <col style={{ width: 'var(--lgi-cr-check-col)' }} /> : null}{COLUMNS.map((width, index) => <col key={index} style={{ width: `${width}%` }} />)}</colgroup>
         <thead><tr>
@@ -299,7 +288,7 @@ export function CommentsView({ domain, nav, selected, onSelected, requestRefs }:
         }) : <tr><td colSpan={selecting ? 10 : 9} className={c('empty')}><strong>没有匹配的评论</strong><p>调整搜索词或筛选条件，再试一次。</p>
           <ActionButton className={c('small')} onClick={() => { setQueryDraft(''); route({ q: '', searchScope: 'comment', workRef: null, workLabel: '', studyState: 'all', signalKind: null, minLikes: null, postUsage: 'all', voiceRole: 'reader_and_unknown', supportOf: null, ...reset }); }}>清除筛选</ActionButton></td></tr>}</tbody>
       </table></div>
-      {!supportMode && (numbered ? totalCount > 0 : rows.length || filter.history.length) ? <div className={c('table-foot')}>
+      {(numbered ? totalCount > 0 : rows.length || filter.history.length) ? <div className={c('table-foot')}>
         <span className={c('page-range')}>{numbered ? `第 ${from}–${to} 条 · 共 ${num(totalCount)} 条` : `第 ${filter.history.length + 1} 页`}</span>
         <nav className={c('pager')} aria-label="评论分页">{numbered ? <>
           <button type="button" className={c('page-btn')} disabled={filter.page <= 1} aria-label="上一页" onClick={() => gotoPage(filter.page - 1)}>‹</button>

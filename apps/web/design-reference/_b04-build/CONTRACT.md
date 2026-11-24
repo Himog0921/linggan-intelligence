@@ -43,3 +43,20 @@
 
 ## 不在本轮
 - 词云的短语级抽取：沿用现有 `word-cloud` 接口，前端只改样式（墨色、不再标红首位、字重 ≤600）。
+
+## 补充（第二轮，2026-11-24）—— 同样只做加法、不加迁移
+
+### 5. 评论列表按问题筛选
+`GET /api/local/comment-study/comments` 新增查询参数 `problemRef`：只返回"当前有效结果里有信号归属到该问题（含归并重定向后的当前问题）"的评论；可与其他筛选、offset 分页同用，`page.totalCount` 与 `summary` 按筛选后计算；`problemRef` 参与 scopeHash（会改变结果集）。问题不存在或不可读时返回空列表，不报错。
+
+### 6. 研究预览逐作品计划
+`POST /api/local/comment-research/v2/preview` 响应新增：
+```json
+"groups": [ { "workRef": "…", "workTitle": "…|null", "selectedCount": 4, "researchableCount": 4,
+              "unitCount": 1, "alreadyResearchedCount": 3, "waitingL1": false, "activeCount": 0 } ],
+"excludedTargets": [ { "workRef": "…", "commentExternalId": "…", "reason": "waiting_l1|already_queued|already_researched|<现有排除原因码>" } ]
+```
+`excludedTargets` 最多 200 条（超出时另给 `excludedTargetsTruncated: true`）。数字必须与现有的 researchable / waitingL1 / alreadyResearchedCount / alreadyQueuedCount / excludedCounts 汇总一致（写测试断言）。
+
+### 7. 运行回执单元明细
+`GET /api/local/comment-research/v2/runs/{batch}` 的每个 unit 新增 `workTitle`（可为 null，与评论目录同一标题来源）和 `outcomes: { "signals": n, "needsContext": n, "noSignal": n }`（单元未成功时为 null）。

@@ -1,5 +1,5 @@
 import { ApiError, isRecord, requestJson } from '../../../shared/api';
-import { bool, decode, list, num, obj, optNum, optObj, optStr, str, strList } from '../../../shared/decode';
+import { bool, decode, list, num, obj, optBool, optNum, optObj, optStr, str, strList } from '../../../shared/decode';
 import { REASONS } from './researchModel';
 import type { SelectedComment } from './studyApi';
 
@@ -49,6 +49,16 @@ export async function previewSelection(domain: string, selected: SelectedComment
       researched: num(row, 'alreadyResearchedCount'), active: num(row, 'alreadyQueuedCount'),
       unresolved: num(row, 'dispatchUnresolvedCount'),
       exclusions: Object.keys(obj(row, 'excludedCounts')).map(code => ({ code, count: num(obj(row, 'excludedCounts'), code) })),
+      // CONTRACT 第二轮 §6：逐作品计划与逐条排除是可选增量；旧服务缺失时为 null，预览沿用按所选评论分组的降级显示。
+      groups: row.groups == null ? null : list(row, 'groups', item => ({
+        workRef: str(item, 'workRef'), workTitle: optStr(item, 'workTitle'), selected: num(item, 'selectedCount'),
+        researchable: num(item, 'researchableCount'), units: num(item, 'unitCount'), researched: num(item, 'alreadyResearchedCount'),
+        waitingL1: bool(item, 'waitingL1'), active: num(item, 'activeCount'),
+      })),
+      excludedTargets: row.excludedTargets == null ? null : list(row, 'excludedTargets', item => ({
+        workRef: str(item, 'workRef'), commentExternalId: str(item, 'commentExternalId'), reason: str(item, 'reason'),
+      })),
+      excludedTruncated: optBool(row, 'excludedTargetsTruncated') ?? false,
     };
   });
 }
@@ -90,8 +100,14 @@ export async function readRun(domain: string, batch: string, signal?: AbortSigna
       cancelRequested: bool(row, 'cancelRequested'),
       retrySelections: list(row, 'retrySelections', item => ({ sourceRef: str(item, 'sourceRef'),
         observationRole: str(item, 'observationRole'), commentKey: { workRef: str(item, 'workRef'), commentExternalId: str(item, 'commentExternalId') } })),
-      units: list(row, 'units', item => ({ unitRef: str(item, 'unitRef'), workRef: str(item, 'workRef'), state: str(item, 'state'),
-        failureCode: optStr(item, 'failureCode'), targetCount: num(item, 'targetCount') })),
+      units: list(row, 'units', item => {
+        // CONTRACT 第二轮 §7：workTitle / outcomes 是可选增量；旧服务缺失或单元未成功时为 null。
+        const outcomes = optObj(item, 'outcomes');
+        const results = outcomes && [optNum(outcomes, 'signals'), optNum(outcomes, 'needsContext'), optNum(outcomes, 'noSignal')];
+        return { unitRef: str(item, 'unitRef'), workRef: str(item, 'workRef'), workTitle: optStr(item, 'workTitle'), state: str(item, 'state'),
+          failureCode: optStr(item, 'failureCode'), targetCount: num(item, 'targetCount'),
+          outcomes: results && results.every(value => value != null) ? { signals: results[0]!, needsContext: results[1]!, noSignal: results[2]! } : null };
+      }),
       targets: list(row, 'targets', item => ({ state: str(item, 'state'), failureCode: optStr(item, 'failureCode'), count: num(item, 'count') })),
       usage: { calls: num(usage, 'modelCalls'), input: num(usage, 'inputTokens'), output: num(usage, 'outputTokens') },
     };

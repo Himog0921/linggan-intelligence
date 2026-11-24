@@ -6,9 +6,9 @@ import { calls, comment, DOMAIN, installFetch, json, plan, problemRow, renderPag
 afterEach(() => vi.unstubAllGlobals());
 const TIME = '2026-11-20T01:00:00Z';
 const run = (batchRef: string, extra: Record<string, unknown> = {}) => ({ batchRef, createdAt: TIME, state: 'open', unitCount: 2, cancelRequested: false, ...extra });
-const runDetail = (batchRef: string, units: { state: string; failureCode?: string | null }[], retry: unknown[] = []) => ({
+const runDetail = (batchRef: string, units: ({ state: string; failureCode?: string | null } & Record<string, unknown>)[], retry: unknown[] = []) => ({
  batchRef, cancelRequested: false, retrySelections: retry,
- units: units.map((unit, i) => ({ unitRef: `unit-${i}`, workRef: WORK, state: unit.state, failureCode: unit.failureCode ?? null, targetCount: 1 })),
+ units: units.map((unit, i) => ({ unitRef: `unit-${i}`, workRef: WORK, failureCode: null, targetCount: 1, ...unit })),
  targets: [{ state: 'succeeded', failureCode: null, count: 1 }], usage: { modelCalls: 2, inputTokens: 1200, outputTokens: 300 },
 });
 
@@ -38,7 +38,7 @@ describe('B-04 研究记录对话框', () => {
   installFetch(url => {
    if (url.pathname.endsWith('/v2/runs')) return json({ domainRef: DOMAIN, consolidationTaskRevision: 1, consolidations: [], runs: [
     run('batch-part', { state: 'completed', targetCount: 3, workCount: 2, unitCounts: { completed: 1, failed: 1, pending: 0 }, outcomes: { signals: 2, needsContext: 0, noSignal: 1 } })] });
-   if (url.pathname.endsWith('/v2/runs/batch-part')) return json(runDetail('batch-part', [{ state: 'succeeded' }, { state: 'failed', failureCode: 'ai_provider_failed' }], retry));
+   if (url.pathname.endsWith('/v2/runs/batch-part')) return json(runDetail('batch-part', [{ state: 'succeeded', workTitle: '合成作品标题', outcomes: { signals: 2, needsContext: 1, noSignal: 0 } }, { state: 'failed', failureCode: 'ai_provider_failed', workTitle: null, outcomes: null }], retry));
    if (url.pathname.endsWith('/v2/preview')) return json(plan());
    return undefined;
   });
@@ -51,6 +51,10 @@ describe('B-04 研究记录对话框', () => {
   expect(row).toHaveTextContent('3条评论'); expect(row).toHaveTextContent('2 篇作品 · 2 个单元');
   expect(row).toHaveTextContent('1 / 2 完成'); expect(row).toHaveTextContent('2有信号');
   expect(screen.getByRole('button', { name: /^研究记录，1项有失败/ })).toHaveTextContent('1 项有失败');
+  await user.click(within(row).getByRole('button', { name: '展开批次 BATCH-PA' }));
+  expect(await within(dialog).findByText('合成作品标题')).toBeInTheDocument();
+  expect(within(dialog).getByText('有信号 2 · 需要语境 1 · 无信号 0')).toBeInTheDocument();
+  expect(within(dialog).getByText(`作品 ${WORK.slice(0, 8).toUpperCase()}`, { exact: false })).toBeInTheDocument();
   await user.click(within(row).getByRole('button', { name: '重试批次 BATCH-PA 中失败的单元' }));
   const preview = await screen.findByRole('dialog', { name: '本次研究预览' });
   await within(preview).findByRole('button', { name: '提交 1 条研究' });
@@ -151,6 +155,39 @@ describe('B-04 研究预览', () => {
  });
 });
 
+describe('B-04 研究预览 · 逐作品计划', () => {
+ const OTHER_WORK = '00000000-0000-4000-8000-000000000004';
+ it('shows per-work groups and lists each excluded comment with its reason and entry point', async () => {
+  installFetch(url => url.pathname.endsWith('/v2/preview') ? json(plan({ selectedCount: 4, researchableCount: 1, workCount: 1, alreadyQueuedCount: 1, waitingL1: { targetCount: 1, workRefs: [OTHER_WORK] },
+   excludedCounts: { creatorVoice: 1 },
+   groups: [{ workRef: WORK, workTitle: '合成作品', selectedCount: 3, researchableCount: 1, unitCount: 1, alreadyResearchedCount: 2, waitingL1: false, activeCount: 1 },
+    { workRef: OTHER_WORK, workTitle: '另一篇合成作品', selectedCount: 1, researchableCount: 0, unitCount: 0, alreadyResearchedCount: 0, waitingL1: true, activeCount: 0 }],
+   excludedTargets: [{ workRef: WORK, commentExternalId: 'c1', reason: 'already_queued' }, { workRef: OTHER_WORK, commentExternalId: 'x9', reason: 'waiting_l1' }, { workRef: WORK, commentExternalId: 'c7', reason: 'creatorVoice' }],
+   excludedTargetsTruncated: true })) : undefined);
+  renderPage(`domain=${DOMAIN}&view=comments`); await screen.findByRole('table');
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '选择评论' }));
+  await user.click(screen.getAllByRole('checkbox', { name: '选择这条评论' })[0]!);
+  await user.click(screen.getByRole('button', { name: /预览研究计划/ }));
+  const dialog = await screen.findByRole('dialog', { name: '本次研究预览' });
+  const first = (await within(dialog).findByText('将提交 1 条 · 1 个研究单元 · 已有结果 2 条 · 已选 3 条')).closest('div')!.parentElement!;
+  expect(first).toHaveTextContent('合成作品'); expect(first).toHaveTextContent('可进入研究 · 1 条进行中');
+  const second = within(dialog).getAllByText('另一篇合成作品')[0]!.closest('div')!.parentElement!;
+  expect(second).toHaveTextContent('待作品语境');
+  expect(within(second).getByRole('button', { name: '补充作品语境' })).toBeEnabled();
+  expect(within(dialog).getByText('合成作品 · 正在研究，不会重复提交')).toBeInTheDocument();
+  expect(within(dialog).getAllByText('SYNTHETIC 原声 <script>不执行</script>').length).toBe(1);
+  const waiting = within(dialog).getByText('作品语境未就绪').closest('div')!.parentElement!;
+  expect(waiting).toHaveTextContent('另一篇合成作品');
+  expect(within(waiting).getByRole('button', { name: '补充作品语境' })).toBeInTheDocument();
+  expect(within(dialog).getByText('创作者本人评论')).toBeInTheDocument();
+  expect(within(dialog).getByText('仅列出前 200 条')).toBeInTheDocument();
+  await user.click(within(dialog).getByRole('button', { name: '查看进行中' }));
+  expect(await screen.findByRole('dialog', { name: '研究记录' })).toBeInTheDocument();
+  expect(writes()).toEqual([]);
+ });
+});
+
 describe('B-04 抽屉与用户问题', () => {
  const latest = { batchRef: 'batch-1', state: 'succeeded', failureCode: null, result: { requestRef: 'request-1', outcome: 'signals', reason: null, workContext: { summary: '合成作品语境' },
   signals: [{ kind: 'need', proposition: '需要外部提醒', quote: '原声', problem: { problemRef: 'problem-1', label: '合成问题：作业启动困难', state: 'formal', authorCount: 2 } }] } };
@@ -192,9 +229,29 @@ describe('B-04 抽屉与用户问题', () => {
   expect(await within(drawer).findByText('已有 2 位独立作者支持，达到正式门槛（2 位）。')).toBeInTheDocument();
   await userEvent.click(within(drawer).getByRole('button', { name: /查看全部支持评论/ }));
   await waitFor(() => expect(new URLSearchParams(router.state.location.search).get('supportOf')).toBe('problem-1'));
-  expect(await screen.findByText(/支持该问题的评论/)).toHaveTextContent('支持该问题的评论 2 条');
-  expect(await screen.findAllByRole('button', { name: 'SYNTHETIC 原声文本' })).toHaveLength(2);
-  expect(calls.some(call => call.url.pathname.endsWith('/comment-study/comments'))).toBe(false);
+  expect(await screen.findByText('支持问题：合成问题：作业启动困难')).toBeInTheDocument();
+  const list = () => calls.filter(call => call.url.pathname.endsWith('/comment-study/comments')).at(-1)!.url.searchParams;
+  await waitFor(() => expect(list().get('problemRef')).toBe('problem-1'));
+  expect(calls.some(call => call.url.pathname.endsWith('/comments/detail'))).toBe(false);
+ });
+
+ it('filters the comment list by problemRef together with other filters and paging, replayable from the URL', async () => {
+  installFetch(url => url.pathname.endsWith('/comment-study/comments')
+   ? json({ domainRef: DOMAIN, items: [comment()], summary: { displayableCommentCount: 23, eligibleCommentCount: 23 }, indexCoverage: { indexedCount: 23, pendingCount: 0 }, page: { nextCursor: null, totalCount: 23 } })
+   : routes(url));
+  const { router } = renderPage(`domain=${DOMAIN}&view=comments&supportOf=problem-1&state=studied&page=2`);
+  expect(await screen.findByText('支持问题：合成问题：作业启动困难')).toBeInTheDocument();
+  const list = () => calls.filter(call => call.url.pathname.endsWith('/comment-study/comments')).at(-1)!.url.searchParams;
+  await waitFor(() => expect(list().get('problemRef')).toBe('problem-1'));
+  expect(list().get('studyState')).toBe('studied'); expect(list().get('offset')).toBe('10');
+  expect(await screen.findByText('第 11–20 条 · 共 23 条')).toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: '第 3 页' }));
+  await waitFor(() => expect(list().get('offset')).toBe('20'));
+  expect(list().get('problemRef')).toBe('problem-1');
+  await userEvent.click(screen.getByRole('button', { name: '取消问题筛选' }));
+  await waitFor(() => expect(new URLSearchParams(router.state.location.search).get('supportOf')).toBeNull());
+  expect(new URLSearchParams(router.state.location.search).get('state')).toBe('studied');
+  await waitFor(() => expect(list().get('problemRef')).toBeNull());
  });
 
  it('shows the one-line summary only when the server provides it', async () => {
