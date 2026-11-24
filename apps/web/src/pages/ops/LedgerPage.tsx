@@ -4,7 +4,7 @@ import { ActionButton } from '../../shared/ActionButton';
 import { FindField } from '../../shared/FindField';
 import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link, useSearchParams } from "react-router";
+import { useSearchParams } from "react-router";
 import * as api from "./api";
 import * as f from "./format";
 import {
@@ -27,6 +27,7 @@ import { NativeViewBatchDialog } from "./NativeViewBatchDialog";
 import { AccountResponsibilityDialog } from "./AccountResponsibilityDialog";
 import { NativeAccountArchiveDialog, NativeAccountEditDialog } from "./NativeAccountLifecycleDialog";
 import { PublicationSyncDialog } from "./PublicationSyncDialog";
+import { FieldAdoptionTag, HistoricalOwnerTag, MediaTag, PublicationCover, PublicationDetail } from "./PublicationDetail";
 import type { LedgerKind } from "./OpsPage";
 const columns = {
   publications: [
@@ -161,7 +162,6 @@ export function LedgerPage({
   const publicationRef = kind === "publications" ? params.get("publication_ref") : null;
   const [dates, setDates] = useState(false);
   const [cover, setCover] = useState<string | null>(null);
-  const [coverFailed, setCoverFailed] = useState(false);
   const [detail, setDetail] = useState<api.Publication | null>(null);
   const [newAccount, setNewAccount] = useState(false);
   const [newPublication, setNewPublication] = useState(false);
@@ -177,7 +177,6 @@ export function LedgerPage({
   const responsibilityScope = `${business}:${assignedTo}:${pendingFrom}`;
   const [editingAccount, setEditingAccount] = useState<api.Account | null>(null);
   const [lifecycleAccount, setLifecycleAccount] = useState<{ account: api.Account; restore: boolean } | null>(null);
-  function openCover(src: string) { setCoverFailed(false); setCover(src); }
   const wrap = useRef<HTMLDivElement>(null);
   const query = Object.fromEntries(params);
   const pubs = useQuery({
@@ -449,7 +448,7 @@ export function LedgerPage({
                 <PublicationRow
                   key={item.ref}
                   item={item}
-                  openCover={openCover}
+                  openCover={setCover}
                   openDetail={setDetail}
                   recordView={setViewPublication}
                   showHistoricalOwner={role === "admin"}
@@ -559,31 +558,7 @@ export function LedgerPage({
           }}
         />
       ) : null}
-      {detail ? <Dialog label="发布记录详情" outsideClose onClose={() => setDetail(null)}>
-        <header className={c('ops-detail-head')}><h2>{detail.title || '无标题发布记录'}</h2><ActionButton onClick={() => setDetail(null)}><IntelligenceIcon name="close" size={16}/>关闭详情</ActionButton></header>
-        <div className={c('ops-dialog-body')}>
-          <p>{detail.businessDate} · {f.platformLabel[detail.platform]} · {detail.account?.name || '账号未知'}</p>
-          <p className={c('ops-note')}>
-            {detail.source === "native" ? "运营台账原生登记" : "工作台历史迁入"}
-            {' · '}系统尚未核对平台发布状态
-          </p>
-          {detail.publisher ? <p className={c("ops-note")}>原发布人 · {detail.publisher}</p> : null}
-          {role === "admin" ? <HistoricalOwnerTag publication={detail} /> : null}
-          {detail.creation ? <p><Link to={`/ops/creation?${new URLSearchParams({ domain: detail.creation.domainRef, work: detail.creation.workId, view: "body" })}`}>查看关联稿件</Link></p> : null}
-          <External href={detail.url} title="原发布链接"><IntelligenceIcon name="external" size={16}/> 查看原发布链接</External>
-          <dl className={c('ops-detail-facts')}>
-            <div><dt>阅读量</dt><dd>{detail.views.state === 'value' ? f.count(detail.views.value).text : detail.views.state === 'pending' ? '待补' : '选填，未知'}</dd></div>
-            <div><dt>点赞</dt><dd>{f.count(detail.likes).text}</dd></div><div><dt>收藏</dt><dd>{f.count(detail.collects).text}</dd></div><div><dt>评论</dt><dd>{f.count(detail.comments).text}</dd></div>
-          </dl>
-          <p className={c('ops-note')}>
-            采集媒体：{mediaLabels[detail.media.state]}{detail.media.observed ? `（已观察 ${detail.media.observed}，本地可用 ${detail.media.available}，失败 ${detail.media.failed}，当前不可用 ${detail.media.unavailable}）` : ''}
-          </p>
-          <FieldAdoptionNotice adoption={detail.fieldAdoption} />
-          <h3>发布正文</h3><p className={c('ops-full-text')}>{detail.body || '未迁入正文'}</p>
-          {detail.duplicates.length ? <p>合并的重复登记日期：{detail.duplicates.map(row => row.businessDate).join('、')}</p> : null}
-          {detail.cover.available ? <ActionButton onClick={() => openCover(`/ops/covers/${encodeURIComponent(detail.ref)}`)}>查看封面大图</ActionButton> : <p>封面未迁入</p>}
-        </div>
-      </Dialog> : null}
+      {detail ? <PublicationDetail detail={detail} isAdmin={role === "admin"} close={() => setDetail(null)} /> : null}
       {newAccount ? <NativeAccountDialog domainRef={business} close={() => setNewAccount(false)} /> : null}
       {newPublication && accounts.data ? <NativePublicationDialog accounts={accounts.data.items.filter(account => account.nativeState !== "archived")} close={() => setNewPublication(false)} /> : null}
       {syncPublications && pubs.data ? <PublicationSyncDialog publications={pubs.data.items} requestRef={syncRequestRef || undefined} close={() => { setSyncPublications(false); setSyncRequestRef(null); }} /> : null}
@@ -596,34 +571,10 @@ export function LedgerPage({
         close={() => setResponsibilityAccount(null)} /> : null}
       {editingAccount ? <NativeAccountEditDialog account={editingAccount} close={() => setEditingAccount(null)} /> : null}
       {lifecycleAccount ? <NativeAccountArchiveDialog account={lifecycleAccount.account} restore={lifecycleAccount.restore} close={() => setLifecycleAccount(null)} /> : null}
-      {cover ? (
-        <Dialog
-          label="封面大图" outsideClose
-          className="ops-cover-dialog"
-          onClose={() => setCover(null)}
-        >
-          <form
-            method="dialog"
-            onSubmit={(event) => {
-              event.preventDefault();
-              setCover(null);
-            }}
-          >
-            <ActionButton type="submit">关闭</ActionButton>
-          </form>
-          {coverFailed ? <div role="status"><p>封面暂时无法读取，原记录仍保留。</p><ActionButton onClick={() => setCoverFailed(false)}>重新加载封面</ActionButton></div> : <img id="ops-cover-large" src={cover} alt="封面大图" onError={() => setCoverFailed(true)} />}
-        </Dialog>
-      ) : null}
+      {cover ? <PublicationCover src={cover} close={() => setCover(null)} /> : null}
     </>
   );
 }
-function HistoricalOwnerTag({ publication }: { publication: api.Publication }) {
-  if (publication.source !== "imported") return null;
-  const state = publication.historicalOwnerState;
-  if (state === "matched") return <Tag tone="success">归属已核实</Tag>;
-  return <Tag tone="warning">{state === "conflict_pending" ? "归属有冲突" : "归属待核实"}</Tag>;
-}
-
 function PublicationRow({
   item,
   openCover, openDetail,
@@ -794,48 +745,6 @@ const syncLabels: Record<api.Publication["sync"]["state"], string> = {
   stopped: "执行已停止",
   chain_unavailable: "状态暂不可读",
 };
-const mediaLabels: Record<api.Publication["media"]["state"], string> = {
-  not_requested: "未请求采集媒体",
-  waiting_for_slots: "等待读取图片/视频",
-  processing: "图片/视频处理中",
-  partial: "媒体部分可用",
-  available: "媒体已本地验证",
-  failed: "媒体处理失败",
-  unavailable: "媒体当前不可用",
-};
-function MediaTag({ media }: { media: api.Publication["media"] }) {
-  const tone = media.state === "available" ? "success" : media.state === "failed" || media.state === "partial" || media.state === "unavailable" ? "warning" : undefined;
-  const title = media.observed
-    ? `已观察 ${media.observed} 项；本地验证 ${media.available} 项；失败 ${media.failed} 项；当前不可用 ${media.unavailable} 项。远程地址不等于可用媒体。`
-    : "媒体状态独立于文字回填；远程地址不等于本地可用资源。";
-  return <Tag tone={tone} title={title}>{mediaLabels[media.state]}</Tag>;
-}
-const adoptionLabels: Record<api.Publication["fieldAdoption"]["title"], string> = {
-  adopted: "已采用",
-  not_provided: "未提供",
-  conflict: "待核实",
-};
-const adoptionNames: Record<keyof api.Publication["fieldAdoption"], string> = {
-  title: "标题", body: "正文", likes: "点赞", collects: "收藏", comments: "评论", publishedAt: "发布时间",
-};
-function conflictingFields(adoption: api.Publication["fieldAdoption"]) {
-  return (Object.entries(adoption) as [keyof typeof adoption, typeof adoption.title][])
-    .filter(([, state]) => state === "conflict")
-    .map(([field]) => adoptionNames[field]);
-}
-function FieldAdoptionTag({ adoption }: { adoption: api.Publication["fieldAdoption"] }) {
-  const conflicts = conflictingFields(adoption);
-  if (!conflicts.length) return null;
-  return <Tag tone="warning" title={`采集观察与原生登记不一致：${conflicts.join("、")}。当前保留冲突，尚未自动覆盖。`}>字段待核实</Tag>;
-}
-function FieldAdoptionNotice({ adoption }: { adoption: api.Publication["fieldAdoption"] }) {
-  const conflicts = conflictingFields(adoption);
-  if (conflicts.length) return <p className={c("ops-note")}>字段采用：{conflicts.join("、")}待核实；当前保留原登记，尚未自动覆盖。</p>;
-  const missing = (Object.entries(adoption) as [keyof typeof adoption, typeof adoption.title][])
-    .filter(([, state]) => state === "not_provided")
-    .map(([field]) => adoptionNames[field]);
-  return missing.length ? <p className={c("ops-note")}>字段采用：{missing.join("、")}未由当前来源提供。</p> : <p className={c("ops-note")}>字段采用：{adoptionLabels.adopted}的观察已按当前身份版本显示。</p>;
-}
 function SyncTag({ item, openSync }: { item: api.Publication; openSync?: (requestRef: string) => void }) {
   const { sync } = item;
   const requestRef = sync.requestRef;

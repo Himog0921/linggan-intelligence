@@ -39,6 +39,13 @@ pub struct SnapshotReceipt {
     pub reused: bool,
 }
 
+/// Pending labels may appear in the board's input without contributing to analysis.
+#[derive(Clone, Copy)]
+pub(super) enum SnapshotMode {
+    Strict,
+    IncludePending,
+}
+
 async fn agreements(
     conn: &mut PgConnection,
     input: &AnalysisInput,
@@ -101,6 +108,15 @@ pub(super) async fn build_for_task(
     scope: SnapshotScope,
     task: &str,
 ) -> Result<SnapshotReceipt, LensDefinitionError> {
+    build_with_mode(database, scope, task, SnapshotMode::Strict).await
+}
+
+pub(super) async fn build_with_mode(
+    database: &Database,
+    scope: SnapshotScope,
+    task: &str,
+    mode: SnapshotMode,
+) -> Result<SnapshotReceipt, LensDefinitionError> {
     // A concurrent generator may win the unique input hash while this transaction
     // still sees an older snapshot. Retry with a fresh PostgreSQL snapshot.
     for attempt in 0..3 {
@@ -111,7 +127,7 @@ pub(super) async fn build_for_task(
         sqlx::query("LOCK TABLE linggan_ops_lens_adjudication IN SHARE MODE")
             .execute(&mut *tx)
             .await?;
-        match build_in(&mut tx, &scope, task).await {
+        match build_in_with_mode(&mut tx, &scope, task, mode).await {
             Err(LensDefinitionError::Database(sqlx::Error::Database(e)))
                 if e.code().as_deref() == Some("40001") && attempt < 2 =>
             {
@@ -131,6 +147,15 @@ pub(super) async fn build_in(
     conn: &mut PgConnection,
     scope: &SnapshotScope,
     task: &str,
+) -> Result<SnapshotReceipt, LensDefinitionError> {
+    build_in_with_mode(conn, scope, task, SnapshotMode::Strict).await
+}
+
+async fn build_in_with_mode(
+    conn: &mut PgConnection,
+    scope: &SnapshotScope,
+    task: &str,
+    mode: SnapshotMode,
 ) -> Result<SnapshotReceipt, LensDefinitionError> {
     scope.validate()?;
     if let Some(domain) = scope.domain_ref {
@@ -156,7 +181,7 @@ pub(super) async fn build_in(
         task_config_ref: current.try_get("task_config_ref")?,
         prompt_version_ref: current.try_get("prompt_version_ref")?,
     };
-    let mut input = read_input(conn, scope, method).await?;
+    let mut input = read_input(conn, scope, method, mode).await?;
     let series = agreements(conn, &input, &m).await?;
     let latest = input
         .publications
@@ -179,18 +204,19 @@ pub(super) async fn build_in(
         .map_err(|_| LensDefinitionError::InvalidDefinition)?;
     let find =
         "SELECT snapshot_ref FROM linggan_ops_lens_snapshot WHERE input_hash=$1 AND metric_ref=$2";
+    let as_of: String = current.try_get("as_of")?;
     if let Some(snapshot_ref) = sqlx::query_scalar(find)
         .bind(&hash)
         .bind(metric)
         .fetch_optional(&mut *conn)
         .await?
     {
+        set_current(conn, scope, snapshot_ref).await?;
         return Ok(SnapshotReceipt {
             snapshot_ref,
             reused: true,
         });
     }
-    let as_of: String = current.try_get("as_of")?;
     let id = Uuid::new_v4();
     let frozen =
         serde_json::to_value(&input).map_err(|_| LensDefinitionError::InvalidDefinition)?;
@@ -231,18 +257,41 @@ pub(super) async fn build_in(
     let inserted:Option<Uuid>=sqlx::query_scalar("INSERT INTO linggan_ops_lens_snapshot(snapshot_ref,as_of,taxonomy_ref,metric_ref,input_hash,analysis_input,body)
       VALUES ($1,$2::text::timestamptz,$3,$4,$5,$6,$7) ON CONFLICT (input_hash,metric_ref) DO NOTHING RETURNING snapshot_ref")
         .bind(id).bind(&as_of).bind(taxonomy).bind(metric).bind(&hash).bind(frozen).bind(body).fetch_optional(&mut *conn).await?;
-    match inserted {
-        Some(snapshot_ref) => Ok(SnapshotReceipt {
-            snapshot_ref,
-            reused: false,
-        }),
-        None => Ok(SnapshotReceipt {
-            snapshot_ref: sqlx::query_scalar(find)
+    let snapshot_ref = match inserted {
+        Some(snapshot_ref) => snapshot_ref,
+        None => {
+            sqlx::query_scalar(find)
                 .bind(hash)
                 .bind(metric)
                 .fetch_one(&mut *conn)
-                .await?,
-            reused: true,
-        }),
-    }
+                .await?
+        }
+    };
+    set_current(conn, scope, snapshot_ref).await?;
+    Ok(SnapshotReceipt {
+        snapshot_ref,
+        reused: inserted.is_none(),
+    })
+}
+
+async fn set_current(
+    conn: &mut PgConnection,
+    scope: &SnapshotScope,
+    snapshot_ref: Uuid,
+) -> Result<(), sqlx::Error> {
+    // The scoped upsert under REPEATABLE READ serializes concurrent activation.
+    // An older MVCC view cannot overwrite a newer commit; it retries with 40001.
+    sqlx::query(
+        "INSERT INTO linggan_ops_lens_snapshot_current(domain_ref,published_from,published_to,snapshot_ref)
+         VALUES($1,$2::text::date,$3::text::date,$4)
+         ON CONFLICT (domain_ref,published_from,published_to) DO UPDATE
+         SET snapshot_ref=EXCLUDED.snapshot_ref",
+    )
+    .bind(scope.domain_ref)
+    .bind(&scope.from)
+    .bind(&scope.to)
+    .bind(snapshot_ref)
+    .execute(conn)
+    .await?;
+    Ok(())
 }

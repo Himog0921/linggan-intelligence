@@ -18,13 +18,14 @@ function phase(r: d.Json) {
   return { state: d.str(r, 'state'), total: d.num(r, 'totalShards'), succeeded: d.num(r, 'succeededShards') };
 }
 function status(value: unknown) {
-  return d.decode(value, r => ({ enabled: d.bool(r, 'enabled'), run: maybe(r, 'run', v => ({
+  return d.decode(value, r => ({ enabled: d.bool(r, 'enabled'), latestSnapshotRef: d.optStr(r, 'latestSnapshotRef'), run: maybe(r, 'run', v => ({
     inProgress: d.bool(v, 'inProgress'), progress: d.num(v, 'progress'), primary: phase(d.obj(v, 'primary')), audit: maybe(v, 'audit', phase),
   })) }));
 }
-export function useLensStatus(enabled = true, watch = false) {
-  return useQuery({ queryKey: ['ops', 'content-lens', 'status'], enabled, retry: false,
-    queryFn: async ({ signal }) => status(await requestJson(base + 'status', { signal })),
+export function useLensStatus(enabled = true, watch = false, domain = 'all') {
+  const query = domain === 'all' ? '' : '?' + new URLSearchParams({ domainRef: domain });
+  return useQuery({ queryKey: ['ops', 'content-lens', 'status', domain], enabled, retry: false,
+    queryFn: async ({ signal }) => status(await requestJson(base + 'status' + query, { signal })),
     refetchInterval: query => watch && query.state.data?.enabled ? 5000 : false,
   });
 }
@@ -81,6 +82,9 @@ export async function getPublications(ref: string, drill: Drill, offset: number,
     return { total: d.num(r, 'total'), limit: d.num(r, 'limit'), items: d.list(r, 'items', p => ({
       ref: d.str(p, 'publicationRef'), title: textOrNull(p, 'title'), account: textOrNull(p, 'accountName'),
       date: textOrNull(p, 'businessDate'), views: numberOrNull(p, 'views'), comments: numberOrNull(p, 'comments'),
+      creationLinks: p.creationLinks === undefined ? [] : d.list(p, 'creationLinks', link => ({
+        linkRef: d.str(link, 'linkRef'), workId: d.str(link, 'workId'), revisionId: d.str(link, 'revisionId'),
+      })),
     })) };
   });
 }

@@ -70,6 +70,7 @@
 .records :is(th,td) { padding:var(--lgi-space-2); border-bottom:1px solid var(--lgi-border); text-align:left; }
 .records :is(th,td):first-child { padding-left:0; width:45%; overflow-wrap:anywhere; }
 .records tbody th { font-weight:var(--lgi-weight-medium); }
+.records tbody th button { text-align:left; white-space:normal; height:auto; overflow-wrap:anywhere; }
 .records thead th { position:sticky; top:0; background:var(--lgi-canvas); color:var(--lgi-muted); white-space:nowrap; }
 .records :is(th,td):nth-child(n+3) { white-space:nowrap; font-variant-numeric:tabular-nums; }
 .records :is(th,td):nth-last-child(-n+2) { text-align:right; }

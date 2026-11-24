@@ -11,6 +11,7 @@ use uuid::Uuid;
 pub struct BoardStatus {
     pub enabled: bool,
     pub run: Option<BoardRun>,
+    pub latest_snapshot_ref: Option<Uuid>,
 }
 
 #[derive(Serialize)]
@@ -23,7 +24,18 @@ pub struct BoardRun {
     pub progress: f64,
 }
 
-pub async fn board_status(db: &Database) -> Result<BoardStatus, LensDefinitionError> {
+pub async fn board_status(
+    db: &Database,
+    domain: Option<Uuid>,
+) -> Result<BoardStatus, LensDefinitionError> {
+    let latest_snapshot_ref = super::latest_snapshot_ref(
+        db,
+        &super::SnapshotScope {
+            domain_ref: domain,
+            ..Default::default()
+        },
+    )
+    .await?;
     // A completed primary can still be waiting for its independent audit; settlement can
     // likewise lag the final audit shard. Prefer such a run over a newer terminal one.
     let run:Option<(Uuid,bool)>=sqlx::query_as("SELECT p.run_ref,
@@ -55,5 +67,9 @@ pub async fn board_status(db: &Database) -> Result<BoardStatus, LensDefinitionEr
     } else {
         None
     };
-    Ok(BoardStatus { enabled: true, run })
+    Ok(BoardStatus {
+        enabled: true,
+        run,
+        latest_snapshot_ref,
+    })
 }

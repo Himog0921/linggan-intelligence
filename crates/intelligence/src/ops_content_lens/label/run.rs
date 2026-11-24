@@ -115,8 +115,38 @@ pub async fn start(db: &Database, command_ref: Uuid) -> Result<RunReceipt, Found
     if let Some(receipt) = command.replay()? {
         return Ok(receipt);
     }
+    lock_primary(&mut command.tx).await?;
     let s = Settings::current(&mut command.tx).await?;
     let (titles, plan) = titles_in(&mut command.tx, &s).await?;
+    // Manual starts remain available, but they must leave titles already in an
+    // automatic primary or its independent audit to that pipeline.
+    let scheduled: Vec<String> = sqlx::query_scalar(
+        "SELECT DISTINCT item->>'titleKey'
+         FROM linggan_ops_lens_label_run r
+         JOIN linggan_ai_batch b ON b.batch_ref=r.foundation_batch_ref
+         JOIN linggan_ai_batch_control bc USING(batch_ref)
+         JOIN linggan_ai_command c ON c.command_ref=b.command_ref
+         CROSS JOIN LATERAL jsonb_array_elements(r.frozen_input->'shards') shard
+         CROSS JOIN LATERAL jsonb_array_elements(shard) item
+         WHERE r.run_kind='primary' AND c.operation='ops_title_label_incremental'
+           AND r.taxonomy_ref=$1 AND r.task_config_ref=$2 AND r.prompt_version_ref=$3
+           AND (bc.state='open' OR (bc.state='completed'
+               AND EXISTS(SELECT FROM linggan_ops_lens_label l WHERE l.run_ref=r.run_ref
+                   AND l.title_key=item->>'titleKey')
+               AND NOT EXISTS(SELECT FROM linggan_ops_lens_label_run a
+                   JOIN linggan_ai_batch_control ac ON ac.batch_ref=a.foundation_batch_ref
+                   WHERE a.primary_run_ref=r.run_ref AND ac.state<>'open')))",
+    )
+    .bind(s.taxonomy)
+    .bind(s.config)
+    .bind(s.prompt)
+    .fetch_all(&mut *command.tx)
+    .await?;
+    let scheduled: std::collections::BTreeSet<_> = scheduled.into_iter().collect();
+    let titles: Vec<_> = titles
+        .into_iter()
+        .filter(|t| !scheduled.contains(&t.title_key))
+        .collect();
     let (run_ref, batch_ref) = if titles.is_empty() {
         (None, None)
     } else {
@@ -130,6 +160,13 @@ pub async fn start(db: &Database, command_ref: Uuid) -> Result<RunReceipt, Found
             plan,
         })
         .await
+}
+
+pub(super) async fn lock_primary(tx: &mut Transaction<'_, Postgres>) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended('ops_title_label:primary',234))")
+        .execute(&mut **tx)
+        .await?;
+    Ok(())
 }
 
 pub(super) async fn enqueue(

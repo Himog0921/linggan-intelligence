@@ -87,8 +87,8 @@ function receipt(value: unknown, requestId: string, workId?: string) {
   });
   return r;
 }
-export async function readRevision(id: string, revision: string) {
-  const item = parseRevision(await requestJson(`${base}/works/${uuid(id)}/revisions/${uuid(revision)}`));
+export async function readRevision(id: string, revision: string, signal?: AbortSignal) {
+  const item = parseRevision(await requestJson(`${base}/works/${uuid(id)}/revisions/${uuid(revision)}`, { signal }));
   if (item.id !== revision) throw new WorkbenchContractError();
   return item;
 }
