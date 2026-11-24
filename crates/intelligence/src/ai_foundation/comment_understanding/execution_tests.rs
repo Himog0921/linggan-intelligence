@@ -4,7 +4,7 @@
 //! The provider's reply is decided by what each comment says (see
 //! `tests/support/comment_understanding_response.rs`), so each test writes the situation it needs.
 #![allow(dead_code)]
-use super::{Cancel, Selection, Start, cancel, preview, read_run, start};
+use super::{Cancel, Selection, Start, cancel, preview, read_run, read_runs, start};
 use crate::{
     ai_foundation::{
         TaskKey,
@@ -401,6 +401,110 @@ async fn one_call_per_work_places_every_comment_and_the_next_unit_reuses_the_cat
         read_run(&env.db, Uuid::new_v4(), batch).await.is_err(),
         "another domain cannot read the run"
     );
+    // The run list carries the same receipt in summary: scale, unit states and the outcomes
+    // stored by completed units. The two failed comments have no outcome.
+    let runs = read_runs(&env.db, support::D).await.unwrap();
+    let listed = runs["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["batchRef"] == json!(batch))
+        .unwrap();
+    assert_eq!(listed["targetCount"], 7, "{listed}");
+    assert_eq!(listed["workCount"], 2, "{listed}");
+    assert_eq!(
+        listed["unitCounts"],
+        json!({"completed":2,"failed":0,"pending":0,"cancelled":0}),
+        "{listed}"
+    );
+    assert_eq!(
+        listed["outcomes"],
+        json!({"signals":4,"needsContext":0,"noSignal":1}),
+        "{listed}"
+    );
+    let other_domain = read_runs(&env.db, Uuid::new_v4()).await.unwrap();
+    assert_eq!(other_domain["runs"], json!([]));
+
+    // The overview splits every eligible comment into exactly one research part.
+    let overview = crate::ai_foundation::comment_research_overview::read(&env.db, support::D)
+        .await
+        .unwrap();
+    let parts = &overview["researchBreakdown"];
+    let eligible = overview["corpusSummary"]["eligibleCommentCount"]
+        .as_i64()
+        .unwrap();
+    let sum: i64 = ["withResult", "running", "failedWithoutResult", "never"]
+        .iter()
+        .map(|key| parts[*key].as_i64().unwrap())
+        .sum();
+    assert_eq!(sum, eligible, "{overview}");
+    assert_eq!(parts["withResult"], 5, "{overview}");
+    assert_eq!(parts["running"], 0, "{overview}");
+    assert_eq!(parts["failedWithoutResult"], 2, "{overview}");
+    // Recent signals: at most five, newest accepted first, without commenter IDs.
+    let recent = overview["recentSignals"].as_array().unwrap();
+    let current = overview["researchSummary"]["currentSignalCount"]
+        .as_u64()
+        .unwrap() as usize;
+    assert_eq!(recent.len(), current.min(5), "{overview}");
+    assert!(!recent.is_empty(), "{overview}");
+    let times: Vec<&str> = recent
+        .iter()
+        .map(|item| item["acceptedAt"].as_str().unwrap())
+        .collect();
+    assert!(times.windows(2).all(|pair| pair[0] >= pair[1]), "{times:?}");
+    for item in recent {
+        assert!(item["requestRef"].is_string(), "{item}");
+        assert!(item["proposition"].is_string(), "{item}");
+        assert!(item["kind"].is_string(), "{item}");
+        assert!(item["commentKey"]["workRef"].is_string(), "{item}");
+        assert!(
+            item["commentKey"]["commentExternalId"].is_string(),
+            "{item}"
+        );
+        assert!(item.get("authorExternalId").is_none(), "{item}");
+    }
+    let recent_text = overview["recentSignals"].to_string();
+    for private in ["reader-a", "reader-b", "reader-g"] {
+        assert!(!recent_text.contains(private), "{recent_text}");
+    }
+
+    // Numbered pages read the same order as the cursor and report the filter's total.
+    let page = |extra: Value| {
+        let mut value = json!({"domain": support::D, "workRef": w1, "limit": 2});
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value::<crate::comment_study_catalog::CommentCatalogQuery>(value).unwrap()
+    };
+    let first = crate::comment_study_catalog::read_comment_catalog(&env.db, &page(json!({})))
+        .await
+        .unwrap();
+    assert_eq!(first["page"]["totalCount"], 6, "{first}");
+    let by_cursor = crate::comment_study_catalog::read_comment_catalog(
+        &env.db,
+        &page(json!({"cursor": first["page"]["nextCursor"]})),
+    )
+    .await
+    .unwrap();
+    let by_offset = crate::comment_study_catalog::read_comment_catalog(
+        &env.db,
+        &page(json!({"offset": 2, "cursor": "ignored-when-an-offset-is-given"})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(by_offset["items"], by_cursor["items"]);
+    assert_eq!(by_offset["page"]["totalCount"], 6);
+    assert_eq!(by_offset["page"]["offset"], 2);
+    assert_eq!(by_offset["page"]["hasMore"], true);
+    let past_end =
+        crate::comment_study_catalog::read_comment_catalog(&env.db, &page(json!({"offset": 6})))
+            .await
+            .unwrap();
+    assert_eq!(past_end["items"], json!([]));
+    assert_eq!(past_end["page"]["hasMore"], false);
+    assert_eq!(past_end["page"]["totalCount"], 6);
     let requests = env.unit_requests();
     assert_eq!(
         requests.len(),
@@ -524,6 +628,15 @@ async fn one_call_per_work_places_every_comment_and_the_next_unit_reuses_the_cat
     .await
     .unwrap();
     assert_eq!(violations, 0);
+
+    // Each listed problem carries a one-sentence summary built from its definition.
+    let listed = super::read_problems(&env.db, support::D).await.unwrap();
+    let listed = listed["problems"].as_array().unwrap();
+    assert_eq!(listed.len(), 2);
+    for problem in listed {
+        let summary = problem["summary"].as_str().unwrap();
+        assert!(summary.ends_with('。'), "{problem}");
+    }
 
     // Researched comments are not researched again; the two that failed are.
     let again = preview(&env.db, support::D, &selections, false)

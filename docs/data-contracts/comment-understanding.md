@@ -123,6 +123,12 @@ Opportunity 从有效支持视图读取 V2 归属并保留原始支持键。当�
 | `GET /runs`、`GET /runs/{batch}`、`POST /cancel` | 领域内最近运行、单元和评论回执、失败重选项、用量和取消。 |
 | `GET /latest`、`GET /overview` | 评论最近执行和当前可展示结果分开读取。概览展示当前 V2 信号、正式需求与候选数量。 |
 | `GET /problems`、`GET /problems/{problem}` | 当前需求列表、作者与作品计数、最多三段代表原声、重定向和撤销历史。 |
+
+以下列表字段为增量字段，旧客户端可以忽略：
+
+- `GET /runs` 的每个运行包含 `targetCount`（本批次评论数，即单元目标数）、`workCount`（涉及作品数）、`unitCounts` 与 `outcomes`。`unitCounts` 按单元条目状态计数：`completed`=succeeded，`failed`=failed，`pending`=pending+running，`cancelled`=cancelled+skipped，四项之和等于本领域单元数。`outcomes` 只统计状态为 succeeded 的单元写入的结果行，按结果 `outcome` 分为 `signals`、`needsContext`、`noSignal`；失败目标不计入。
+- `GET /problems` 的每个需求包含 `summary`。需求定义没有单独保存的描述，服务端用 actor、goal、barrier 组成一句话（如「<actor>希望<goal>，但<barrier>。」）。goal 与 barrier 都为空时为 NULL；定义来源已撤回时也为 NULL。
+- `GET /overview` 包含 `researchBreakdown` 与 `recentSignals`。`researchBreakdown` 对 `corpusSummary.eligibleCommentCount` 的同一批可研究评论按优先级互斥分段：`withResult` 为存在当前成功结果（与目录 `studyState=studied` 同口径），`running` 为无成功结果且有排队或运行中的研究，`never` 为从未发起研究，`failedWithoutResult` 为其余评论，即最近一次研究失败或被取消且没有成功结果。四段之和等于 `eligibleCommentCount`。`recentSignals` 从概览已有的当前有效结果中选取，最多 5 条，按结果写入时间 `acceptedAt` 倒序排列。每条包含 `requestRef`、`proposition`、`kind`、`authorDisplayName`（来自该评论最新观察，可为 NULL）、`acceptedAt` 与 `commentKey`，不返回评论者外部 ID。来源资格与 `solutionPreview` 相同：使用相同的结果选择，并经过 `current_source_in` 复核。
 | `POST /consolidation`、`POST /redirects/revoke` | 手动提交候选整理，在当前领域撤销已发生的合并。 |
 
 评论目录可按已提交的筛选和排序生成研究清单。运营选择检查的前 100、300、500 或 1,000 条结果。清单从筛选首页开始，沿目录游标读取，加入可选评论的来源引用。任一页失败时整份清单作废。清单留在当前领域的工作台会话，运营用同一份清单预览并确认启动。缺 L1 时沿用内容理解入口，L1 就绪后可用原清单重新预览。生成清单和预览均不提交评论研究任务。

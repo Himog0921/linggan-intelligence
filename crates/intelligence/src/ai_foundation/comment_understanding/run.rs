@@ -111,11 +111,42 @@ pub async fn read_run(db: &Database, domain: Uuid, batch: Uuid) -> Result<Value,
 }
 
 /// The newest research batches for the domain. The full unit and target receipt loads on demand.
+///
+/// Each run also carries its scale and a summary derived from the same unit items and stored
+/// results as `read_run`: comments and works in the batch, units by item state (`pending` counts
+/// pending and running; `cancelled` counts cancelled and skipped) and the outcomes stored by
+/// completed units only.
 pub async fn read_runs(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
     let runs: Vec<Value> = sqlx::query_scalar(
         "SELECT jsonb_build_object('batchRef',batch.batch_ref,'createdAt',batch.created_at,
-           'state',control.state,'cancelRequested',control.cancel_requested,'unitCount',batch.item_count)
+           'state',control.state,'cancelRequested',control.cancel_requested,'unitCount',batch.item_count,
+           'targetCount',targets.target_count,'workCount',units.work_count,
+           'unitCounts',jsonb_build_object('completed',units.completed,'failed',units.failed,
+             'pending',units.pending,'cancelled',units.cancelled),
+           'outcomes',jsonb_build_object('signals',targets.signals,'needsContext',targets.needs_context,
+             'noSignal',targets.no_signal))
          FROM linggan_ai_batch batch JOIN linggan_ai_batch_control control USING(batch_ref)
+         CROSS JOIN LATERAL (
+           SELECT count(DISTINCT unit.work_ref) AS work_count,
+             count(*) FILTER(WHERE item_control.state='succeeded') AS completed,
+             count(*) FILTER(WHERE item_control.state='failed') AS failed,
+             count(*) FILTER(WHERE item_control.state IN('pending','running')) AS pending,
+             count(*) FILTER(WHERE item_control.state IN('cancelled','skipped')) AS cancelled
+           FROM linggan_ai_batch_item item JOIN linggan_comment_research_unit unit USING(item_ref)
+           JOIN linggan_ai_batch_item_control item_control USING(item_ref)
+           WHERE item.batch_ref=batch.batch_ref AND unit.domain_ref=$1
+         ) units
+         CROSS JOIN LATERAL (
+           SELECT count(*) AS target_count,
+             count(*) FILTER(WHERE item_control.state='succeeded' AND result.result->>'outcome'='signals') AS signals,
+             count(*) FILTER(WHERE item_control.state='succeeded' AND result.result->>'outcome'='needs_context') AS needs_context,
+             count(*) FILTER(WHERE item_control.state='succeeded' AND result.result->>'outcome'='no_signal') AS no_signal
+           FROM linggan_ai_batch_item item JOIN linggan_comment_research_unit unit USING(item_ref)
+           JOIN linggan_ai_batch_item_control item_control USING(item_ref)
+           JOIN linggan_comment_research_unit_target target ON target.unit_ref=unit.unit_ref
+           LEFT JOIN linggan_comment_research_result result ON result.request_ref=target.request_ref
+           WHERE item.batch_ref=batch.batch_ref AND unit.domain_ref=$1
+         ) targets
          WHERE batch.task_key='comment_understanding' AND EXISTS(
            SELECT 1 FROM linggan_ai_batch_item item JOIN linggan_comment_research_unit unit USING(item_ref)
            WHERE item.batch_ref=batch.batch_ref AND unit.domain_ref=$1

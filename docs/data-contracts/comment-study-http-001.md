@@ -54,11 +54,13 @@ costSummary 恰含 recordingState(`full/legacy_partial/unavailable`)、tokenLimi
 
 | 方法／路径 | 请求 | 响应职责 |
 |---|---|---|
-| GET `/comments` | domain、q、workRef、voiceRole、studyState、signalKind、sort、minLikes、postUsage、cursor、limit | 有效文本原声目录，不依赖 runRef；每行 `signalKinds` 来自当前有效评论研究结果；`sort`/`minLikes`/`postUsage` 见下方高赞原话库补充 |
+| GET `/comments` | domain、q、workRef、voiceRole、studyState、signalKind、sort、minLikes、postUsage、cursor、limit、offset | 有效文本原声目录，不依赖 runRef；每行 `signalKinds` 来自当前有效评论研究结果；`sort`/`minLikes`/`postUsage` 见下方高赞原话库补充；`offset` 见下方数字分页 |
 | GET `/comments/detail` | domain、workRef、commentExternalId | 当前原声＋历史版本＋作品与父评论＋研究历史入口 |
 | GET `/works` | domain、q、studyState、cursor、limit | 可浏览全部作品与研究覆盖；不截断前 100 |
 | GET `/catalog-summary` | 同目录筛选（含 minLikes、postUsage；不含 sort），但无 cursor/limit | 当前原声、可研究、身份未知、作者声音、无效、待清洗数量及 asOf |
 | POST `/selection-preview` | 与启动命令相同的 domainRef/policyRef/scope/mode/limits，不含 requestRef | 不持久化样本、不占位、不外发；返回可预估的选择数量和限制 |
+
+数字分页：`/comments` 可传 `offset`（0–100000，默认不传）。传入 `offset` 时，服务端忽略 `cursor`，以新的 asOf 按同一排序跳过前 `offset` 行，并在 `page.offset` 回显该值。`offset` 与 `limit` 一样不进入 scopeHash。响应 `page.totalCount` 为当前筛选下可翻页的总行数，等于 `summary.displayableCommentCount`，两种分页方式都返回。`nextCursor` 仍按本页末行生成，可继续使用游标翻页。
 
 q 是 1–200 字的**字面子串**，Unicode 正常文本可查；空字符串等于不筛选。对 `\`、`%`、`_` 做 LIKE 转义，使用显式 ESCAPE。不能把 `simple` FTS 当成中文分词，也不以点赞提高词义相关性。1–2 个中文字允许搜索；若触发执行时间上限返回明确查询错误，不返回假空结果。
 

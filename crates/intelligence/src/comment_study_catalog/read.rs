@@ -58,6 +58,8 @@ pub enum CatalogPostUsage {
 
 /// A minimum below 1 would silently keep unknown counts out without meaning anything.
 const MAX_MIN_LIKES: i64 = 1_000_000_000;
+/// Numbered pages stay bounded; deeper reads use the cursor.
+pub(super) const MAX_OFFSET: i64 = 100_000;
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -77,6 +79,9 @@ pub struct CommentCatalogQuery {
     pub post_usage: CatalogPostUsage,
     pub cursor: Option<String>,
     pub limit: Option<i64>,
+    /// Numbered pages: skip this many rows of the current filter. Given an offset, any cursor is
+    /// ignored and the page starts from a fresh `asOf`.
+    pub offset: Option<i64>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -105,6 +110,7 @@ struct Scope {
     min_likes: Option<i64>,
     post_usage: &'static str,
     limit: i64,
+    offset: Option<i64>,
 }
 
 impl CatalogSort {
@@ -155,6 +161,9 @@ impl CommentCatalogQuery {
             || self
                 .min_likes
                 .is_some_and(|value| !(1..=MAX_MIN_LIKES).contains(&value))
+            || self
+                .offset
+                .is_some_and(|value| !(0..=MAX_OFFSET).contains(&value))
         {
             return Err(StudyCatalogError::InvalidQuery);
         }
@@ -202,6 +211,7 @@ impl CommentCatalogQuery {
             min_likes: self.min_likes,
             post_usage: self.post_usage.as_sql(),
             limit,
+            offset: self.offset,
         })
     }
 }
@@ -231,6 +241,7 @@ pub async fn read_catalog_summary(
         post_usage: query.post_usage,
         cursor: None,
         limit: Some(50),
+        offset: None,
     };
     read_catalog(database, &query, true)
         .await
@@ -243,9 +254,11 @@ async fn read_catalog(
     summary_only: bool,
 ) -> Result<Value, StudyCatalogError> {
     let scope = query.validate()?;
+    // An offset page is numbered from the start of the current filter, never from a cursor.
     let previous = query
         .cursor
         .as_deref()
+        .filter(|_| scope.offset.is_none())
         .map(|value| cursor::decode(value, &scope.hash))
         .transpose()?;
     let mut tx = database.pool().begin().await?;
@@ -280,6 +293,7 @@ async fn read_catalog(
         .bind(scope.min_likes)
         .bind(scope.post_usage)
         .bind(last.and_then(|value| value.like_count))
+        .bind(scope.offset.unwrap_or(0))
         .fetch_one(&mut *tx)
         .await?;
     if !summary_only {
@@ -362,6 +376,7 @@ pub(super) async fn read_one_projection(
         .bind(Option::<i64>::None)
         .bind(CatalogPostUsage::default().as_sql())
         .bind(Option::<i64>::None)
+        .bind(0_i64)
         .fetch_one(&mut **tx)
         .await?;
     if projection.get("currentSource").is_none_or(Value::is_null) {
@@ -420,10 +435,17 @@ fn page_response(
         None
     };
     let items: Vec<Value> = rows.into_iter().map(|row| row["item"].clone()).collect();
+    let mut page = json!({
+        "limit": scope.limit, "hasMore": has_more, "nextCursor": next_cursor, "asOf": as_of,
+        "totalCount": projection["totalCount"],
+    });
+    if let Some(offset) = scope.offset {
+        page["offset"] = json!(offset);
+    }
     Ok(json!({
         "contract": "comment-study.read.v2", "domainRef": domain,
         "items": items,
-        "page": { "limit": scope.limit, "hasMore": has_more, "nextCursor": next_cursor, "asOf": as_of },
+        "page": page,
         "indexCoverage": projection["indexCoverage"],
         "summary": projection["summary"]
     }))
@@ -497,6 +519,28 @@ mod tests {
             }))
             .is_err()
         );
+    }
+
+    #[test]
+    fn offset_is_bounded_and_does_not_change_cursor_scope() {
+        let mut query = query();
+        let original = query.validate().unwrap();
+        assert_eq!(original.offset, None);
+        for offset in [0, 40, MAX_OFFSET] {
+            query.offset = Some(offset);
+            let scope = query.validate().unwrap();
+            assert_eq!(
+                (scope.offset, scope.hash),
+                (Some(offset), original.hash.clone())
+            );
+        }
+        for offset in [-1, MAX_OFFSET + 1] {
+            query.offset = Some(offset);
+            assert!(matches!(
+                query.validate(),
+                Err(StudyCatalogError::InvalidQuery)
+            ));
+        }
     }
 
     #[test]

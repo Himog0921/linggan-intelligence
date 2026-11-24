@@ -1,7 +1,8 @@
 -- Appended to facts.sql. $6 literal query; $7 voice; $8 study filter;
 -- $9 received-before; $10 work-after; $11 external-id-after; $12 page size plus one; $13 signal kind;
 -- $14 sort (received_desc | like_desc); $15 minimum known likes; $16 post usage (all | used | unused);
--- $17 like-count-after (NULL with a cursor means the page continues inside the unknown-likes tail).
+-- $17 like-count-after (NULL with a cursor means the page continues inside the unknown-likes tail);
+-- $18 rows to skip for a numbered page (0 with a cursor).
 , signal_kinds AS MATERIALIZED (
     SELECT original.content_public_ref,original.comment_external_id,
            array_agg(DISTINCT label.kind ORDER BY label.kind) AS kinds
@@ -91,13 +92,15 @@
            AND like_count IS NULL AND after_received_key)
     ORDER BY CASE WHEN $14::text = 'like_desc' THEN like_count END DESC NULLS LAST,
              created_at DESC, content_public_ref, comment_external_id COLLATE "C"
-    LIMIT $12
+    LIMIT $12 OFFSET $18::bigint
 ), coverage AS (
     SELECT (SELECT count(*) FROM matching WHERE readable AND cached_source_ref IS NOT NULL) AS indexed,
            count(*) FILTER (WHERE readable AND cached_source_ref IS NULL) AS pending
     FROM scoped
 )
 SELECT jsonb_build_object(
+    -- Every row of the current filter the page draws from, ignoring the cursor position.
+    'totalCount', (SELECT count(*) FROM visible),
     'currentSource', (SELECT jsonb_build_object(
         'commentKey', jsonb_build_object('workRef', content_public_ref, 'commentExternalId', comment_external_id),
         'sourceRef', material_ref,
