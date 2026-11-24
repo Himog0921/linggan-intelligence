@@ -5,7 +5,7 @@ import { LikeCount, PostUsageControl } from './CommentCells';
 import { ActionButton } from '../../../shared/ActionButton';
 import { SelectField } from '../../../shared/SelectField';
 import { CommentDetail } from './CommentDetail';
-import { parseComments } from './commentDtos';
+import { parseComments, type CommentItem } from './commentDtos';
 import { commentEligibility, commentFilters, commentStatus, shortBeijingDate, type CommentFilters } from './commentModel';
 import { errorText, studyTime } from './format';
 import { signalKindLabel, workTitleSourceLabel } from './labels';
@@ -13,6 +13,17 @@ import { parseWorkCatalog } from './methodDtos';
 import type { SelectedComment } from './studyApi';
 import { commentIdentity, studyRead, useStudyRead, type StudyNavigation } from './studyApi';
 import { c } from './styles';
+
+const BULK_SIZES = ['100', '300', '500', '1000'] as const;
+type BulkSize = typeof BULK_SIZES[number];
+
+function canSelect(item: CommentItem) {
+  return item.studyEligibility.eligible && ['primary', 'reference'].includes(item.observationRole);
+}
+
+function selectionFor(item: CommentItem): SelectedComment {
+  return { sourceRef: item.sourceRef, commentKey: item.commentKey, observationRole: item.observationRole };
+}
 
 export interface CommentCounts { displayableCommentCount: number | null; eligibleCommentCount: number | null; indexedCount: number | null; pendingCount: number | null }
 interface Props { domain: string; nav: StudyNavigation; selected: SelectedComment[]; onSelected: (rows: SelectedComment[]) => void; onCounts: (counts: CommentCounts | null) => void; requestRefs: Map<string, string>; closeDetail: () => void }
@@ -26,6 +37,10 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
   const [queryDraft, setQueryDraft] = useState(filter.q);
   const [previousFilter, setPreviousFilter] = useState(filter);
   const [selecting, setSelecting] = useState(selected.length > 0);
+  const [bulkSize, setBulkSize] = useState<BulkSize>('300');
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkNotice, setBulkNotice] = useState('');
+  const bulkRequest = useRef<AbortController | null>(null);
   // A router change replaces the submitted draft; local SelectField edits never auto-query.
   if (previousFilter !== filter) {
     setPreviousFilter(filter);
@@ -34,7 +49,10 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
   }
   const alive = useRef(true), searchSerial = useRef(0), currentLocation = useRef(location.key);
   const toastTimer = useRef<number | null>(null);
-  useLayoutEffect(() => { currentLocation.current = location.key; }, [location.key]);
+  useLayoutEffect(() => {
+    currentLocation.current = location.key;
+    return () => bulkRequest.current?.abort();
+  }, [location.key]);
   useEffect(() => { alive.current = true; return () => { alive.current = false; searchSerial.current += 1; if (toastTimer.current !== null) window.clearTimeout(toastTimer.current); }; }, []);
   function notify(message: string, error = false) {
     setToast({ message, error });
@@ -72,7 +90,43 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
   const detail = detailWork && detailId ? <CommentDetail key={commentIdentity({ workRef: detailWork, commentExternalId: detailId })} domain={domain} commentKey={{ workRef: detailWork, commentExternalId: detailId }} nav={nav} request={params.get('researchRequestRef')} close={closeDetail} filterWork={(workRef, workLabel) => route({ q: workLabel, searchScope: 'work', workRef, workLabel, workChoices: [{ workRef, displayTitle: workLabel }], cursor: null, history: [] }, false, true)} /> : null;
 
   const extraCount = Number(draft.voiceRole !== 'reader_and_unknown') + Number(!!draft.minLikes) + Number(draft.postUsage !== 'all');
-  const loadedEligible = rows.filter(item => item.studyEligibility.eligible && ['primary','reference'].includes(item.observationRole));
+  const loadedEligible = rows.filter(canSelect);
+  async function prepareFilteredSelection() {
+    if (bulkRequest.current || selected.length) return;
+    const controller = new AbortController();
+    bulkRequest.current = controller;
+    setBulkLoading(true);
+    setBulkNotice('');
+    const requested = Number(bulkSize);
+    const pickParams = new URLSearchParams(queryParams);
+    pickParams.delete('cursor');
+    pickParams.set('limit', '100');
+    const selections = new Map<string, SelectedComment>();
+    let scanned = 0;
+    try {
+      while (scanned < requested) {
+        const page = await studyRead(domain, `comments?${pickParams}`, parseComments, controller.signal);
+        const items = page.items.slice(0, requested - scanned);
+        for (const item of items) {
+          if (canSelect(item)) selections.set(commentIdentity(item.commentKey), selectionFor(item));
+        }
+        scanned += items.length;
+        const next = page.page.nextCursor;
+        if (items.length === 0 || !next) break;
+        if (next === pickParams.get('cursor')) throw new Error('评论目录分页未前进');
+        pickParams.set('cursor', next);
+      }
+      if (controller.signal.aborted) return;
+      onSelected([...selections.values()]);
+      setBulkNotice(`已检查当前筛选结果的前 ${scanned} 条，选入 ${selections.size} 条。`);
+    } catch {
+      if (!controller.signal.aborted) setBulkNotice('未能生成评论清单，请重试。');
+    } finally {
+      bulkRequest.current = null;
+      if (alive.current) setBulkLoading(false);
+    }
+  }
+
   const allPageSelected = loadedEligible.length > 0 && loadedEligible.every(item => selectedIds.has(commentIdentity(item.commentKey)));
   function togglePage() {
     const pageKeys = new Set(loadedEligible.map(item => commentIdentity(item.commentKey)));
@@ -83,13 +137,13 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
       if (ids.has(key)) continue;
       if (next.length >= 50) break;
       if (!works.has(item.commentKey.workRef) && works.size >= 100) continue;
-      next.push({ sourceRef: item.sourceRef, commentKey: item.commentKey, observationRole: item.observationRole });
+      next.push(selectionFor(item));
       ids.add(key); works.add(item.commentKey.workRef);
     }
     onSelected(next);
   }
   return <div className={c('study-results-comments')}>
-    {selected.length ? <CommentResearchSelection key={selected.map(p => p.sourceRef).join(',')} domain={domain} selected={selected} nav={nav} clear={() => onSelected([])} /> : null}
+    {selected.length ? <CommentResearchSelection key={selected.map(p => p.sourceRef).join(',')} domain={domain} selected={selected} nav={nav} clear={() => { onSelected([]); setBulkNotice(''); }} /> : null}
     {query.isPending ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>正在读取评论研究…</p></div> : query.isError ? <div className={c('study-comment-read-status')}><p className={c('study-empty')}>评论目录读取失败：{errorText(query.error)} <button type="button" onClick={() => { void query.refetch(); }}>重试</button></p></div> :
     <section className={c('study-comments')} aria-label="用户评论">
       {toast ? <p className={c('study-comment-toast')} data-comment-toast data-error={toast.error || undefined} role="status">{toast.message}</p> : null}
@@ -125,27 +179,35 @@ export function CommentsView({ domain, nav, selected, onSelected, onCounts, requ
               ]} /></div>
               <footer><button type="button" className={c('study-link')} onClick={() => setDraft(old => ({ ...old, voiceRole: 'reader_and_unknown', minLikes: null, postUsage: 'all' }))}>清空筛选</button><ActionButton variant="outline" type="submit">完成</ActionButton></footer>
             </section> : null}
-            {selecting ? <button type="button" className={c('study-comment-page-select')} disabled={!loadedEligible.length} onClick={togglePage}>{allPageSelected ? '取消勾选本页' : '勾选本页'}</button> : null}
+            {selecting ? <button type="button" className={c('study-comment-page-select')} disabled={bulkLoading || !loadedEligible.length} onClick={togglePage}>{allPageSelected ? '取消勾选本页' : '勾选本页'}</button> : null}
             <button className={c('study-comment-select-mode')} type="button" aria-pressed={selecting} title={selecting ? '退出并清空本次选择' : '进入批量选择模式'} onClick={() => {
-              if (selecting) onSelected([]);
+              if (selecting) { bulkRequest.current?.abort(); setBulkNotice(''); onSelected([]); }
               setSelecting(old => !old);
             }}><span aria-hidden="true" className={c('study-comment-select-glyph')}><i/><i/><i/><i/></span>{selecting ? '取消选择' : '选择评论'}</button>
           </div>
         </div>
       </form>
+      {selecting && !selected.length ? <div className={c('study-link-actions')}>
+        <SelectField compact label="检查当前筛选结果的前几条" value={bulkSize} disabled={bulkLoading} onChange={setBulkSize}
+          options={BULK_SIZES.map(value => ({ value, label: `前 ${value} 条` }))} />
+        <ActionButton type="button" disabled={bulkLoading || !rows.length} onClick={() => void prepareFilteredSelection()}>
+          {bulkLoading ? '正在生成清单' : '按当前筛选生成研究清单'}
+        </ActionButton>
+      </div> : null}
+      {selecting && bulkNotice ? <p role="status">{bulkNotice}</p> : null}
       {workError ? <p className={c('study-filter-work-error')} role="status">{workError}</p> : null}
       {!selecting ? <div className={c('study-comment-result-bar')}><span>{stats?.displayableCommentCount == null ? '评论范围待读取' : `当前筛选 ${stats.displayableCommentCount.toLocaleString('zh-CN')} 条评论`}</span></div> : null}
       <div className={c('study-review-table-wrap')}><table className={c('study-review-table study-comments-table')} data-selecting={selecting}>
         <colgroup>{selecting ? <col className={c('study-col-check')} /> : null}<col className={c('study-col-voice')} /><col className={c('study-col-likes')} /><col className={c('study-col-work')} /><col className={c('study-col-status')} /><col className={c('study-col-kinds')} /><col className={c('study-col-author')} /><col className={c('study-col-day')} /><col className={c('study-col-time')} /><col className={c('study-col-usage')} /></colgroup>
         <thead><tr>{(selecting ? ['选择'] : []).concat(['原声','点赞','所属作品','研究状态','研究标签','作者','点赞采集日','观测时间','改帖']).map(title=><th className={title === '点赞' ? c('study-comment-like-heading') : undefined} scope="col" key={title}>{title}</th>)}</tr></thead>
         <tbody>{rows.length ? rows.map(item => {
-          const key = commentIdentity(item.commentKey), eligible = item.studyEligibility.eligible && ['primary','reference'].includes(item.observationRole), checked = selectedIds.has(key),
+          const key = commentIdentity(item.commentKey), eligible = canSelect(item), checked = selectedIds.has(key),
             capped = !checked && (selected.length >= 50 || (!selectedWorks.has(item.commentKey.workRef) && selectedWorks.size >= 100)),
             kinds = item.signalKinds.filter(kind => Object.hasOwn(signalKindLabel, kind)), fullKinds = kinds.map(kind => signalKindLabel[kind]).join('、');
           const eligibilityText = eligible ? '' : commentEligibility(item), statusText = commentStatus(item);
           return <tr key={key} data-selected={checked ? 'true' : undefined}>
-            {selecting ? <td className={c('study-comment-check-cell')}><label className={c('study-comment-check')}><input type="checkbox" data-select-comment data-work-ref={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} data-eligible={eligible} aria-label="选择这条评论" title={!eligible ? eligibilityText : capped ? '本次选择已达到评论或作品数量上限' : undefined} checked={checked} disabled={!eligible || capped} onChange={event => {
-              if (event.target.checked && eligible && !capped) onSelected([...selected, { sourceRef: item.sourceRef, commentKey: item.commentKey, observationRole: item.observationRole }]);
+            {selecting ? <td className={c('study-comment-check-cell')}><label className={c('study-comment-check')}><input type="checkbox" data-select-comment data-work-ref={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} data-eligible={eligible} aria-label="选择这条评论" title={!eligible ? eligibilityText : capped ? '本次选择已达到评论或作品数量上限' : undefined} checked={checked} disabled={bulkLoading || !eligible || capped} onChange={event => {
+              if (event.target.checked && eligible && !capped) onSelected([...selected, selectionFor(item)]);
               else onSelected(selected.filter(row => commentIdentity(row.commentKey) !== key));
             }} /></label></td> : null}
             <td><button type="button" className={c('study-comment-open')} aria-label={item.commentText || '评论原声不可用'} title={item.commentText || '评论原声不可用'} data-comment-work={item.commentKey.workRef} data-comment-id={item.commentKey.commentExternalId} onClick={() => nav.comment(item.commentKey)}>
