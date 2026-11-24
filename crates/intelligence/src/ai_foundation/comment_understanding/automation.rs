@@ -69,24 +69,15 @@ pub async fn read_selection(
     domain: Uuid,
     selection: Uuid,
 ) -> Result<Value, FoundationError> {
-    sqlx::query_scalar(
-        "SELECT jsonb_build_object('selectionRef',s.selection_ref,'domainRef',s.domain_ref,
-         'selections',COALESCE((
-            SELECT jsonb_agg(jsonb_build_object('workRef',t.work_ref,'sourceRef',t.source_ref,
-                'commentExternalId',t.comment_external_id,'observationRole','primary') ORDER BY t.position)
-            FROM linggan_comment_research_selection_target t WHERE t.selection_ref=s.selection_ref
-              AND NOT EXISTS (
-                SELECT 1 FROM linggan_material_comment_restriction r
-                WHERE r.content_public_ref=t.work_ref AND r.comment_external_id=t.comment_external_id
-              )
-         ),'[]'::jsonb))
-         FROM linggan_comment_research_selection s WHERE s.selection_ref=$1 AND s.domain_ref=$2",
-    )
-    .bind(selection)
-    .bind(domain)
-    .fetch_optional(db.pool())
-    .await?
-    .ok_or(FoundationError::NotFound)
+    let mut tx = read_only_tx(db).await?;
+    let result = sqlx::query_scalar(include_str!("automation_selection.sql"))
+        .bind(selection)
+        .bind(domain)
+        .fetch_optional(&mut *tx)
+        .await?
+        .ok_or(FoundationError::NotFound)?;
+    tx.commit().await?;
+    Ok(result)
 }
 
 pub async fn change(db: &Database, request: &Change) -> Result<Value, FoundationError> {

@@ -75,6 +75,7 @@ describe('D3 actual four-view React boundary', () => {
  it('saves the daily schedule from research records and leaves launch to the operator', async () => {
   const time = '2026-11-20T01:00:00Z';
   let enabled = false;
+  let sourceRef = 'source-c1';
   installFetch((url, request) => {
     if (url.pathname.endsWith('/v2/automation')) {
       if (request.method === 'POST') enabled = true;
@@ -87,7 +88,7 @@ describe('D3 actual four-view React boundary', () => {
     }
     if (url.pathname.endsWith('/automation/selections/daily-1')) return json({
       domainRef: DOMAIN, selectionRef: 'daily-1',
-      selections: [{ workRef: WORK, sourceRef: 'source-c1', commentExternalId: 'c1', observationRole: 'primary' }],
+      selections: [{ workRef: WORK, sourceRef, commentExternalId: 'c1', observationRole: 'primary' }],
     });
     if (url.pathname.endsWith('/v2/preview')) return json({
       domainRef: DOMAIN, knowledgeCutoff: time, planHash: 'e'.repeat(64), taskConfigRef: 'config', taskRevision: 2,
@@ -118,6 +119,15 @@ describe('D3 actual four-view React boundary', () => {
   expect(calls.filter(call => call.method === 'POST').map(call => call.url.pathname)).toEqual([
     '/api/local/comment-research/v2/automation', '/api/local/comment-research/v2/preview',
   ]);
+
+  sourceRef = 'source-c1-reobserved';
+  await user.click(screen.getByRole('button', { name: '刷新清单' }));
+  await waitFor(() => expect(screen.queryByRole('button', { name: '开始所选评论研究' })).toBeNull());
+  await user.click(screen.getByRole('button', { name: '预览所选评论' }));
+  expect(await screen.findByRole('button', { name: '开始所选评论研究' })).toBeVisible();
+  const previews = calls.filter(call => call.method === 'POST' && call.url.pathname.endsWith('/v2/preview'));
+  expect(previews.at(-1)?.body?.selections).toEqual([{ workRef: WORK, sourceRef, observationRole: 'primary' }]);
+  expect(calls.some(call => call.method === 'POST' && call.url.pathname.endsWith('/v2/runs'))).toBe(false);
  });
 
  it('does not expose a partial selection when a later directory page fails', async () => {

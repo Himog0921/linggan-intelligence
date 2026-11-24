@@ -75,8 +75,10 @@ export function CommentAutomation({ domain, nav, showingSettings, closeSettings 
   });
   const selection = useQuery({
     queryKey: ['comment-understanding', domain, 'automation-selection', selectedRef],
-    queryFn: selectedRef === null ? skipToken : ({ signal }) => readAutomationSelection(domain, selectedRef, signal), retry: false, gcTime: 0,
+    queryFn: selectedRef === null ? skipToken : ({ signal }) => readAutomationSelection(domain, selectedRef, signal),
+    retry: false, gcTime: 0, refetchOnWindowFocus: false, refetchOnReconnect: false,
   });
+  const sourceKey = selection.data?.map(comment => comment.sourceRef).join(',');
   const setting = automation.data?.setting;
   const nextBefore = automation.data?.nextBefore;
   const settingsTitle = 'comment-automation-title';
@@ -87,7 +89,10 @@ export function CommentAutomation({ domain, nav, showingSettings, closeSettings 
       <p>{setting.enabled ? `每天 ${asTime(setting.minuteOfDay)} · ${setting.timeZone} · 每批最多 ${setting.selectionLimit} 条` : '已暂停生成新清单'}</p>
       {automation.data?.selections.length ? <ul>{automation.data.selections.map(item => <li key={item.selectionRef}>
         {studyTime(item.generatedAt)} · {item.targetCount ? `${item.targetCount} 条评论` : '无符合条件的新增评论'}
-        {item.targetCount ? <> · <button type="button" className={c('study-link')} aria-pressed={selectedRef === item.selectionRef} onClick={() => setSelectedRef(item.selectionRef)}>查看清单</button></> : null}
+        {item.targetCount ? <> · <button type="button" className={c('study-link')} aria-pressed={selectedRef === item.selectionRef} onClick={() => {
+          if (selectedRef === item.selectionRef) void selection.refetch();
+          else setSelectedRef(item.selectionRef);
+        }}>{selectedRef === item.selectionRef ? '刷新清单' : '查看清单'}</button></> : null}
       </li>)}</ul> : <p>暂无自动研究清单。</p>}
       <div className={c('study-link-actions')}>
         {before ? <ActionButton type="button" onClick={() => { setBefore(null); setSelectedRef(null); }}>最新清单</ActionButton> : null}
@@ -95,7 +100,7 @@ export function CommentAutomation({ domain, nav, showingSettings, closeSettings 
       </div>
       {selectedRef && selection.isPending ? <p>正在读取清单…</p> : null}
       {selectedRef && selection.isError ? <p role="alert">清单读取失败。 <button type="button" onClick={() => void selection.refetch()}>重试</button></p> : null}
-      {selectedRef && selection.data && selection.data.length > 0 ? <CommentResearchSelection key={selectedRef} domain={domain} selected={selection.data} nav={nav} /> : null}
+      {selectedRef && selection.data && selection.data.length > 0 ? <CommentResearchSelection key={`${selectedRef}:${sourceKey}`} domain={domain} selected={selection.data} nav={nav} /> : null}
       {selectedRef && selection.data?.length === 0 ? <p>清单内暂时没有可读取的评论。</p> : null}
     </section> : null}
     {notice ? <p role="status">{notice}</p> : null}

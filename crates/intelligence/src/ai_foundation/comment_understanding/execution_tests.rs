@@ -716,7 +716,30 @@ async fn scheduled_selections_are_ordered_bounded_and_do_not_enqueue_models() {
         automation::read_selection(&db, Uuid::new_v4(), first_ref).await,
         Err(crate::ai_foundation::store::FoundationError::NotFound)
     ));
-    let plan = preview(&db, domain, &[selection(work, earlier)], false)
+    let reobserved = support::comments::comment_with_author(
+        &db,
+        "schedule-work",
+        "z-first",
+        "我家孩子每天都要提醒才愿意动笔",
+        Some("reader-a"),
+        "2026-10-15T00:00:00Z",
+    )
+    .await;
+    assert_ne!(earlier, reobserved);
+    let first = automation::read_selection(&db, domain, first_ref)
+        .await
+        .unwrap();
+    let source = serde_json::from_value(first["selections"][0]["sourceRef"].clone()).unwrap();
+    assert_eq!(source, reobserved);
+    let recorded: Uuid = sqlx::query_scalar(
+        "SELECT source_ref FROM linggan_comment_research_selection_target WHERE selection_ref=$1",
+    )
+    .bind(first_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(recorded, earlier);
+    let plan = preview(&db, domain, &[selection(work, source)], false)
         .await
         .unwrap();
     assert_eq!(plan["waitingL1"]["targetCount"], 1);
