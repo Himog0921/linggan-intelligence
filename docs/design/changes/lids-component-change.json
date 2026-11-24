@@ -1,7 +1,7 @@
 {
   "kind": "implementation_fix",
-  "reason": "C17 SelectField: an option click inside a wrapping label was forwarded by the browser to the trigger and reopened the menu, and a click on the label caption while the menu was open closed it and reopened it. The menu now cancels the default action of clicks inside it, and the outside-pointer rule treats the wrapping label's caption as part of the control. Parameters, states, visual design and keyboard behaviour are unchanged; the creation-workbench FieldLabel workaround is removed.",
-  "authorization": "Mog 2026-11-24: '下拉组件可以从根本修复一下' in the current conversation.",
+  "reason": "在材料桌选题框设置复用样板选择控件，写稿区展示所选版本",
+  "authorization": "Mog 确认推进 S2 连续创作",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",

@@ -393,6 +393,7 @@ export function errorText(error: unknown): string {
       creation_source_unavailable: '来源可用情况已变化，请回到材料核对。',
       creation_experience_reset_required: '经历已撤回。请先重新载入服务器版本，再继续编辑。',
       creation_experience_editor_reset_required: '本页编辑来自撤回前的版本，请丢弃旧编辑并使用服务器版本。',
+      creation_writing_template_unavailable: '所选样板已更新、停用或来源不可用。请重新选择样板后再保存或开稿。',
       creation_idea_account_limit: '这个选题已关联三个账号，请先调整关联账号，当前编辑仍保留。',
       creation_idea_anchor: '此稿是选题框的来源稿，不能解除或换成其他选题；当前编辑仍保留。',
       creation_idea_not_found: '选题框已不可用，请重新读取并选择，当前编辑仍保留。',

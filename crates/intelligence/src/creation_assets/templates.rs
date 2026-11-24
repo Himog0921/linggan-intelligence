@@ -140,6 +140,38 @@ async fn get_revision_in(
         created_at: row.try_get("created_at")?,
     })
 }
+/// Checks whether a template revision can be newly assigned to a draft.
+pub(crate) async fn qualifies_for_writing_in(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    selection: &workbench::WritingTemplateRef,
+) -> Result<bool, workbench::WorkbenchError> {
+    let same_domain: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM linggan_creation_template t
+         JOIN linggan_creation_work source ON source.work_ref=t.work_ref
+         JOIN linggan_creation_work target ON target.domain_ref=source.domain_ref
+         WHERE t.code=$1 AND target.work_ref=$2)",
+    )
+    .bind(&selection.code)
+    .bind(work)
+    .fetch_one(&mut **tx)
+    .await?;
+    if !same_domain {
+        return Ok(false);
+    }
+    match get_in(tx, &selection.code).await {
+        Ok(template) => Ok(template.revision == selection.revision
+            && template.status == "ok"
+            && template.source_available),
+        Err(AssetsError::Database(error)) => Err(error.into()),
+        Err(AssetsError::Workbench(error)) => Err(error),
+        Err(AssetsError::NotFound) => Ok(false),
+        Err(_) => Err(workbench::WorkbenchError::Invalid(
+            "writing_template_unavailable",
+        )),
+    }
+}
+
 pub async fn structural_template_history(
     db: &Database,
     code: &str,

@@ -404,6 +404,14 @@ pub(super) async fn append(
     let number = previous.map_or(1, |r| r.number + 1);
     let (stored, fragments) =
         super::experience_fragments::prepare(tx, work, previous.map(|r| &r.document), &doc).await?;
+    if let Some(selection) = &doc.writing_template
+        && previous.and_then(|r| r.document.writing_template.as_ref()) != Some(selection)
+        && (doc.idea_ref.is_none()
+            || !crate::creation_assets::templates::qualifies_for_writing_in(tx, work, selection)
+                .await?)
+    {
+        return Err(WorkbenchError::Invalid("writing_template_unavailable"));
+    }
     // Experience reads and writes take the shared gate first; keep that order for idea links too.
     ensure_idea_box(tx, work, &doc).await?;
     let bytes = serde_json::to_vec(&stored)?;
@@ -701,6 +709,7 @@ pub async fn restore(
     // Restoring manuscript content must not silently sever or change its current idea box.
     revision.document.idea_ref = current.document.idea_ref;
     revision.document.idea_name = current.document.idea_name.clone();
+    revision.document.writing_template = current.document.writing_template.clone();
     if current.document.idea_name.is_some() {
         revision.document.angle = current.document.angle.clone();
     }

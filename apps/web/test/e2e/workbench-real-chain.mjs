@@ -672,10 +672,20 @@ try {
     await page.getByRole('button',{name:'建立并关联',exact:true}).click();await save();
     const anchor=(await envelope()).revision.document;
     assert.equal(anchor.ideaName,ideaName);assert.ok(anchor.ideaRef);assert.ok(anchor.excerpts.length>0&&anchor.canvas.length>0,'the idea draft holds material to share');
+    const templateCommand=async (path,data)=>{
+      const response=await context.request.post(`${origin}/ops/api/creation/structural-templates${path}`,{headers:{Origin:origin},data:{requestId:randomUUID(),...data}});
+      assert.equal(response.status(),200,await response.text());
+      return (await response.json()).template;
+    };
+    const template=await templateCommand('',{workId,expectedRevision:(await envelope()).revision.id,steps:['opening','ending']});
+    const approved=await templateCommand(`/${template.code}/review`,{expectedRevision:template.revision,action:'approve'});
+    const selection={code:approved.code,revision:approved.revision};
     const before=(await creationJson(`/works?domainRef=${domainRef}`)).items.length;
+    await page.reload();
     await stage('材料');
     await page.getByLabel('选题框：作业启动').getByRole('button',{name:'设置',exact:true}).click();
     const settings=page.getByRole('region',{name:'选题框设置'});await settings.waitFor();
+    await choose(settings.getByRole('combobox',{name:'写作样板',exact:true}),`${selection.code} · 第 ${selection.revision} 版`);
     const mine=settings.getByRole('button',{name:`${await fixtureAccountName()} · 已开稿`,exact:true});
     assert.equal(await mine.isDisabled(),true,'the idea draft’s own account already has its draft');
     const open=settings.getByRole('button',{name:/^用这组材料开稿/});
@@ -688,6 +698,8 @@ try {
     await settings.getByText(`已开稿 1 篇：${other.accountName}`).waitFor();
     // The server holds one new draft for that account: the idea's material, none of what the idea's draft wrote.
     const made=(await creationJson(`/works/${opened.drafts[0].workId}`)).revision.document;
+    assert.deepEqual((await envelope()).revision.document.writingTemplate,selection);
+    assert.deepEqual(made.writingTemplate,selection);
     assert.equal(made.ideaRef,anchor.ideaRef);assert.ok(made.ideaName==null,'only the idea’s own draft holds its name');assert.equal(made.accountRef,other.accountRef);assert.equal(made.title,ideaName);
     assert.equal(made.paragraphs.length,0);assert.equal(made.pages.length,0);assert.ok(!made.experienceSlots?.length&&!made.experienceGaps?.length&&!made.bridge,'nothing of the account’s own experience or bridge is carried over');
     assert.equal(made.excerpts.length,anchor.excerpts.length);assert.equal(made.canvas.length,anchor.canvas.length);

@@ -49,6 +49,11 @@ pub async fn open_idea_drafts_as_in(
     if accounts.is_empty() || accounts.len() as i64 > IDEA_ACCOUNT_LIMIT {
         return Err(WorkbenchError::Invalid("accounts"));
     }
+    // Match append's experience → idea lock order before opening any draft.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut **tx)
+        .await?;
     // The same lock `ensure_idea_box` takes, so two openings of one idea cannot interleave.
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
         .bind(format!("creation_idea:{idea}"))
@@ -180,6 +185,7 @@ struct Starting {
     topic_angle_refs: Vec<Uuid>,
     excerpts: Vec<Excerpt>,
     canvas: Vec<CanvasBlock>,
+    writing_template: Option<WritingTemplateRef>,
     skipped_excerpts: usize,
 }
 impl Starting {
@@ -226,6 +232,7 @@ impl Starting {
             topic_ref: source.topic_ref,
             topic_angle_refs: source.topic_angle_refs,
             skipped_excerpts: source.excerpts.len() - excerpts.len(),
+            writing_template: source.writing_template,
             excerpts,
             canvas,
         })
@@ -245,6 +252,7 @@ impl Starting {
             topic_angle_refs: self.topic_angle_refs.clone(),
             idea_ref: Some(idea),
             idea_name: None,
+            writing_template: self.writing_template.clone(),
             angle: self.angle.clone(),
             excerpts: self
                 .excerpts

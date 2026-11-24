@@ -837,6 +837,142 @@ async fn work_count(db: &Database) -> usize {
 
 #[tokio::test]
 #[ignore = "random isolated PostgreSQL proof; no shared database"]
+async fn opening_drafts_carries_the_approved_template_revision() {
+    let db = db("assets_idea_writing_template").await;
+    let (a, b, c) = accounts(&db).await;
+    let (idea, anchor) = idea_with_material(&db, a).await;
+    let before = read_work(&db, anchor).await.unwrap();
+    let template = create_structural_template(
+        &db,
+        &CreateTemplate {
+            request_id: Uuid::new_v4(),
+            work_id: anchor,
+            expected_revision: before.revision.id,
+            steps: vec![StructuralStep::Opening, StructuralStep::Ending],
+        },
+    )
+    .await
+    .unwrap()
+    .template;
+    let selection = linggan_intelligence::content_workbench::WritingTemplateRef {
+        code: template.code.clone(),
+        revision: template.revision,
+    };
+    let mut document = before.revision.document;
+    document.writing_template = Some(selection.clone());
+    let save_request = SaveRequest {
+        request_id: Uuid::new_v4(),
+        expected_revision: before.revision.id,
+        document,
+    };
+    assert!(matches!(
+        save(&db, anchor, &save_request).await,
+        Err(WorkbenchError::Invalid("writing_template_unavailable"))
+    ));
+    review_structural_template(
+        &db,
+        &template.code,
+        &ReviewTemplate {
+            request_id: Uuid::new_v4(),
+            expected_revision: template.revision,
+            action: TemplateAction::Approve,
+        },
+    )
+    .await
+    .unwrap();
+    let original_selection = save(&db, anchor, &save_request).await.unwrap();
+    let command = open_for(&[b]);
+    let opened = open_idea_drafts(&db, idea, &command).await.unwrap();
+    let draft = opened.drafts[0].work_id;
+    assert_eq!(
+        read_work(&db, draft)
+            .await
+            .unwrap()
+            .revision
+            .document
+            .writing_template,
+        Some(selection.clone())
+    );
+    let updated = revise_structural_template(
+        &db,
+        &template.code,
+        &ReviseTemplate {
+            request_id: Uuid::new_v4(),
+            expected_revision: template.revision,
+            steps: vec![StructuralStep::Scene, StructuralStep::Ending],
+        },
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        open_idea_drafts(&db, idea, &open_for(&[c])).await,
+        Err(WorkbenchError::Invalid("writing_template_unavailable"))
+    ));
+    assert_eq!(work_count(&db).await, 2);
+    let replay = open_idea_drafts(&db, idea, &command).await.unwrap();
+    assert!(replay.replayed);
+    assert_eq!(replay.drafts[0].work_id, draft);
+    assert_eq!(
+        read_work(&db, draft)
+            .await
+            .unwrap()
+            .revision
+            .document
+            .writing_template,
+        Some(selection)
+    );
+    review_structural_template(
+        &db,
+        &template.code,
+        &ReviewTemplate {
+            request_id: Uuid::new_v4(),
+            expected_revision: updated.template.revision,
+            action: TemplateAction::Approve,
+        },
+    )
+    .await
+    .unwrap();
+    let new_selection = linggan_intelligence::content_workbench::WritingTemplateRef {
+        code: template.code,
+        revision: updated.template.revision,
+    };
+    let mut document = original_selection.revision.document;
+    document.writing_template = Some(new_selection.clone());
+    document.paragraphs[0].text = "改过的正文".into();
+    let current = save(
+        &db,
+        anchor,
+        &SaveRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: original_selection.revision.id,
+            document,
+        },
+    )
+    .await
+    .unwrap();
+    let restored = restore(
+        &db,
+        anchor,
+        &RestoreRequest {
+            request_id: Uuid::new_v4(),
+            expected_revision: current.revision.id,
+            restore_revision: original_selection.revision.id,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        restored.revision.document.writing_template,
+        Some(new_selection)
+    );
+    assert_eq!(
+        restored.revision.document.paragraphs[0].text,
+        "手写正文，标点。"
+    );
+}
+
+#[tokio::test]
+#[ignore = "random isolated PostgreSQL proof; no shared database"]
 async fn opening_drafts_for_two_accounts_gives_each_the_material_and_nothing_the_anchor_wrote() {
     let db = db("assets_open_idea_drafts").await;
     let (a, b, c) = accounts(&db).await;

@@ -1,3 +1,5 @@
+import type { Template } from './assets/structuralTemplatesApi';
+import type { WritingTemplateRef } from './workbenchModel';
 import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
@@ -66,6 +68,9 @@ interface Props {
   onRemoveCard: (id: string) => void;
   onRenameTitle: (title: string) => void;
   onPickAccount: (ref: string | null) => void;
+  templates: Template[];
+  templateState: 'pending' | 'error' | 'success';
+  onPickTemplate: (ref: WritingTemplateRef | null) => void;
   onCreateFramePending?: boolean;
   idea: IdeaBoxSummary | null;
   ideaState: 'pending' | 'error' | 'success';
@@ -170,7 +175,7 @@ function inspectorStyle(spot: SpotBox | null, height: number, width = 320) {
 
 export function MaterialDesk({
   domain, works, currentWorkId, currentDocument, accounts, sourceFocus, onClearSourceFocus,
-  onOpenWork, onSwitchWork, onCreateFrame, onAddNote, onPlaceMaterial, onUpdateCard, onRemoveCard, onRenameTitle, onPickAccount, onCreateFramePending,
+  onOpenWork, onSwitchWork, onCreateFrame, onAddNote, onPlaceMaterial, onUpdateCard, onRemoveCard, onRenameTitle, onPickAccount, templates, templateState, onPickTemplate, onCreateFramePending,
   idea, ideaState, onOpenIdeaDrafts,
 }: Props) {
   const documents = useQueries({
@@ -580,6 +585,10 @@ export function MaterialDesk({
   </div>;
 
   const focused = frames.find(frame => frame.work.workId === focus) ?? null;
+  const approvedTemplates = templates.filter(template => template.status === 'ok' && template.sourceAvailable);
+  const selectedTemplate = currentDocument.writingTemplate;
+  const templateKey = (template: WritingTemplateRef) => `${template.code}:${template.revision}`;
+  const templateStale = selectedTemplate && !approvedTemplates.some(template => templateKey(template) === templateKey(selectedTemplate));
   const settingsFrame = frames.find(frame => frame.work.workId === settingsFor) ?? null;
   const editorCard = editor ? frames.flatMap(frame => frame.cards).find(card => card.id === editor.blockId) ?? null : null;
   const sources = shelf.data?.items ?? [];
@@ -748,6 +757,26 @@ export function MaterialDesk({
             <input id="desk-frame-title" className="input" value={settingsFrame.title} onChange={event => onRenameTitle(event.target.value)} />
             <p className="lbl">给哪个账号写</p>
             <SelectField label="给哪个账号写" value={currentDocument.accountRef ?? ''} options={[{ value: '', label: '不指定' }, ...accounts.map(account => ({ value: account.ref, label: account.name }))]} onChange={value => onPickAccount(value || null)} />
+            {currentDocument.ideaRef || selectedTemplate ? <>
+            <p className="lbl">写作样板</p>
+            <SelectField label="写作样板" value={selectedTemplate ? templateKey(selectedTemplate) : ''}
+              options={[
+                { value: '', label: '不使用样板' },
+                ...(templateStale ? [{ value: templateKey(selectedTemplate), label: `${selectedTemplate.code} · 第 ${selectedTemplate.revision} 版` }] : []),
+                ...approvedTemplates.map(template => ({ value: templateKey(template), label: `${template.code} · 第 ${template.revision} 版` })),
+              ]}
+              onChange={value => {
+                if (!value) onPickTemplate(null);
+                else {
+                  const template = approvedTemplates.find(item => templateKey(item) === value);
+                  if (template) onPickTemplate({ code: template.code, revision: template.revision });
+                }
+              }} />
+            {templateState === 'pending' ? <p className="aux">正在读取样板…</p>
+              : templateState === 'error' ? <p className="aux">样板读取失败</p>
+              : templateStale ? <p className="aux">所选版本当前不可用于新稿，请重新选择。</p>
+              : !approvedTemplates.length ? <p className="aux">暂无可用样板</p> : null}
+            </> : null}
             <IdeaDraftsBody idea={idea} ideaState={ideaState} hasIdea={!!currentDocument.ideaRef} isAnchor={!!idea && idea.anchorWorkId === currentWorkId}
               accounts={accounts} drafted={drafted} picked={chosen} reading={reading} opening={opening} outcome={outcome}
               onPick={pick} onOpenWork={onOpenWork} onOpenAnchor={() => { if (idea) onSwitchWork(idea.anchorWorkId); }} />

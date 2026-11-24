@@ -562,6 +562,7 @@ function WorkEditor({
         identities.settle(p.action);
       } else if (e instanceof ApiError && e.answered) {
         if (e.failure.kind === 'http' && e.failure.code === 'creation_experience_reset_required') setResetRequired(true);
+        if (e.failure.kind === 'http' && e.failure.code === 'creation_writing_template_unavailable') void templates.refetch();
         pending.current = null;
         setHasPending(false);
         identities.settle(p.action);
@@ -867,7 +868,10 @@ function WorkEditor({
       identities.settle('open-idea-drafts');
       return opened;
     } catch (cause) {
-      if (cause instanceof ApiError && cause.failure.kind === 'http') identities.settle('open-idea-drafts');
+      if (cause instanceof ApiError && cause.failure.kind === 'http') {
+        identities.settle('open-idea-drafts');
+        if (cause.failure.code === 'creation_writing_template_unavailable') void templates.refetch();
+      }
       throw cause;
     } finally {
       // Whatever the answer was, the drafts may exist by now: read the list again.
@@ -1216,7 +1220,9 @@ function WorkEditor({
   </>;
   const savedTemplate = templates.data?.filter(item => item.sourceWorkId === initial.workId).sort((a, b) => b.revision - a.revision)[0];
   const accountStyle = accountRecord ? styleList.data?.find(item => item.accountRef === accountRecord.ref) : undefined;
-  const edMeta = savedTemplate || accountStyle ? <div className="ed-meta" aria-label="稿件信息">
+  const writingTemplate = document.writingTemplate;
+  const edMeta = savedTemplate || accountStyle || writingTemplate ? <div className="ed-meta" aria-label="稿件信息">
+    {writingTemplate ? <span className="meta-sample">采用样板 {writingTemplate.code} · 第 {writingTemplate.revision} 版</span> : null}
     {savedTemplate ? <span className="meta-sample" title={`本篇已存为样板 ${savedTemplate.code}`}>样板 <span className="data">{savedTemplate.code}</span> · {savedTemplate.status === 'review' ? '待审核' : savedTemplate.status === 'ok' ? '已通过' : '已停用'}</span> : null}
     {accountStyle ? <span className="meta-style" title={`风格 · ${accountStyle.name}`}>风格 · {accountStyle.name.split(' · ')[0]}</span> : null}
   </div> : null;
@@ -1294,7 +1300,7 @@ function WorkEditor({
     }}>丢弃本页编辑并重新读取</ActionButton></div> : null}
     {recheckStatus === 'checking' ? <p role="status">正在核验稿件来源…</p> : recheckStatus === 'failed' ? <p role="alert">暂时无法核验稿件来源。未保存的编辑仍在本页。<ActionButton variant="quiet" onClick={() => setRecheckAttempt(value => value + 1)}>重新核验</ActionButton></p> : null}
     <fieldset hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} className={styles.editingSurface}>
-    {view === 'desk' ? <div className="gm-studio"><MaterialDesk domain={initial.domainRef} works={drafts} currentWorkId={initial.workId} currentDocument={document} accounts={accounts.data ?? []} sourceFocus={sourceFocus} onClearSourceFocus={() => setSourceFocus(null)} onOpenWork={onOpenDraftWriting} onSwitchWork={onSwitchWork} onCreateFrame={createFrame} onCreateFramePending={creatingFrame} onAddNote={addDeskNote} onPlaceMaterial={placeMaterial} onUpdateCard={updateCanvas} onRemoveCard={id => edit({ ...live.current, canvas: live.current.canvas.filter(block => block.id !== id) })} onRenameTitle={next => edit({ ...live.current, title: next })} onPickAccount={ref => edit({ ...live.current, accountRef: ref })} idea={ideas.find(item => item.ideaRef === document.ideaRef) ?? null} ideaState={ideaState} onOpenIdeaDrafts={openIdeaDrafts} /></div> : null}
+    {view === 'desk' ? <div className="gm-studio"><MaterialDesk domain={initial.domainRef} works={drafts} currentWorkId={initial.workId} currentDocument={document} accounts={accounts.data ?? []} sourceFocus={sourceFocus} onClearSourceFocus={() => setSourceFocus(null)} onOpenWork={onOpenDraftWriting} onSwitchWork={onSwitchWork} onCreateFrame={createFrame} onCreateFramePending={creatingFrame} onAddNote={addDeskNote} onPlaceMaterial={placeMaterial} onUpdateCard={updateCanvas} onRemoveCard={id => edit({ ...live.current, canvas: live.current.canvas.filter(block => block.id !== id) })} onRenameTitle={next => edit({ ...live.current, title: next })} onPickAccount={ref => edit({ ...live.current, accountRef: ref })} templates={templates.data ?? []} templateState={templates.status} onPickTemplate={ref => edit({ ...live.current, writingTemplate: ref })} idea={ideas.find(item => item.ideaRef === document.ideaRef) ?? null} ideaState={ideaState} onOpenIdeaDrafts={openIdeaDrafts} /></div> : null}
     {view === 'canvas' ? <CanvasBoard onCompose={compose} document={document} busy={busy} onChange={edit} onUpdate={updateCanvas} onLocate={citation=>{setSourceFocus(citation);onView('desk');}} onMaterials={()=>onView('desk')} onUse={target=>{const location=targetLocation(target,document);return {label:location.label,open:()=>onView(location.view)};}} onPlace={openPlacement} /> : null}
     {view === 'body' ? <div className={styles.bodyWorkspace}>
 {compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}

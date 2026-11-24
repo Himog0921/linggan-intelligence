@@ -174,7 +174,10 @@ export interface ExperienceSlot {
   experienceRef: string;
   experienceRevision: number;
 }
+export type WritingTemplateRef = { code: string; revision: number };
+
 export interface WorkDocument {
+  writingTemplate?: WritingTemplateRef | null;
   contract: string;
   experienceEpoch: string | null;
   experienceSlots: ExperienceSlot[];
@@ -622,6 +625,7 @@ export const parseWorkDocument = shape<WorkDocument>({
   topicRef: nullable(uuid),
   ideaRef: v => v === undefined ? null : nullable(uuid)(v),
   ideaName: v => v === undefined ? null : nullable(str)(v),
+  writingTemplate: v => v === undefined ? null : nullable(shape<WritingTemplateRef>({ code: str, revision: integer }))(v),
   angle: str,
   outline: array(str),
   tags: array(str),
