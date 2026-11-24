@@ -35,12 +35,15 @@ try {
   await page.getByRole('button',{name:'近 56 天',exact:true}).click();await page.getByRole('button',{name:'图表',exact:true}).click();
   await hero.getByRole('img',{name:'评论柱状与研究信号渐变曲线，共同横轴及采集覆盖',exact:true}).waitFor();
  });
- await step('select real catalog comments and reuse L1 from the preview',async()=>{
+ await step('freeze a filtered catalog selection and reuse L1 from the preview',async()=>{
   await page.goto(`${origin}/corpus/comments?domain=${domain}&view=comments`);
   await page.getByRole('button',{name:'选择评论',exact:true}).click();
   const checks=page.getByRole('checkbox',{name:'选择这条评论',exact:true});
   await checks.first().waitFor();assert.equal(await checks.count(),2);
-  await checks.nth(0).check();await checks.nth(1).check();
+  await page.getByRole('button',{name:'按当前筛选生成研究清单',exact:true}).click();
+  await page.getByText('已检查当前筛选结果的前 2 条，选入 2 条。',{exact:true}).waitFor();
+  assert.ok(await checks.nth(0).isChecked());assert.ok(await checks.nth(1).isChecked());
+  assert.equal((await get(`${commentV2}/runs?domainRef=${domain}`)).runs.length,0);
   const preview=await post(page.getByRole('button',{name:'预览所选评论',exact:true}),commentV2+'/preview');
   assert.equal(preview.waitingL1.targetCount,2);assert.deepEqual(preview.waitingL1.workRefs,[work]);
   await page.getByText('L1 未就绪 2 条，涉及 1 个作品。',{exact:true}).waitFor();

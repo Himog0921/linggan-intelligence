@@ -25,6 +25,71 @@ describe('D3 actual four-view React boundary', () => {
   const pageSelect=screen.getByRole('button',{name:/勾选本页/});expect(pageSelect.compareDocumentPosition(screen.getByRole('button',{name:'取消选择'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();await userEvent.click(boxes[0]!);expect(screen.getByRole('button',{name:/勾选本页/})).toBeInTheDocument();expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'研究所选评论'})).not.toBeInTheDocument();
   expect(calls.every(call=>call.method==='GET')).toBe(true);
  });
+ it('freezes the first 300 filtered rows as eligible selections and submits only after preview and confirmation', async () => {
+  const planHash = 'e'.repeat(64);
+  const filteredPages: string[] = [];
+  installFetch(url => {
+    if (url.pathname.endsWith('/comments') && url.searchParams.get('limit') === '100') {
+      expect(url.searchParams.get('q')).toBe('样本');
+      const cursor = url.searchParams.get('cursor') || 'first';
+      filteredPages.push(cursor);
+      const offset = cursor === 'first' ? 0 : Number(cursor);
+      return json({
+        domainRef: DOMAIN,
+        items: Array.from({ length: 100 }, (_, i) => comment(`batch-${offset + i}`, offset + i !== 100)),
+        summary: { displayableCommentCount: 400, eligibleCommentCount: 399 },
+        indexCoverage: { indexedCount: 400, pendingCount: 0 },
+        page: { nextCursor: String(offset + 100) },
+      });
+    }
+    if (url.pathname.endsWith('/v2/preview')) return json({
+      domainRef: DOMAIN, knowledgeCutoff: '2026-11-20T00:00:00Z', planHash, taskConfigRef: 'config', taskRevision: 2,
+      selectedCount: 299, researchableCount: 280, workCount: 1, unitCount: 14, expectedModelCalls: 14,
+      waitingL1: { targetCount: 0, workRefs: [] }, alreadyResearchedCount: 19, alreadyQueuedCount: 0,
+      dispatchUnresolvedCount: 0, excludedCounts: {},
+    });
+    if (url.pathname.endsWith('/v2/runs')) return json({ batchRef: 'batch', unitCount: 14, targetCount: 280 });
+    return undefined;
+  });
+  renderPage(`domain=${DOMAIN}&view=comments&q=${encodeURIComponent('样本')}&cursor=visible-page`);
+  await screen.findByRole('table');
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '选择评论' }));
+  await user.click(screen.getByRole('button', { name: '按当前筛选生成研究清单' }));
+  await screen.findByText('已检查当前筛选结果的前 300 条，选入 299 条。');
+  expect(filteredPages).toEqual(['first', '100', '200']);
+  expect(calls.filter(call => call.method === 'POST')).toEqual([]);
+  await user.click(screen.getByRole('button', { name: '预览所选评论' }));
+  expect(await screen.findByText('已有结果，跳过 19 条。')).toBeVisible();
+  const preview = calls.filter(call => call.method === 'POST');
+  expect(preview).toHaveLength(1);
+  expect(preview[0]?.body?.selections).toHaveLength(299);
+  expect(preview[0]?.body?.selections).not.toContainEqual({ workRef: WORK, sourceRef: 'source-batch-100', observationRole: 'primary' });
+  await user.click(screen.getByRole('button', { name: '开始所选评论研究' }));
+  await screen.findByText(/已提交 280 条评论，共 14 个研究单元/);
+  const starts = calls.filter(call => call.method === 'POST' && call.url.pathname.endsWith('/v2/runs'));
+  expect(starts).toHaveLength(1);
+  expect(starts[0]?.body).toMatchObject({ expectedPlanHash: planHash, selections: preview[0]?.body?.selections });
+ });
+
+ it('does not expose a partial selection when a later directory page fails', async () => {
+  installFetch(url => {
+    if (!url.pathname.endsWith('/comments') || url.searchParams.get('limit') !== '100') return undefined;
+    if (url.searchParams.has('cursor')) return json({ code: 'read_unavailable' }, 503);
+    return json({
+      domainRef: DOMAIN, items: [comment()], summary: {}, indexCoverage: {}, page: { nextCursor: 'second' },
+    });
+  });
+  renderPage(`domain=${DOMAIN}&view=comments`);
+  await screen.findByRole('table');
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '选择评论' }));
+  await user.click(screen.getByRole('button', { name: '按当前筛选生成研究清单' }));
+  expect(await screen.findByText('未能生成评论清单，请重试。')).toBeVisible();
+  expect(screen.queryByRole('button', { name: '预览所选评论' })).toBeNull();
+  expect(calls.every(call => call.method === 'GET')).toBe(true);
+ });
+
  it('sends the complete submitted filter to the server and records it in the deep link',async()=>{
   installFetch();const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
   await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'两字');await userEvent.click(screen.getByRole('combobox',{name:'研究标签'}));await userEvent.click(screen.getByRole('option',{name:'需求'}));await userEvent.click(screen.getByRole('button',{name:'筛选'}));await userEvent.click(screen.getByRole('combobox',{name:'点赞'}));await userEvent.click(screen.getByRole('option',{name:'100 以上'}));await userEvent.click(screen.getByRole('button',{name:'完成'}));
