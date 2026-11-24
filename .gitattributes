@@ -3,3 +3,6 @@ references/** -whitespace
 
 # Third-party font binaries and license notices are checked in byte-for-byte.
 apps/web/public/fonts/lids/** -whitespace
+
+# Approved design references are kept byte-for-byte as delivered (generated/exported CSS keeps its whitespace).
+apps/web/design-reference/** -whitespace
