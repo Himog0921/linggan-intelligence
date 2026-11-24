@@ -2,7 +2,10 @@ import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useQueries, useQuery } from '@tanstack/react-query';
 import * as api from './workbenchApi';
-import { GROUPS, type CanvasBlock, type CanvasGroup, type Citation, type SourceItem, type WorkDocument, type WorkSummary } from './workbenchModel';
+import { GROUPS, WorkbenchContractError, type CanvasBlock, type CanvasGroup, type Citation, type IdeaBoxSummary, type OpenedIdeaDrafts, type SourceItem, type WorkDocument, type WorkSummary } from './workbenchModel';
+import { ApiError } from '../../shared/api';
+import { IdeaDraftsAction, IdeaDraftsBody, type DraftOutcome, type IdeaDraftRow } from './IdeaDrafts';
+import { openedText } from './ideaDraftsText';
 import { cardsOf, kindDot, kindLabel, softRole, type Card } from './deskCards';
 import styles from './WorkbenchPage.module.css';
 import { SelectField } from '../../shared/SelectField';
@@ -64,6 +67,9 @@ interface Props {
   onRenameTitle: (title: string) => void;
   onPickAccount: (ref: string | null) => void;
   onCreateFramePending?: boolean;
+  idea: IdeaBoxSummary | null;
+  ideaState: 'pending' | 'error' | 'success';
+  onOpenIdeaDrafts: (accountRefs: string[]) => Promise<OpenedIdeaDrafts>;
 }
 
 
@@ -168,6 +174,7 @@ function inspectorStyle(spot: SpotBox | null, height: number, width = 320) {
 export function MaterialDesk({
   domain, works, currentWorkId, currentDocument, accounts, sourceFocus, onClearSourceFocus,
   onOpenWork, onSwitchWork, onCreateFrame, onAddNote, onPlaceMaterial, onUpdateCard, onRemoveCard, onRenameTitle, onPickAccount, onCreateFramePending,
+  idea, ideaState, onOpenIdeaDrafts,
 }: Props) {
   const documents = useQueries({
     queries: works.map(work => ({
@@ -222,6 +229,9 @@ export function MaterialDesk({
   const [editor, setEditor] = useState<{ kind: 'memo' | 'role' | 'source'; blockId: string; anchor: SpotBox | null } | null>(null);
   const [settingsFor, setSettingsFor] = useState<string | null>(null);
   const [settingsAnchor, setSettingsAnchor] = useState<SpotBox | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [opening, setOpening] = useState(false);
+  const [outcome, setOutcome] = useState<DraftOutcome | null>(null);
   const inspector = useRef<HTMLElement | null>(null);
   const [inspectorHeight, setInspectorHeight] = useState(0);
   useLayoutEffect(() => {
@@ -241,6 +251,31 @@ export function MaterialDesk({
   const sizes: Record<string, { w: number; h: number }> = { ...savedSizes, ...sized };
   const positions: Record<string, Spot> = { ...framePositions, ...moved };
   const frames = layout(works, works.map(docOf), accountOf, heights, spots, sizes, positions);
+  // The drafts that already write under this idea, one account each; they decide who can still be picked.
+  const drafted: IdeaDraftRow[] = idea ? works.flatMap((work, index) => {
+    const document = docOf(work, index);
+    return document?.ideaRef === idea.ideaRef && document.accountRef ? [{ workId: work.workId, accountRef: document.accountRef, title: document.title || work.title }] : [];
+  }) : [];
+  // Which accounts already write under the idea is known only once every draft of the idea has been read.
+  const ideaReads = idea ? works.flatMap((work, index) => work.ideaRef === idea.ideaRef && work.workId !== currentWorkId ? [documents[index]] : []) : [];
+  const reading = ideaReads.some(read => read?.isError) ? 'failed' : ideaReads.some(read => !read?.isSuccess) ? 'pending' : 'ready';
+  const chosen = reading === 'ready' ? picked.filter(ref => !drafted.some(row => row.accountRef === ref)) : [];
+  const pick = (ref: string) => setPicked(previous => previous.includes(ref) ? previous.filter(item => item !== ref) : [...previous, ref]);
+  const openDrafts = async () => {
+    if (!chosen.length || opening) return;
+    setOpening(true);
+    setOutcome(null);
+    try {
+      const opened = await onOpenIdeaDrafts(chosen);
+      setPicked(previous => previous.filter(ref => !chosen.includes(ref)));
+      setOutcome({ state: 'applied', text: openedText(opened, ref => accountOf(ref) ?? '账号未知') });
+    } catch (cause) {
+      const unknown = cause instanceof WorkbenchContractError || cause instanceof ApiError && (cause.failure.kind === 'network' || cause.failure.kind === 'invalid_response');
+      setOutcome({ state: unknown ? 'unconfirmed' : 'rejected', text: api.errorText(cause) });
+    } finally {
+      setOpening(false);
+    }
+  };
   const [view, setView] = useState({ x: 64, y: 64, zoom: 1 });
   const [focus, setFocus] = useState<string | null>(null);
   const autoFitted = useRef(false);
@@ -475,6 +510,8 @@ export function MaterialDesk({
   const openSettings = (frame: Frame, event: React.MouseEvent<HTMLElement>) => {
     setEditor(null);
     setSettingsAnchor(spotOf((event.currentTarget as HTMLElement).closest('.frame')));
+    // A result belongs to the panel it was shown in.
+    setOutcome(null);
     setSettingsFor(frame.work.workId);
   };
 
@@ -654,6 +691,9 @@ export function MaterialDesk({
             <input id="desk-frame-title" className="input" value={settingsFrame.title} onChange={event => onRenameTitle(event.target.value)} />
             <p className="lbl">给哪个账号写</p>
             <SelectField label="给哪个账号写" value={currentDocument.accountRef ?? ''} options={[{ value: '', label: '不指定' }, ...accounts.map(account => ({ value: account.ref, label: account.name }))]} onChange={value => onPickAccount(value || null)} />
+            <IdeaDraftsBody idea={idea} ideaState={ideaState} hasIdea={!!currentDocument.ideaRef} isAnchor={!!idea && idea.anchorWorkId === currentWorkId}
+              accounts={accounts} drafted={drafted} picked={chosen} reading={reading} opening={opening} outcome={outcome}
+              onPick={pick} onOpenWork={onOpenWork} onOpenAnchor={() => { if (idea) onSwitchWork(idea.anchorWorkId); }} />
             <p className="lbl">材料 · {settingsFrame.cards.length} 张 · 每张写清用途和思路</p>
             {settingsFrame.cards.length ? settingsFrame.cards.map((card, index) => <div className="mrow" key={card.id}>
               <div className="mrow-top"><span className={`dot ${card.dot}`} /><span className="aux">{card.kind}</span><span className="mrow-text">{card.text}</span></div>
@@ -669,6 +709,9 @@ export function MaterialDesk({
             <button type="button" className="btn sm primary" onClick={() => onSwitchWork(settingsFrame.work.workId)}>切到这篇</button>
           </>}
         </div>
+        {settingsFrame.work.workId === currentWorkId && idea && idea.anchorWorkId === currentWorkId
+          ? <div className="insp-foot"><IdeaDraftsAction count={chosen.length} cards={settingsFrame.cards.length} opening={opening} onOpen={() => void openDrafts()} /></div>
+          : null}
       </section> : null}
       <div className="desk-tools">
         <div className="desk-tool-group material-tools" role="group" aria-label="材料与选题">
