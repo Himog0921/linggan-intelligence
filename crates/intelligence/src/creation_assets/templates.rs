@@ -146,6 +146,17 @@ pub(crate) async fn qualifies_for_writing_in(
     work: Uuid,
     selection: &workbench::WritingTemplateRef,
 ) -> Result<bool, workbench::WorkbenchError> {
+    Ok(approved_writing_steps_in(tx, work, selection)
+        .await?
+        .is_some())
+}
+
+/// Resolves only the selected approved revision, never the source manuscript.
+pub(crate) async fn approved_writing_steps_in(
+    tx: &mut Transaction<'_, Postgres>,
+    work: Uuid,
+    selection: &workbench::WritingTemplateRef,
+) -> Result<Option<Vec<StructuralStep>>, workbench::WorkbenchError> {
     let same_domain: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_creation_template t
          JOIN linggan_creation_work source ON source.work_ref=t.work_ref
@@ -157,15 +168,21 @@ pub(crate) async fn qualifies_for_writing_in(
     .fetch_one(&mut **tx)
     .await?;
     if !same_domain {
-        return Ok(false);
+        return Ok(None);
     }
+    // Template review and source withdrawal both take this gate before changing eligibility.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind("creation_assets:experience-gate")
+        .execute(&mut **tx)
+        .await?;
     match get_in(tx, &selection.code).await {
-        Ok(template) => Ok(template.revision == selection.revision
+        Ok(template) => Ok((template.revision == selection.revision
             && template.status == "ok"
-            && template.source_available),
+            && template.source_available)
+            .then_some(template.steps)),
         Err(AssetsError::Database(error)) => Err(error.into()),
         Err(AssetsError::Workbench(error)) => Err(error),
-        Err(AssetsError::NotFound) => Ok(false),
+        Err(AssetsError::NotFound) => Ok(None),
         Err(_) => Err(workbench::WorkbenchError::Invalid(
             "writing_template_unavailable",
         )),

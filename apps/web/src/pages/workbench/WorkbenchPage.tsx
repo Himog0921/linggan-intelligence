@@ -1002,7 +1002,9 @@ function WorkEditor({
       if (!readiness?.configRef) throw new api.WorkbenchActionError('请先配置可用的创作模型');
       if (aiAction === 'rewrite_selection' && !selection) throw new api.WorkbenchActionError('请先选择要改写的原文');
       if (saved.document.experienceSlots.length && (aiAction !== 'rewrite_selection' || saved.document.experienceSlots.length !== 1 || selection?.paragraphId !== saved.document.experienceSlots[0]?.paragraphId)) throw new api.WorkbenchActionError('当前可改写一段已确认经历；开稿和其他经历组合仍在接入。');
-      const citations = saved.document.excerpts.filter(e => e.selectedText !== null && aiMaterials.includes(e.id)).map(e => e.citation);
+      const selectedExcerpts = saved.document.excerpts.filter(e => e.selectedText !== null && aiMaterials.includes(e.id));
+      const citations = selectedExcerpts.map(e => e.citation);
+      const draftContextExcerptIds = aiAction === 'draft' ? selectedExcerpts.map(e => e.id) : undefined;
       let exact: WritingSelection | null = null;
       if (aiAction === 'rewrite_selection' && selection) {
         const p = saved.document.paragraphs.find(p => p.id === selection.paragraphId);
@@ -1021,11 +1023,13 @@ function WorkEditor({
           instruction,
           aiAction,
           exact,
+          draftContextExcerptIds,
           citations
         })),
         workRef: initial.workId,
         expectedRevision: saved.id,
         action: aiAction,
+        draftContextExcerptIds,
         configRef: readiness.configRef,
         citations,
         paragraphIds: exact ? [exact.paragraphId] : [],

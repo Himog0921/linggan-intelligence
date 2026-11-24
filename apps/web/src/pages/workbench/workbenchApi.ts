@@ -258,6 +258,7 @@ export async function adoptTitle(id: string, body: {requestId:string; expectedRe
   return receipt(await post(`${base}/ai/requests/${uuid(id)}/adopt-title`, body), body.requestId);
 }
 export async function preview(body: {
+  draftContextExcerptIds?: string[];
   previewRef: string;
   workRef: string;
   expectedRevision: string;
@@ -361,7 +362,7 @@ export function aiFailureText(code: string | null): string {
     ai_input_limit_before_dispatch: '选定输入超过模型上限，请减少材料或调整配置后重新准备。',
 
     source_or_base_changed_before_dispatch: '选定材料或底稿已经变化，这次生成没有继续。请核对后重新准备。',
-    creation_ai_source_unavailable: '所选材料已经变化或暂不可用。请回到材料重新选取，再准备建议。',
+    creation_ai_source_unavailable: '所选材料或样板已经变化或暂不可用。请重新选择，再准备建议。',
     creation_ai_model_unavailable: '创作模型暂不可用，请到设置核对连接。当前输入仍保留，也可以继续手写。',
     model_secret_unavailable: '模型连接信息暂不可用，请到设置核对连接。当前输入仍保留。',
     provider_timeout: '生成等待超时，当前输入仍保留。请先刷新结果，核实后再决定是否重新准备。',

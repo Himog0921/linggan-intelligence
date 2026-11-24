@@ -1,5 +1,5 @@
 {
-  "fingerprint": "07d87be7f72b20adebb03332c1b66f9661718dd0c636a65221a7bb145d0f47ac",
+  "fingerprint": "d41bc9ff6dfb88cc54c01196843d039b338a1027753b86e6ead90bcf8711dafc",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -515,7 +515,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/WorkbenchPage.tsx",
-      "sha256": "c224fcdd8ccfaf9ab74731e770a850795c3ab4cf2e211a523c58cc55e8012efa"
+      "sha256": "1a9f4e8df9a4856601e18d733fe7c82dfe90915203e399729135be7c724447b0"
     },
     {
       "path": "apps/web/src/shared/ActionButton.module.css",

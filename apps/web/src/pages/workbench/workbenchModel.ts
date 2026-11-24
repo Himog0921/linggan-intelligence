@@ -911,6 +911,7 @@ export function newDocument(title = ''): WorkDocument {
     topicRef: null,
     ideaRef: null,
     ideaName: null,
+    writingTemplate: null,
     angle: '',
     outline: [],
     tags: [],
