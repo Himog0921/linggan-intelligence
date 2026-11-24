@@ -139,12 +139,30 @@ fn check(actual: &Value, expected: &Value, path: &str) {
         assert_eq!(actual, expected, "{path}");
     }
 }
+fn passing_agreement(dimension: &str) -> RunAgreement {
+    RunAgreement {
+        run_ref: Uuid::from_u128(2),
+        audit_run_ref: Uuid::from_u128(3),
+        dimension: dimension.into(),
+        sample_count: 2,
+        excluded_example_count: 0,
+        agreement: Some(1.0),
+        kappa: Some(1.0),
+        reason: None,
+        meets_threshold: true,
+    }
+}
+
+fn reference_agreements() -> [RunAgreement; 3] {
+    ["moment", "offer", "audience"].map(passing_agreement)
+}
+
 #[test]
 fn snapshot_matches_frozen_statistics() {
     let raw: Value = serde_json::from_str(SOURCE).unwrap();
     let golden: Value = serde_json::from_str(GOLD).unwrap();
     let (input, vocab, metric) = fixture(&raw);
-    let body = summarize(&input, &vocab, &metric, &[]).unwrap();
+    let body = summarize(&input, &vocab, &metric, &reference_agreements()).unwrap();
     check(&body["quality"], &golden["quality"], "quality");
     check(&body["coverage"], &golden["coverage"], "coverage");
     for (dim, entries) in golden["structure"].as_object().unwrap() {
@@ -238,17 +256,7 @@ fn snapshot_matches_frozen_statistics() {
         reason: None,
         meets_threshold: false,
     };
-    let high = RunAgreement {
-        run_ref: Uuid::from_u128(2),
-        audit_run_ref: Uuid::from_u128(3),
-        dimension: "offer".into(),
-        sample_count: 2,
-        excluded_example_count: 0,
-        agreement: Some(1.0),
-        kappa: Some(1.0),
-        reason: None,
-        meets_threshold: true,
-    };
+    let high = passing_agreement("offer");
     let gated = summarize(&input, &vocab, &metric, &[high, low]).unwrap();
     assert_eq!(gated["structure"], body["structure"]);
     assert_eq!(
@@ -267,7 +275,7 @@ fn snapshot_matches_frozen_statistics() {
 fn historical_retrospective() {
     let raw = std::fs::read(std::env::var("OPS_LENS_RETRO_REFERENCE").unwrap()).unwrap();
     let (input, vocab, m) = fixture(&serde_json::from_slice(&raw).unwrap());
-    let body = summarize(&input, &vocab, &m, &[]).unwrap();
+    let body = summarize(&input, &vocab, &m, &reference_agreements()).unwrap();
     check(
         &body["quality"],
         &json!({"publications":956,"titleKeys":886,"withViews":442}),
@@ -312,6 +320,11 @@ fn undated_input_still_contributes_to_structure() {
         r.business_date = None;
     }
     let stats = summarize(&input, &vocab, &metric, &[]).unwrap();
+    assert_eq!(
+        stats["effect"]["byDimension"]["offer"]["unavailableReason"],
+        "no_data"
+    );
+    assert!(stats["effect"]["byDimension"]["offer"]["rows"].is_null());
     assert_eq!(stats["quality"]["publications"], 22);
     assert!(stats["quality"]["latestPublishedDate"].is_null());
     assert_eq!(stats["coverage"]["labeledPublications"], 22);
