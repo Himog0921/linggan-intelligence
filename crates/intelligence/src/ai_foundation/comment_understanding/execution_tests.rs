@@ -4,7 +4,7 @@
 //! The provider's reply is decided by what each comment says (see
 //! `tests/support/comment_understanding_response.rs`), so each test writes the situation it needs.
 #![allow(dead_code)]
-use super::{Cancel, Selection, Start, cancel, preview, read_run, start};
+use super::{Cancel, Selection, Start, cancel, preview, read_run, read_runs, start};
 use crate::{
     ai_foundation::{
         TaskKey,
@@ -250,6 +250,130 @@ fn selection(work: Uuid, source: Uuid) -> Selection {
     }
 }
 
+/// The per-work plan and the left-out list must add up to the plan-wide counts.
+fn assert_preview_reconciles(plan: &Value) {
+    let groups = plan["groups"].as_array().unwrap();
+    let sum = |key: &str| -> i64 { groups.iter().map(|g| g[key].as_i64().unwrap()).sum() };
+    assert_eq!(
+        sum("selectedCount"),
+        plan["selectedCount"].as_i64().unwrap(),
+        "{plan}"
+    );
+    assert_eq!(
+        sum("researchableCount"),
+        plan["researchableCount"].as_i64().unwrap(),
+        "{plan}"
+    );
+    assert_eq!(
+        sum("unitCount"),
+        plan["unitCount"].as_i64().unwrap(),
+        "{plan}"
+    );
+    assert_eq!(
+        sum("alreadyResearchedCount"),
+        plan["alreadyResearchedCount"].as_i64().unwrap(),
+        "{plan}"
+    );
+    assert_eq!(
+        sum("activeCount"),
+        plan["alreadyQueuedCount"].as_i64().unwrap(),
+        "{plan}"
+    );
+    assert_eq!(
+        sum("dispatchUnresolvedCount"),
+        plan["dispatchUnresolvedCount"].as_i64().unwrap(),
+        "{plan}"
+    );
+    assert_eq!(
+        sum("waitingL1TargetCount"),
+        plan["waitingL1"]["targetCount"].as_i64().unwrap(),
+        "{plan}"
+    );
+    let excluded: i64 = plan["excludedCounts"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|n| n.as_i64().unwrap())
+        .sum();
+    assert_eq!(sum("excludedCount"), excluded, "{plan}");
+    let mut waiting: Vec<Value> = groups
+        .iter()
+        .filter(|g| g["waitingL1"] == true)
+        .map(|g| g["workRef"].clone())
+        .collect();
+    waiting.sort_by_key(|v| v.to_string());
+    let mut listed = plan["waitingL1"]["workRefs"].as_array().unwrap().clone();
+    listed.sort_by_key(|v| v.to_string());
+    assert_eq!(waiting, listed, "{plan}");
+    for group in groups {
+        let parts: i64 = [
+            "researchableCount",
+            "alreadyResearchedCount",
+            "activeCount",
+            "dispatchUnresolvedCount",
+            "waitingL1TargetCount",
+            "excludedCount",
+        ]
+        .iter()
+        .map(|key| group[*key].as_i64().unwrap())
+        .sum();
+        assert_eq!(parts, group["selectedCount"].as_i64().unwrap(), "{group}");
+    }
+    // Every selection left out of the plan is listed (up to 200) with exactly one reason.
+    let left_out =
+        plan["selectedCount"].as_i64().unwrap() - plan["researchableCount"].as_i64().unwrap();
+    let targets = plan["excludedTargets"].as_array().unwrap();
+    assert_eq!(targets.len() as i64, left_out.min(200), "{plan}");
+    assert_eq!(plan["excludedTargetsTruncated"], left_out > 200, "{plan}");
+    let count = |reason: &str| targets.iter().filter(|t| t["reason"] == reason).count() as i64;
+    if left_out <= 200 {
+        assert_eq!(
+            count("waiting_l1"),
+            plan["waitingL1"]["targetCount"].as_i64().unwrap()
+        );
+        assert_eq!(
+            count("already_queued"),
+            plan["alreadyQueuedCount"].as_i64().unwrap()
+        );
+        assert_eq!(
+            count("already_researched"),
+            plan["alreadyResearchedCount"].as_i64().unwrap()
+        );
+        assert_eq!(
+            count("dispatch_unresolved"),
+            plan["dispatchUnresolvedCount"].as_i64().unwrap()
+        );
+        for (code, n) in plan["excludedCounts"].as_object().unwrap() {
+            assert_eq!(count(code), n.as_i64().unwrap(), "{plan}");
+        }
+    }
+    let text = plan["excludedTargets"].to_string();
+    assert!(!text.contains("author"), "{text}");
+}
+
+/// What a preview could have written: nothing.
+async fn write_footprint(db: &Database) -> Vec<i64> {
+    let mut counts = Vec::new();
+    for table in [
+        "linggan_ai_command",
+        "linggan_ai_batch",
+        "linggan_comment_research_request",
+        "linggan_comment_research_unit",
+        "linggan_comment_research_unit_target",
+        "linggan_model_invocation",
+    ] {
+        counts.push(
+            sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+                "SELECT count(*) FROM {table}"
+            )))
+            .fetch_one(db.pool())
+            .await
+            .unwrap(),
+        );
+    }
+    counts
+}
+
 fn failure_of<'a>(
     results: &'a [(String, Option<Value>, Option<String>)],
     id: &str,
@@ -317,6 +441,12 @@ async fn one_call_per_work_places_every_comment_and_the_next_unit_reuses_the_cat
     assert_eq!(plan["workCount"], 2);
     assert_eq!(plan["waitingL1"]["targetCount"], 0);
     assert_eq!(plan["units"][0]["workRef"], json!(w1));
+    assert_preview_reconciles(&plan);
+    assert_eq!(plan["groups"][0]["workRef"], json!(w1), "{plan}");
+    assert_eq!(plan["groups"][0]["selectedCount"], 6, "{plan}");
+    assert_eq!(plan["groups"][0]["unitCount"], 1, "{plan}");
+    assert_eq!(plan["excludedTargets"], json!([]), "{plan}");
+    assert_eq!(plan["excludedTargetsTruncated"], false, "{plan}");
     env.settle(batch).await;
 
     // The comment directory shows V2 research: the state of the latest study and the signal kinds.
@@ -397,10 +527,140 @@ async fn one_call_per_work_places_every_comment_and_the_next_unit_reuses_the_cat
         ])
     );
     assert_eq!(run["units"].as_array().unwrap().len(), 2);
+    // Each unit names its work like the directory does and carries what it stored.
+    let unit_of = |work: Uuid| {
+        run["units"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|unit| unit["workRef"] == json!(work))
+            .unwrap()
+            .clone()
+    };
+    // Titles of the plan, the run and the directory come from one source.
+    let titled = catalog["items"][0]["workTitle"].clone();
+    assert!(catalog["items"][0].get("workTitle").is_some(), "{catalog}");
+    assert_eq!(unit_of(w1)["workTitle"], titled, "{run}");
+    assert_eq!(plan["groups"][0]["workTitle"], titled, "{plan}");
+    assert_eq!(
+        unit_of(w1)["outcomes"],
+        json!({"signals":3,"needsContext":0,"noSignal":1}),
+        "{run}"
+    );
+    assert_eq!(
+        unit_of(w2)["outcomes"],
+        json!({"signals":1,"needsContext":0,"noSignal":0}),
+        "{run}"
+    );
+    assert!(!run.to_string().contains("reader-"), "{run}");
     assert!(
         read_run(&env.db, Uuid::new_v4(), batch).await.is_err(),
         "another domain cannot read the run"
     );
+    // The run list carries the same receipt in summary: scale, unit states and the outcomes
+    // stored by completed units. The two failed comments have no outcome.
+    let runs = read_runs(&env.db, support::D).await.unwrap();
+    let listed = runs["runs"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["batchRef"] == json!(batch))
+        .unwrap();
+    assert_eq!(listed["targetCount"], 7, "{listed}");
+    assert_eq!(listed["workCount"], 2, "{listed}");
+    assert_eq!(
+        listed["unitCounts"],
+        json!({"completed":2,"failed":0,"pending":0,"cancelled":0}),
+        "{listed}"
+    );
+    assert_eq!(
+        listed["outcomes"],
+        json!({"signals":4,"needsContext":0,"noSignal":1}),
+        "{listed}"
+    );
+    let other_domain = read_runs(&env.db, Uuid::new_v4()).await.unwrap();
+    assert_eq!(other_domain["runs"], json!([]));
+
+    // The overview splits every eligible comment into exactly one research part.
+    let overview = crate::ai_foundation::comment_research_overview::read(&env.db, support::D)
+        .await
+        .unwrap();
+    let parts = &overview["researchBreakdown"];
+    let eligible = overview["corpusSummary"]["eligibleCommentCount"]
+        .as_i64()
+        .unwrap();
+    let sum: i64 = ["withResult", "running", "failedWithoutResult", "never"]
+        .iter()
+        .map(|key| parts[*key].as_i64().unwrap())
+        .sum();
+    assert_eq!(sum, eligible, "{overview}");
+    assert_eq!(parts["withResult"], 5, "{overview}");
+    assert_eq!(parts["running"], 0, "{overview}");
+    assert_eq!(parts["failedWithoutResult"], 2, "{overview}");
+    // Recent signals: at most five, newest accepted first, without commenter IDs.
+    let recent = overview["recentSignals"].as_array().unwrap();
+    let current = overview["researchSummary"]["currentSignalCount"]
+        .as_u64()
+        .unwrap() as usize;
+    assert_eq!(recent.len(), current.min(5), "{overview}");
+    assert!(!recent.is_empty(), "{overview}");
+    let times: Vec<&str> = recent
+        .iter()
+        .map(|item| item["acceptedAt"].as_str().unwrap())
+        .collect();
+    assert!(times.windows(2).all(|pair| pair[0] >= pair[1]), "{times:?}");
+    for item in recent {
+        assert!(item["requestRef"].is_string(), "{item}");
+        assert!(item["proposition"].is_string(), "{item}");
+        assert!(item["kind"].is_string(), "{item}");
+        assert!(item["commentKey"]["workRef"].is_string(), "{item}");
+        assert!(
+            item["commentKey"]["commentExternalId"].is_string(),
+            "{item}"
+        );
+        assert!(item.get("authorExternalId").is_none(), "{item}");
+    }
+    let recent_text = overview["recentSignals"].to_string();
+    for private in ["reader-a", "reader-b", "reader-g"] {
+        assert!(!recent_text.contains(private), "{recent_text}");
+    }
+
+    // Numbered pages read the same order as the cursor and report the filter's total.
+    let page = |extra: Value| {
+        let mut value = json!({"domain": support::D, "workRef": w1, "limit": 2});
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value::<crate::comment_study_catalog::CommentCatalogQuery>(value).unwrap()
+    };
+    let first = crate::comment_study_catalog::read_comment_catalog(&env.db, &page(json!({})))
+        .await
+        .unwrap();
+    assert_eq!(first["page"]["totalCount"], 6, "{first}");
+    let by_cursor = crate::comment_study_catalog::read_comment_catalog(
+        &env.db,
+        &page(json!({"cursor": first["page"]["nextCursor"]})),
+    )
+    .await
+    .unwrap();
+    let by_offset = crate::comment_study_catalog::read_comment_catalog(
+        &env.db,
+        &page(json!({"offset": 2, "cursor": "ignored-when-an-offset-is-given"})),
+    )
+    .await
+    .unwrap();
+    assert_eq!(by_offset["items"], by_cursor["items"]);
+    assert_eq!(by_offset["page"]["totalCount"], 6);
+    assert_eq!(by_offset["page"]["offset"], 2);
+    assert_eq!(by_offset["page"]["hasMore"], true);
+    let past_end =
+        crate::comment_study_catalog::read_comment_catalog(&env.db, &page(json!({"offset": 6})))
+            .await
+            .unwrap();
+    assert_eq!(past_end["items"], json!([]));
+    assert_eq!(past_end["page"]["hasMore"], false);
+    assert_eq!(past_end["page"]["totalCount"], 6);
     let requests = env.unit_requests();
     assert_eq!(
         requests.len(),
@@ -525,6 +785,89 @@ async fn one_call_per_work_places_every_comment_and_the_next_unit_reuses_the_cat
     .unwrap();
     assert_eq!(violations, 0);
 
+    // The directory filtered by a Problem lists the comments whose current result supports it,
+    // across works, with the page total and summary of that filter.
+    let reminder_ref: Uuid = serde_json::from_value(reminder.clone()).unwrap();
+    let by_problem = |problem: Uuid, extra: Value| {
+        let mut value = json!({"domain": support::D, "problemRef": problem, "limit": 50});
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        let query: crate::comment_study_catalog::CommentCatalogQuery =
+            serde_json::from_value(value).unwrap();
+        let db = env.db.clone();
+        async move {
+            crate::comment_study_catalog::read_comment_catalog(&db, &query)
+                .await
+                .unwrap()
+        }
+    };
+    let ids = |page: &Value| {
+        let mut ids: Vec<String> = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| {
+                item["commentKey"]["commentExternalId"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        ids.sort();
+        ids
+    };
+    let filtered = by_problem(reminder_ref, json!({})).await;
+    assert_eq!(ids(&filtered), ["c1", "c2", "x1"], "{filtered}");
+    assert_eq!(filtered["page"]["totalCount"], 3, "{filtered}");
+    assert_eq!(
+        filtered["summary"]["displayableCommentCount"], 3,
+        "{filtered}"
+    );
+    assert_eq!(filtered["summary"]["studiedCommentCount"], 3, "{filtered}");
+    let narrowed = by_problem(
+        reminder_ref,
+        json!({"workRef": w1, "limit": 1, "offset": 1}),
+    )
+    .await;
+    assert_eq!(narrowed["page"]["totalCount"], 2, "{narrowed}");
+    assert_eq!(narrowed["items"].as_array().unwrap().len(), 1, "{narrowed}");
+    assert_eq!(narrowed["page"]["hasMore"], false, "{narrowed}");
+    let summary = crate::comment_study_catalog::read_catalog_summary(
+        &env.db,
+        &serde_json::from_value(json!({"domain": support::D, "problemRef": reminder_ref})).unwrap(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(summary["summary"], filtered["summary"], "{summary}");
+    let unknown = by_problem(Uuid::new_v4(), json!({})).await;
+    assert_eq!(unknown["items"], json!([]), "{unknown}");
+    assert_eq!(unknown["page"]["totalCount"], 0, "{unknown}");
+    let filtered_cursor =
+        by_problem(reminder_ref, json!({"limit": 1})).await["page"]["nextCursor"].clone();
+    let other_scope = crate::comment_study_catalog::read_comment_catalog(
+        &env.db,
+        &serde_json::from_value(
+            json!({"domain": support::D, "limit": 1, "cursor": filtered_cursor}),
+        )
+        .unwrap(),
+    )
+    .await;
+    assert!(
+        other_scope.is_err(),
+        "a problem-filtered cursor is not valid without the filter"
+    );
+
+    // Each listed problem carries a one-sentence summary built from its definition.
+    let listed = super::read_problems(&env.db, support::D).await.unwrap();
+    let listed = listed["problems"].as_array().unwrap();
+    assert_eq!(listed.len(), 2);
+    for problem in listed {
+        let summary = problem["summary"].as_str().unwrap();
+        assert!(summary.ends_with('。'), "{problem}");
+    }
+
     // Researched comments are not researched again; the two that failed are.
     let again = preview(&env.db, support::D, &selections, false)
         .await
@@ -532,6 +875,31 @@ async fn one_call_per_work_places_every_comment_and_the_next_unit_reuses_the_cat
     assert_eq!(again["alreadyResearchedCount"], 5);
     assert_eq!(again["researchableCount"], 2);
     assert_eq!(again["unitCount"], 1);
+    assert_preview_reconciles(&again);
+    let mut researched: Vec<&str> = again["excludedTargets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["reason"] == "already_researched")
+        .map(|t| t["commentExternalId"].as_str().unwrap())
+        .collect();
+    researched.sort();
+    assert_eq!(researched, ["c1", "c2", "c3", "c4", "x1"], "{again}");
+    let w2_group = again["groups"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|g| g["workRef"] == json!(w2))
+        .unwrap();
+    assert_eq!(
+        (
+            w2_group["selectedCount"].clone(),
+            w2_group["researchableCount"].clone(),
+            w2_group["unitCount"].clone()
+        ),
+        (json!(1), json!(0), json!(0)),
+        "{again}"
+    );
     let forced = preview(&env.db, support::D, &selections, true)
         .await
         .unwrap();
@@ -627,6 +995,31 @@ async fn comments_of_a_work_without_l1_wait_and_are_not_planned() {
     assert_eq!(plan["unitCount"], 0);
     assert_eq!(plan["waitingL1"]["targetCount"], 1);
     assert_eq!(plan["waitingL1"]["workRefs"], json!([work]));
+    assert_preview_reconciles(&plan);
+    assert_eq!(
+        plan["excludedTargets"],
+        json!([{"workRef": work, "sourceRef": comment, "commentExternalId": "c1", "reason": "waiting_l1"}])
+    );
+    assert_eq!(plan["groups"][0]["waitingL1"], true, "{plan}");
+
+    // More than 200 left-out selections: the list stops at 200, the counts cover all of them,
+    // and the preview writes nothing.
+    let mut many = vec![selection(work, comment)];
+    many.extend((1..=250).map(|n| selection(work, Uuid::from_u128(n))));
+    let before = write_footprint(&db).await;
+    let plan = preview(&db, support::D, &many, false).await.unwrap();
+    assert_eq!(write_footprint(&db).await, before);
+    assert_preview_reconciles(&plan);
+    assert_eq!(plan["excludedCounts"]["source_unavailable"], 250, "{plan}");
+    assert_eq!(plan["excludedTargets"].as_array().unwrap().len(), 200);
+    assert_eq!(plan["excludedTargetsTruncated"], true);
+    let unknown = plan["excludedTargets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|t| t["reason"] == "source_unavailable")
+        .unwrap();
+    assert!(unknown["commentExternalId"].is_null(), "{unknown}");
 }
 
 #[tokio::test]
@@ -1439,6 +1832,39 @@ async fn consolidates_duplicate_candidates_once_and_restores_opportunity_on_revo
     let redirected_card = read_card(&env.db, loser).await.unwrap();
     assert_eq!(redirected_card["problem"]["id"], json!(winner));
     assert_eq!(redirected_card["problem"]["redirectedFrom"], json!(loser));
+    // Filtering the directory by the merged-away Problem lists the winner's supporting comments.
+    crate::comment_study_catalog::refresh_clean_cache(&env.db, support::D, 200)
+        .await
+        .unwrap();
+    let problem_ids = async |problem: Uuid| {
+        let page = crate::comment_study_catalog::read_comment_catalog(
+            &env.db,
+            &serde_json::from_value(json!({"domain": support::D, "problemRef": problem})).unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            page["page"]["totalCount"].as_u64().unwrap() as usize,
+            page["items"].as_array().unwrap().len(),
+            "{page}"
+        );
+        let mut ids: Vec<String> = page["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|item| {
+                item["commentKey"]["commentExternalId"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            })
+            .collect();
+        ids.sort();
+        ids
+    };
+    let merged = problem_ids(winner).await;
+    assert_eq!(merged.len(), 2, "{merged:?}");
+    assert_eq!(problem_ids(loser).await, merged);
     let active_loser_support: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM linggan_opportunity_current_comment_mention WHERE problem_ref=$1",
     )
@@ -1488,6 +1914,10 @@ async fn consolidates_duplicate_candidates_once_and_restores_opportunity_on_revo
         .await
         .unwrap();
     assert_eq!(card_author_count(loser).await, 1);
+    // After the revoke the loser stands alone again; the winner's defining source is withdrawn,
+    // so its filter reads as an unreadable Problem.
+    assert_eq!(problem_ids(loser).await.len(), 1);
+    assert!(problem_ids(winner).await.is_empty());
     let restored_card = read_card(&env.db, loser).await.unwrap();
     assert_eq!(restored_card["problem"]["id"], json!(loser));
     assert!(restored_card["problem"]["redirectedFrom"].is_null());

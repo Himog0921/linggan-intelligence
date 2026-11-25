@@ -35,11 +35,17 @@ impl StoredSignal {
     }
 }
 
+/// The current problem list. `summary` is one sentence the server writes from the stored
+/// definition (no separate description is stored, so it is built from actor, goal and barrier);
+/// a withdrawn definition shows no summary, as it shows no goal or barrier.
 pub async fn read_problems(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
-    let problems: Vec<Value> = sqlx::query_scalar(
+    let rows: Vec<(Value, Option<String>, Option<String>, Option<String>)> = sqlx::query_as(
         "SELECT jsonb_build_object('problemRef',p.problem_ref,'label',CASE WHEN withdrawn.problem_ref IS NULL THEN p.label ELSE '需求来源已撤回' END,'state',p.state,
            'authorCount',p.author_count,'commentCount',p.comment_count,'workCount',p.work_count,
-           'lastResearchedAt',p.last_researched_at)
+           'lastResearchedAt',p.last_researched_at),
+           CASE WHEN withdrawn.problem_ref IS NULL THEN p.actor END,
+           CASE WHEN withdrawn.problem_ref IS NULL THEN p.goal END,
+           CASE WHEN withdrawn.problem_ref IS NULL THEN p.barrier END
          FROM linggan_comment_problem_current p JOIN linggan_comment_problem_definition d USING(problem_ref)
          LEFT JOIN linggan_comment_problem_withdrawn_source withdrawn USING(problem_ref)
          WHERE p.domain_ref=$1 AND d.origin_invocation_ref IS NOT NULL
@@ -48,7 +54,75 @@ pub async fn read_problems(db: &Database, domain: Uuid) -> Result<Value, Foundat
          ))
          ORDER BY p.author_count DESC,p.last_researched_at DESC NULLS LAST,p.problem_ref",
     ).bind(domain).fetch_all(db.pool()).await?;
+    let problems: Vec<Value> = rows
+        .into_iter()
+        .map(|(mut problem, actor, goal, barrier)| {
+            problem["summary"] = json!(problem_summary(
+                actor.as_deref(),
+                goal.as_deref(),
+                barrier.as_deref()
+            ));
+            problem
+        })
+        .collect();
     Ok(json!({"domainRef":domain,"problems":problems}))
+}
+
+fn summary_part(value: Option<&str>) -> Option<&str> {
+    value
+        .map(|text| {
+            text.trim()
+                .trim_end_matches(['。', '.', '；', ';', '，', ',', '！', '!', '、'])
+                .trim()
+        })
+        .filter(|text| !text.is_empty())
+}
+
+/// One sentence from a definition: "<actor>希望<goal>，但<barrier>。" with any missing part left out.
+fn problem_summary(
+    actor: Option<&str>,
+    goal: Option<&str>,
+    barrier: Option<&str>,
+) -> Option<String> {
+    let actor = summary_part(actor).unwrap_or("");
+    match (summary_part(goal), summary_part(barrier)) {
+        (Some(goal), Some(barrier)) => Some(format!("{actor}希望{goal}，但{barrier}。")),
+        (Some(goal), None) => Some(format!("{actor}希望{goal}。")),
+        (None, Some(barrier)) if actor.is_empty() => Some(format!("{barrier}。")),
+        (None, Some(barrier)) => Some(format!("{actor}：{barrier}。")),
+        (None, None) => None,
+    }
+}
+
+#[cfg(test)]
+mod summary_tests {
+    use super::problem_summary;
+
+    #[test]
+    fn a_summary_is_one_sentence_from_the_definition_and_absent_without_goal_or_barrier() {
+        assert_eq!(
+            problem_summary(
+                Some("小学生家长"),
+                Some("孩子按时开始写作业"),
+                Some("需要反复催促才动笔。")
+            )
+            .as_deref(),
+            Some("小学生家长希望孩子按时开始写作业，但需要反复催促才动笔。")
+        );
+        assert_eq!(
+            problem_summary(None, Some(" 孩子按时开始写作业 "), Some("  ")).as_deref(),
+            Some("希望孩子按时开始写作业。")
+        );
+        assert_eq!(
+            problem_summary(None, None, Some("需要反复催促")).as_deref(),
+            Some("需要反复催促。")
+        );
+        assert_eq!(
+            problem_summary(Some("家长"), Some(""), Some("需要反复催促")).as_deref(),
+            Some("家长：需要反复催促。")
+        );
+        assert_eq!(problem_summary(Some("家长"), None, Some("。")), None);
+    }
 }
 
 pub async fn read_problem(

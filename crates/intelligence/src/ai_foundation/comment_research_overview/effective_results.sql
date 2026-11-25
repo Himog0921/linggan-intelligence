@@ -2,7 +2,7 @@
 , current_results AS MATERIALIZED (
     SELECT DISTINCT ON (r.work_ref, original.comment_external_id)
            r.work_ref, original.comment_external_id, r.request_ref, r.created_at,
-           result.result, original.body_text
+           result.result, result.created_at AS accepted_at, original.body_text
     FROM linggan_comment_research_request r
     JOIN linggan_comment_research_result result USING (request_ref)
     JOIN linggan_material_comment original ON original.material_ref = r.source_ref
@@ -10,7 +10,9 @@
       AND result.result IS NOT NULL AND result.created_at <= $2::timestamptz
     ORDER BY r.work_ref, original.comment_external_id, r.created_at DESC, r.request_ref DESC
 )
-SELECT current.request_ref, current.result
+SELECT current.request_ref, current.result,
+       to_char(current.accepted_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"') AS accepted_at,
+       q.author_display_name
 FROM current_results current
 JOIN qualified q ON q.content_public_ref = current.work_ref
                 AND q.comment_external_id = current.comment_external_id

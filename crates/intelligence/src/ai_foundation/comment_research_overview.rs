@@ -7,6 +7,9 @@ use sqlx::Row;
 use std::collections::HashSet;
 use uuid::Uuid;
 
+/// The overview lists at most this many of the newest current research signals.
+const RECENT_SIGNAL_LIMIT: usize = 5;
+
 pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
     if domain.is_nil() {
         return Err(FoundationError::Invalid);
@@ -37,7 +40,7 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
         comment_study_catalog::facts_sql(),
         include_str!("comment_research_overview/catalog_counts.sql")
     );
-    let counts: Value = sqlx::query_scalar(sqlx::AssertSqlSafe(query))
+    let (counts, breakdown): (Value, Value) = sqlx::query_as(sqlx::AssertSqlSafe(query))
         .bind(domain)
         .bind(&as_of)
         .bind(CLEANER_VERSION)
@@ -67,6 +70,8 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
     let mut experience_works = HashSet::new();
     let mut solutions = Vec::new();
     let mut experiences = Vec::new();
+    // (acceptedAt, requestRef, ordinal, signal); the newest five are kept after the loop.
+    let mut recent: Vec<(String, Uuid, usize, Value)> = Vec::new();
     for row in rows {
         let request: Uuid = row.get("request_ref");
         let source = match comment_understanding::current_source_in(&mut tx, request).await {
@@ -83,8 +88,18 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
             no_signal += 1;
         }
         signal_count += signals.len();
-        for signal in signals {
+        let accepted_at: String = row.get("accepted_at");
+        let author: Option<String> = row.get("author_display_name");
+        for (ordinal, signal) in signals.iter().enumerate() {
             let kind = signal["kind"].as_str().ok_or(FoundationError::Invalid)?;
+            recent.push((
+                accepted_at.clone(),
+                request,
+                ordinal,
+                json!({"requestRef":request,"proposition":signal["proposition"],"kind":kind,
+                  "authorDisplayName":author,"acceptedAt":accepted_at,
+                  "commentKey":{"workRef":source.work_ref,"commentExternalId":source.comment_external_id}}),
+            ));
             if !["solution", "experience"].contains(&kind) {
                 continue;
             }
@@ -119,6 +134,13 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
             }
         }
     }
+    // Newest accepted first; the UTC text form sorts in time order.
+    recent.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
+    let recent_signals: Vec<Value> = recent
+        .into_iter()
+        .take(RECENT_SIGNAL_LIMIT)
+        .map(|(_, _, _, item)| item)
+        .collect();
     let series: Value = sqlx::query_scalar(include_str!(
         "comment_research_overview/observation_series.sql"
     ))
@@ -150,6 +172,6 @@ pub async fn read(db: &Database, domain: Uuid) -> Result<Value, FoundationError>
     };
     tx.commit().await?;
     Ok(
-        json!({"contract":"comment-research.overview.v1","domainRef":domain,"asOf":as_of,"corpusSummary":counts,"indexCoverage":{"indexedCount":counts["indexedCount"],"pendingCount":counts["pendingCount"]},"researchSummary":{"studiedCommentCount":counts["studiedCommentCount"],"succeededCommentCount":succeeded,"noSignalCommentCount":no_signal,"currentSignalCount":signal_count},"knowledgeSummary":{"problemCount":problem_count,"pendingCandidateCount":candidate_count,"solutionSignalCount":solution_count,"experienceSignalCount":experience_count,"solutionWorkCount":solution_works.len(),"experienceWorkCount":experience_works.len(),"solutionPreview":solutions,"experiencePreview":experiences,"problemPreview":problem_preview},"yesterdayNewProblemCount":yesterday,"observationSeries":series}),
+        json!({"contract":"comment-research.overview.v1","domainRef":domain,"asOf":as_of,"corpusSummary":counts,"indexCoverage":{"indexedCount":counts["indexedCount"],"pendingCount":counts["pendingCount"]},"researchSummary":{"studiedCommentCount":counts["studiedCommentCount"],"succeededCommentCount":succeeded,"noSignalCommentCount":no_signal,"currentSignalCount":signal_count},"knowledgeSummary":{"problemCount":problem_count,"pendingCandidateCount":candidate_count,"solutionSignalCount":solution_count,"experienceSignalCount":experience_count,"solutionWorkCount":solution_works.len(),"experienceWorkCount":experience_works.len(),"solutionPreview":solutions,"experiencePreview":experiences,"problemPreview":problem_preview},"researchBreakdown":breakdown,"recentSignals":recent_signals,"yesterdayNewProblemCount":yesterday,"observationSeries":series}),
     )
 }

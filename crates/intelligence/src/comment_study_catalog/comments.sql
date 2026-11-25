@@ -1,7 +1,8 @@
 -- Appended to facts.sql. $6 literal query; $7 voice; $8 study filter;
 -- $9 received-before; $10 work-after; $11 external-id-after; $12 page size plus one; $13 signal kind;
 -- $14 sort (received_desc | like_desc); $15 minimum known likes; $16 post usage (all | used | unused);
--- $17 like-count-after (NULL with a cursor means the page continues inside the unknown-likes tail).
+-- $17 like-count-after (NULL with a cursor means the page continues inside the unknown-likes tail);
+-- $18 rows to skip for a numbered page (0 with a cursor); $19 optional Problem filter.
 , signal_kinds AS MATERIALIZED (
     SELECT original.content_public_ref,original.comment_external_id,
            array_agg(DISTINCT label.kind ORDER BY label.kind) AS kinds
@@ -27,6 +28,19 @@
         WHERE restriction.content_public_ref=original.content_public_ref
           AND restriction.comment_external_id IN (original.comment_external_id,original.parent_comment_external_id))
     GROUP BY original.content_public_ref,original.comment_external_id
+), problem_requests AS MATERIALIZED (
+    -- The current results that support the Problem the requested one resolves to through active
+    -- merge redirects. A Problem of another domain, a V1 definition or one whose defining source
+    -- was withdrawn reads the same as one that does not exist: no comment matches.
+    SELECT DISTINCT support.request_ref
+    FROM linggan_comment_problem_resolution requested
+    JOIN linggan_comment_problem_definition definition ON definition.problem_ref = requested.problem_ref
+    JOIN linggan_comment_problem_support support ON support.problem_ref = requested.current_ref
+    WHERE $19::uuid IS NOT NULL AND requested.problem_ref = $19::uuid
+      AND definition.domain_ref = $1 AND definition.origin_invocation_ref IS NOT NULL
+      AND support.domain_ref = $1
+      AND NOT EXISTS (SELECT 1 FROM linggan_comment_problem_withdrawn_source withdrawn
+                      WHERE withdrawn.problem_ref = requested.current_ref)
 ), /*COMMENT_LIKE_HEADS*/, usage_heads AS MATERIALIZED (
     SELECT DISTINCT ON (event.content_public_ref, event.comment_external_id)
            event.content_public_ref, event.comment_external_id,
@@ -48,6 +62,7 @@
     WHERE ($7 = 'all' OR voice_role = $7 OR ($7 = 'reader_and_unknown' AND voice_role <> 'creator'))
       AND ($13::text IS NULL OR $13::text = ANY(COALESCE(signal_kinds.kinds, ARRAY[]::text[])))
       AND ($15::bigint IS NULL OR like_heads.like_count >= $15::bigint)
+      AND ($19::uuid IS NULL OR qualified.effective_request_ref IN (SELECT request_ref FROM problem_requests))
       AND CASE $16::text
           WHEN 'all' THEN true
           WHEN 'used' THEN usage_heads.usage_action = 'marked'
@@ -91,13 +106,15 @@
            AND like_count IS NULL AND after_received_key)
     ORDER BY CASE WHEN $14::text = 'like_desc' THEN like_count END DESC NULLS LAST,
              created_at DESC, content_public_ref, comment_external_id COLLATE "C"
-    LIMIT $12
+    LIMIT $12 OFFSET $18::bigint
 ), coverage AS (
     SELECT (SELECT count(*) FROM matching WHERE readable AND cached_source_ref IS NOT NULL) AS indexed,
            count(*) FILTER (WHERE readable AND cached_source_ref IS NULL) AS pending
     FROM scoped
 )
 SELECT jsonb_build_object(
+    -- Every row of the current filter the page draws from, ignoring the cursor position.
+    'totalCount', (SELECT count(*) FROM visible),
     'currentSource', (SELECT jsonb_build_object(
         'commentKey', jsonb_build_object('workRef', content_public_ref, 'commentExternalId', comment_external_id),
         'sourceRef', material_ref,
