@@ -1171,64 +1171,52 @@ async fn enrich_current_batch(
     text: Option<&str>,
     as_of: &str,
 ) -> Result<Vec<MaterialLibraryItem>, sqlx::Error> {
-    enrich_current_batch_for_read(tx, rows, text, as_of, false).await
-}
-
-async fn enrich_current_batch_for_read(
-    tx: &mut Transaction<'_, Postgres>,
-    rows: &[WorkResourceCurrent],
-    text: Option<&str>,
-    as_of: &str,
-    overview: bool,
-) -> Result<Vec<MaterialLibraryItem>, sqlx::Error> {
     let mut items: Vec<_> = rows.iter().map(|row| material_item(row, text)).collect();
-    if !overview {
-        // These library-only lanes are not exposed by the overview DTO. Canonical
-        // display fields, source fingerprints and media qualification are shared below.
-        let sources: Vec<_> = rows
-            .iter()
-            .map(|row| row.author_attribution_source.as_deref())
-            .collect();
-        enrich_discovery_batch(tx, &mut items, as_of, &sources).await?;
-        material_social_read::enrich_batch(tx, &mut items, text, as_of).await?;
-    } else {
-        // The canonical evidence excerpt belongs to the social reader's shared
-        // fragment seam, even when comments/provenance payloads are omitted.
-        crate::material_evidence_fragment::read_batch(tx, &mut items, text, as_of).await?;
-    }
-    enrich_media_batch_for_read(tx, &mut items, as_of, overview).await?;
+    let sources: Vec<_> = rows
+        .iter()
+        .map(|row| row.author_attribution_source.as_deref())
+        .collect();
+    enrich_discovery_batch(tx, &mut items, as_of, &sources).await?;
+    material_social_read::enrich_batch(tx, &mut items, text, as_of).await?;
+    enrich_media_batch_for_read(tx, &mut items, as_of, false).await?;
     Ok(items)
 }
 
 /// Complete finite overview scope, with the same current sources and media restrictions.
 /// Detail slots and OCR/ASR bodies stay in the existing work reader.
-pub(crate) async fn read_work_overviews(
-    database: &Database,
+pub(crate) async fn read_work_overviews_in(
+    tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,
     refs: &[Uuid],
     as_of: &str,
-) -> Result<Vec<MaterialLibraryItem>, MaterialReadError> {
+) -> Result<crate::work_resource_read::WorkOverviewPage, MaterialReadError> {
     if refs.is_empty() {
-        return Ok(Vec::new());
+        return Ok(crate::work_resource_read::WorkOverviewPage::default());
     }
     if refs.len() > 500 {
         return Err(MaterialReadError::InvalidCursor);
     }
-    let mut tx = database.pool().begin().await?;
-    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
-        .execute(&mut *tx)
-        .await?;
     // Expensive media joins need parameter-specific plans without query JIT startup.
     // LOCAL settings end with this read transaction, including error rollback.
-    sqlx::query("SET LOCAL jit=off").execute(&mut *tx).await?;
+    sqlx::query("SET LOCAL jit=off").execute(&mut **tx).await?;
     sqlx::query("SET LOCAL plan_cache_mode=force_custom_plan")
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?;
     let allowed: Vec<Uuid> = sqlx::query_scalar("SELECT DISTINCT content_public_ref FROM linggan_material_domain_usage WHERE domain_ref=$1 AND content_public_ref=ANY($2)")
-        .bind(domain).bind(refs).fetch_all(&mut *tx).await?;
+        .bind(domain).bind(refs).fetch_all(&mut **tx).await?;
     let currents =
-        crate::work_resource_current::read_work_resource_currents(&mut tx, &allowed, as_of).await?;
-    let items = enrich_current_batch_for_read(&mut tx, &currents, None, as_of, true).await?;
-    tx.commit().await?;
-    Ok(items)
+        crate::work_resource_current::read_work_resource_currents(tx, &allowed, as_of).await?;
+    let dossiers = crate::research_dossier::read_from_currents_in(
+        tx,
+        &currents.iter().collect::<Vec<_>>(),
+        as_of,
+    )
+    .await?;
+    let mut items: Vec<_> = currents
+        .iter()
+        .map(|row| material_item(row, None))
+        .collect();
+    crate::material_evidence_fragment::apply_dossiers(&mut items, None, &dossiers);
+    enrich_media_batch_for_read(tx, &mut items, as_of, true).await?;
+    Ok(crate::work_resource_read::WorkOverviewPage { items, dossiers })
 }

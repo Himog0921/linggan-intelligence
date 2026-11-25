@@ -6,7 +6,9 @@ pub use automation::{
 mod core_revision;
 pub use core_revision::{CoreRevisionReceipt, ReviewedCore, publish_reviewed_core};
 mod coverage;
-pub(crate) use coverage::scope_coverage;
+#[cfg(test)]
+use coverage::scope_coverage;
+pub(crate) use coverage::{count_coverage, coverage_from_dossiers};
 mod deep;
 mod deep_grounding;
 mod deep_manifest;

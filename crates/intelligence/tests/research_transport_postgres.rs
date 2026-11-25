@@ -54,7 +54,7 @@ async fn lost_research_receipts_hold_quota_and_block_new_commands_even_after_con
     for scope in [ControlScope::Global, ControlScope::Executor] {
         setup::enable(&db, scope).await;
     }
-    core_fixture::prepare(&db, work, &owner).await;
+    core_fixture::prepare(&db, work, &owner, core_fixture::CoreStorage::Direct).await;
     owner.request_drain().await.unwrap();
     owner.complete_drain().await.unwrap();
     drop(owner);

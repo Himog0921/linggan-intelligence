@@ -44,9 +44,18 @@ pub(crate) async fn read_batch(
     query: Option<&str>,
     as_of: &str,
 ) -> Result<(), sqlx::Error> {
-    let query = query.map(str::trim).filter(|value| !value.is_empty());
     let refs: Vec<_> = items.iter().map(|item| item.identity.public_ref).collect();
     let dossiers = crate::research_dossier::read_in(tx, &refs, as_of).await?;
+    apply_dossiers(items, query, &dossiers);
+    Ok(())
+}
+
+pub(crate) fn apply_dossiers(
+    items: &mut [MaterialLibraryItem],
+    query: Option<&str>,
+    dossiers: &std::collections::BTreeMap<Uuid, crate::research_dossier::ResearchDossier>,
+) {
+    let query = query.map(str::trim).filter(|value| !value.is_empty());
     for item in items.iter_mut() {
         if let Some(dossier) = dossiers.get(&item.identity.public_ref) {
             item.material_readiness = Some(crate::research_dossier::material_readiness(dossier));
@@ -57,7 +66,6 @@ pub(crate) async fn read_batch(
     for item in items {
         item.body_text = None;
     }
-    Ok(())
 }
 
 fn dossier_excerpt(
