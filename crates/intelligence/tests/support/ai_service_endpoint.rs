@@ -15,6 +15,9 @@ pub struct Endpoint {
 }
 impl Endpoint {
     pub async fn start() -> Self {
+        Self::with_abandoned_requests(0).await
+    }
+    pub async fn with_abandoned_requests(abandoned: usize) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(vec![]));
@@ -30,8 +33,13 @@ impl Endpoint {
                         let (mut socket,_)=socket.unwrap();let mut gate=gate.clone();let recorded=recorded.clone();
                         tasks.spawn(async move {
                             let request=wire::read(&mut socket).await;
-                            recorded.lock().unwrap().push(request);
+                            let position = {
+                                let mut requests = recorded.lock().unwrap();
+                                requests.push(request);
+                                requests.len()
+                            };
                             while !*gate.borrow_and_update() {gate.changed().await.unwrap();}
+                            if position <= abandoned { return; }
                             wire::respond(&mut socket,r#"{"lingganProbe":"ok"}"#).await;
                         });
                     }

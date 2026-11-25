@@ -284,7 +284,8 @@ async fn ai_binary_sigkill_restart_keeps_attempted_calls_unknown_and_only_dispat
 async fn ai_binary_reconnects_without_resending_dispatched_calls() {
     let schema = "ai_binary_session_recovery";
     let db = fixture::db(schema).await;
-    let endpoint = endpoint::Endpoint::start().await;
+    // The lost executor abandons the first four connections before the gate opens.
+    let endpoint = endpoint::Endpoint::with_abandoned_requests(4).await;
     service_fixture::queued(&db, &endpoint.url, 5).await;
     let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
     let scoped = format!("{url}?options=-csearch_path%3D{schema}");
