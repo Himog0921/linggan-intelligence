@@ -59,6 +59,19 @@ async fn configuration(tx: &mut Transaction<'_, Postgres>) -> Result<(Uuid, i64)
 pub(crate) fn payload(p: &Packet) -> Value {
     json!({"draftProtocol":contract::model_draft::PROTOCOL,"material":contract::model_draft::material(&p.snapshot),"imageInventory":p.inventory,"resultSchema":contract::response_schema()})
 }
+// A reconciliation supplements the immutable failure. It only applies to
+// the exact invocation, domain and frozen snapshot recorded in the receipt.
+const DISPATCH_RECONCILIATION_JOIN: &str = "
+    LEFT JOIN linggan_ai_command reconciliation
+      ON c.failure_code='ai_dispatch_unknown'
+     AND reconciliation.command_ref=md5('l1-dispatch-reconciliation:'||r.request_ref::text||':'||c.invocation_ref::text)::uuid
+     AND reconciliation.operation='content_understanding_dispatch_reconciliation'
+     AND reconciliation.payload=jsonb_build_object('domainRef',r.domain_ref,'workRef',r.work_ref,
+       'requestRef',r.request_ref,'invocationRef',c.invocation_ref,
+       'materialSnapshotIdentity',r.material_snapshot_identity,'methodVersion',r.method_version)
+     AND reconciliation.receipt->>'disposition'='not_dispatched'
+";
+
 async fn reasons(
     tx: &mut Transaction<'_, Postgres>,
     config: Uuid,
@@ -116,12 +129,32 @@ async fn reasons(
             reasons.push("input_too_large".into());
         }
     }
-    let unknown: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3 AND c.failure_code='ai_dispatch_unknown')")
-        .bind(p.snapshot.work_ref).bind(&p.snapshot.material_snapshot_identity).bind(METHOD).fetch_one(&mut **tx).await?;
-    if unknown {
+    if prior_dispatch_unresolved_in(tx, p).await? {
         reasons.push("ai_prior_dispatch_unresolved".into());
     }
     Ok(reasons)
+}
+
+pub(crate) async fn prior_dispatch_unresolved_in(
+    tx: &mut Transaction<'_, Postgres>,
+    p: &Packet,
+) -> Result<bool, FoundationError> {
+    let sql = format!(
+        "SELECT EXISTS(SELECT 1 FROM linggan_content_understanding_request r
+        JOIN linggan_ai_batch_item_control c USING(item_ref)
+        {DISPATCH_RECONCILIATION_JOIN}
+          AND NOT EXISTS (SELECT 1 FROM linggan_ai_late_usage_receipt usage
+                          WHERE usage.invocation_ref=c.invocation_ref)
+        WHERE r.work_ref=$1 AND r.material_snapshot_identity=$2 AND r.method_version=$3
+          AND c.failure_code='ai_dispatch_unknown' AND reconciliation.command_ref IS NULL)"
+    );
+    let unresolved = sqlx::query_scalar(sqlx::AssertSqlSafe(sql))
+        .bind(p.snapshot.work_ref)
+        .bind(&p.snapshot.material_snapshot_identity)
+        .bind(METHOD)
+        .fetch_one(&mut **tx)
+        .await?;
+    Ok(unresolved)
 }
 pub async fn preview(db: &Database, domain: Uuid, work: Uuid) -> Result<Value, FoundationError> {
     let mut tx = db.pool().begin().await?;
@@ -279,14 +312,19 @@ pub async fn latest(
         .await?;
     let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut tx, as_of).await?;
     let p = source::load(&mut tx, domain, work, &cutoff).await?;
-    let row = sqlx::query("SELECT r.request_ref,r.batch_ref,r.item_ref,r.input_manifest,r.material_snapshot_identity,
+    let latest_sql = format!("SELECT r.request_ref,r.batch_ref,r.item_ref,r.input_manifest,r.material_snapshot_identity,
         r.created_at::text || r.request_ref::text AS request_order, (r.knowledge_cutoff <= $5::timestamptz) AS input_before_cutoff,
         CASE WHEN result.offline_recovery THEN 'succeeded' ELSE c.state END AS state,
-        CASE WHEN result.offline_recovery THEN NULL ELSE c.failure_code END AS failure_code,
+        CASE WHEN result.offline_recovery THEN NULL
+             WHEN reconciliation.created_at<=$5::timestamptz THEN 'ai_adapter_rejected_before_dispatch'
+             ELSE c.failure_code END AS failure_code,
         COALESCE(review.result,result.result) AS result, review.revision_ref,
         COALESCE(result.offline_recovery,false) AS offline_recovery,
         deeps.list AS deep_analyses
         FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref)
+        {DISPATCH_RECONCILIATION_JOIN}
+          AND NOT EXISTS (SELECT 1 FROM linggan_ai_late_usage_receipt usage
+                          WHERE usage.invocation_ref=c.invocation_ref AND usage.received_at<=$5::timestamptz)
         LEFT JOIN linggan_content_understanding_saved_core result ON result.request_ref=r.request_ref
           AND (NOT result.offline_recovery OR result.created_at<=$5::timestamptz)
         LEFT JOIN LATERAL (
@@ -309,9 +347,15 @@ pub async fn latest(
           WHERE d.core_ref=result.request_ref AND d.domain_ref=$4 AND d.created_at<=$5::timestamptz
         ) deeps ON true
         WHERE r.work_ref=$1 AND r.method_version=$3
-        ORDER BY (result.result IS NOT NULL) DESC,(r.material_snapshot_identity=$2) DESC,r.created_at DESC,r.request_ref DESC")
-        .bind(work).bind(&p.snapshot.material_snapshot_identity).bind(METHOD).bind(domain).bind(&cutoff)
-        .fetch_all(&mut *tx).await?;
+        ORDER BY (result.result IS NOT NULL) DESC,(r.material_snapshot_identity=$2) DESC,r.created_at DESC,r.request_ref DESC");
+    let row = sqlx::query(sqlx::AssertSqlSafe(latest_sql))
+        .bind(work)
+        .bind(&p.snapshot.material_snapshot_identity)
+        .bind(METHOD)
+        .bind(domain)
+        .bind(&cutoff)
+        .fetch_all(&mut *tx)
+        .await?;
     // Track a request whose frozen inputs remain usable even if extra material arrived.
     let current_inputs: Vec<bool> = row
         .iter()

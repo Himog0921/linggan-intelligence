@@ -1195,11 +1195,34 @@ fn model_draft_keeps_canonical_source_and_requires_direct_book_title_support() {
     assert_eq!(material["texts"][0]["citationId"], "s1");
     assert_eq!(material["texts"][1]["citationId"], "s2");
     assert_eq!(snapshot.texts[1].citation_id, "canonical-segment");
+    assert_eq!(
+        material["texts"][0]["sourceRef"],
+        json!(snapshot.texts[0].source_ref)
+    );
+    assert_eq!(material["texts"][1]["text"], snapshot.texts[1].text);
+    assert_eq!(material["texts"][1]["speaker"], snapshot.texts[1].speaker);
+    for key in ["sourceRef", "sourceVersion", "start", "issues"] {
+        assert!(material["texts"][1].get(key).is_none(), "{key}");
+    }
     assert!(material["texts"][1]["structure"].get("ref").is_none());
     assert_eq!(
         material["texts"][1]["structure"]["time"],
         snapshot.texts[1].structure["time"]
     );
+
+    let mut multiple_origins = snapshot.clone();
+    let mut other_video = snapshot.texts[1].clone();
+    other_video.source_ref = uuid::Uuid::from_u128(1000);
+    multiple_origins.texts.push(other_video);
+    let material = model_draft::material(&multiple_origins);
+    for (index, source) in multiple_origins.texts.iter().enumerate().skip(1) {
+        let text = &material["texts"][index];
+        assert_eq!(text["citationId"], format!("s{}", index + 1));
+        assert_eq!(text["sourceRef"], json!(source.source_ref));
+        assert_eq!(text["sourceVersion"], json!(source.source_version));
+        assert_eq!(text["structure"]["time"], source.structure["time"]);
+        assert!(text.get("start").is_none());
+    }
 
     let result = verify(draft.clone()).unwrap();
     let bound = &result["card"]["evidence"][1];

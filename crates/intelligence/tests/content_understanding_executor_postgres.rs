@@ -732,20 +732,30 @@ async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
         json!(image_source)
     );
     assert_eq!(packet["imageInventory"][0]["blobSha256"], image_sha);
-    let mut restored_material = packet["material"].clone();
-    for (index, source) in restored_material["texts"]
+    // The frozen snapshot retains canonical provenance. Verify the full wire
+    // packet against it with only the intentional model-facing omissions.
+    let mut expected_material = frozen["snapshot"].clone();
+    for (index, source) in expected_material["texts"]
         .as_array_mut()
         .unwrap()
         .iter_mut()
         .enumerate()
     {
-        source["citationId"] = frozen["snapshot"]["texts"][index]["citationId"].clone();
-        assert!(source["structure"].get("ref").is_none());
-        if let Some(reference) = frozen["snapshot"]["texts"][index]["structure"].get("ref") {
-            source["structure"]["ref"] = reference.clone();
+        source["citationId"] = json!(format!("s{}", index + 1));
+        if let Some(structure) = source["structure"].as_object_mut() {
+            structure.remove("ref");
+        }
+        if source["kind"] == "transcript" {
+            let fields = source.as_object_mut().unwrap();
+            for key in ["sourceRef", "sourceVersion", "start"] {
+                assert!(
+                    fields.remove(key).is_some(),
+                    "frozen transcript keeps {key}"
+                );
+            }
         }
     }
-    assert_eq!(restored_material, frozen["snapshot"]);
+    assert_eq!(packet["material"], expected_material);
     assert_eq!(packet["imageInventory"], frozen["inventory"]);
     let recovery = seed_recoverable_failure(&db, work).await;
     let before = owner::latest(&db, dossier::DOMAIN, work, None)

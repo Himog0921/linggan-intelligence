@@ -48,6 +48,11 @@ async fn prepare(
         return Err(ExecutorError::Invalid);
     }
     let packet = owner::frozen_in(&mut tx, request_ref).await?;
+    if owner::prior_dispatch_unresolved_in(&mut tx, &packet).await? {
+        return Err(
+            FoundationError::AdmissionDenied(vec!["ai_prior_dispatch_unresolved".into()]).into(),
+        );
+    }
     let images = owner::images_in(&mut tx, &packet).await?;
     let output_limit: i32 = sqlx::query_scalar("SELECT model.output_token_limit FROM linggan_ai_task_config task JOIN linggan_model_config model ON model.config_ref=task.model_config_ref WHERE task.task_config_ref=$1")
         .bind(item.task_config_ref).fetch_one(&mut *tx).await?;
@@ -96,10 +101,15 @@ pub(super) async fn execute(
                 .first()
                 .map(String::as_str)
                 .unwrap_or("admission_denied");
-            if reason == "ai_source_unavailable" {
-                item.skip_unattempted(db, "ai_source_unavailable").await?;
-            } else {
-                item.defer(db, reason).await?;
+            match reason {
+                "ai_source_unavailable" => {
+                    item.skip_unattempted(db, "ai_source_unavailable").await?
+                }
+                "ai_prior_dispatch_unresolved" => {
+                    item.skip_unattempted(db, "ai_prior_dispatch_unresolved")
+                        .await?;
+                }
+                _ => item.defer(db, reason).await?,
             }
             return Ok(());
         }
