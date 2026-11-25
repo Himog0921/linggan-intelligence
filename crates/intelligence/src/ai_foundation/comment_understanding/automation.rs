@@ -1,4 +1,5 @@
 //! Scheduled selections preserve source identity and use the ordinary operator confirmation path.
+mod submission;
 use super::{MAX_SELECTIONS, start::read_only_tx};
 use crate::{
     ai_foundation::store::{Command, FoundationError},
@@ -18,13 +19,15 @@ pub struct Change {
     pub domain_ref: Uuid,
     pub expected_revision: i64,
     pub enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_submit: Option<bool>,
     pub minute_of_day: i32,
     pub time_zone: String,
     pub selection_limit: i32,
 }
 
 const SETTING: &str = "SELECT jsonb_build_object(
-    'domainRef', d.domain_ref, 'enabled', coalesce(a.enabled,false),
+    'domainRef', d.domain_ref, 'enabled', coalesce(a.enabled,false), 'autoSubmit',coalesce(a.auto_submit,false),
     'minuteOfDay', coalesce(a.minute_of_day,540), 'timeZone', coalesce(a.time_zone,'Asia/Shanghai'),
     'selectionLimit', coalesce(a.selection_limit,300), 'revision', coalesce(a.revision,0),
     'enabledFrom', a.enabled_from, 'nextRunAt', a.next_run_at)
@@ -44,7 +47,13 @@ pub async fn read(
         .ok_or(FoundationError::NotFound)?;
     let mut selections: Vec<Value> = sqlx::query_scalar(
         "SELECT jsonb_build_object('selectionRef', s.selection_ref,'scheduledAt',s.scheduled_at,
-             'generatedAt',s.generated_at,'targetCount',(SELECT count(*) FROM linggan_comment_research_selection_target t WHERE t.selection_ref=s.selection_ref))
+             'generatedAt',s.generated_at,
+             'submissionCounts', (SELECT coalesce(jsonb_object_agg(state,n),'{}') FROM
+              (SELECT submission_state state,count(*) n FROM linggan_comment_research_selection_target WHERE selection_ref=s.selection_ref GROUP BY submission_state) totals),
+             'submissionReasons',(SELECT coalesce(jsonb_agg(reason ORDER BY reason),'[]') FROM
+              (SELECT DISTINCT submission_reason reason FROM linggan_comment_research_selection_target WHERE selection_ref=s.selection_ref AND submission_reason IS NOT NULL ORDER BY reason LIMIT 8) reasons),
+             'batchRefs',(SELECT coalesce(jsonb_agg(DISTINCT submitted_batch_ref),'[]') FROM linggan_comment_research_selection_target WHERE selection_ref=s.selection_ref AND submitted_batch_ref IS NOT NULL),
+             'targetCount',(SELECT count(*) FROM linggan_comment_research_selection_target t WHERE t.selection_ref=s.selection_ref))
          FROM linggan_comment_research_selection s WHERE s.domain_ref=$1 AND
            ($2::uuid IS NULL OR s.scheduled_at < (SELECT scheduled_at FROM linggan_comment_research_selection WHERE domain_ref=$1 AND selection_ref=$2))
          ORDER BY s.scheduled_at DESC LIMIT 21",
@@ -73,6 +82,7 @@ pub async fn read_selection(
     let result = sqlx::query_scalar(include_str!("automation_selection.sql"))
         .bind(selection)
         .bind(domain)
+        .bind(Option::<Vec<i32>>::None)
         .fetch_optional(&mut *tx)
         .await?
         .ok_or(FoundationError::NotFound)?;
@@ -83,6 +93,7 @@ pub async fn read_selection(
 pub async fn change(db: &Database, request: &Change) -> Result<Value, FoundationError> {
     if request.command_ref.is_nil()
         || request.domain_ref.is_nil()
+        || (request.auto_submit == Some(true) && !request.enabled)
         || request.expected_revision < 0
         || !(0..1440).contains(&request.minute_of_day)
         || !(1..=MAX_SELECTIONS as i32).contains(&request.selection_limit)
@@ -128,7 +139,7 @@ pub async fn change(db: &Database, request: &Change) -> Result<Value, Foundation
     }
     sqlx::query(
         "UPDATE linggan_comment_research_automation
-         SET enabled=$2,minute_of_day=$3,time_zone=$4,selection_limit=$5,revision=revision+1,
+         SET enabled=$2,auto_submit=$2 AND coalesce($6,auto_submit),minute_of_day=$3,time_zone=$4,selection_limit=$5,revision=revision+1,
              enabled_from=CASE WHEN $2 THEN coalesce(enabled_from,scope_001_now()) ELSE enabled_from END,
              next_run_at=CASE WHEN $2 THEN linggan_comment_research_next_run(scope_001_now(),$3,$4) END
          WHERE domain_ref=$1",
@@ -138,6 +149,7 @@ pub async fn change(db: &Database, request: &Change) -> Result<Value, Foundation
     .bind(request.minute_of_day)
     .bind(&request.time_zone)
     .bind(request.selection_limit)
+    .bind(request.auto_submit)
     .execute(&mut *command.tx)
     .await?;
     let receipt: Value = sqlx::query_scalar(SETTING)
@@ -147,8 +159,28 @@ pub async fn change(db: &Database, request: &Change) -> Result<Value, Foundation
     command.finish(receipt).await
 }
 
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum ScanError {
+    #[error(transparent)]
+    Selection(#[from] comment_study_catalog::StudyCatalogError),
+    #[error(transparent)]
+    Submission(#[from] FoundationError),
+}
+
+pub(crate) async fn tick(db: &Database) -> Result<(), ScanError> {
+    let generation = generate(db).await;
+    let submission = submission::advance(db).await;
+    if let Err(generation_error) = generation {
+        if let Err(submission_error) = submission {
+            eprintln!("scheduled comment submission deferred: {submission_error}");
+        }
+        return Err(generation_error.into());
+    }
+    submission.map_err(ScanError::from)
+}
+
 // Claiming the schedule, freezing the sources and advancing the next slot commit together.
-pub(crate) async fn tick(db: &Database) -> Result<(), comment_study_catalog::StudyCatalogError> {
+pub(super) async fn generate(db: &Database) -> Result<(), comment_study_catalog::StudyCatalogError> {
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET LOCAL statement_timeout='15s'")
         .execute(&mut *tx)
@@ -157,15 +189,15 @@ pub(crate) async fn tick(db: &Database) -> Result<(), comment_study_catalog::Stu
         .execute(&mut *tx)
         .await?;
     sqlx::query("SET LOCAL jit=off").execute(&mut *tx).await?;
-    let due: Option<(Uuid, String, String, i32)> = sqlx::query_as(
-        "SELECT a.domain_ref, a.enabled_from::text, a.next_run_at::text, a.selection_limit
+    let due: Option<(Uuid, String, String, i32, bool)> = sqlx::query_as(
+        "SELECT a.domain_ref, a.enabled_from::text, a.next_run_at::text, a.selection_limit, a.auto_submit
          FROM linggan_comment_research_automation a JOIN observation_domain d USING(domain_ref)
          WHERE a.enabled AND a.next_run_at<=scope_001_now() AND d.status='active'
          ORDER BY a.next_run_at,a.domain_ref LIMIT 1 FOR UPDATE OF a SKIP LOCKED",
     )
     .fetch_optional(&mut *tx)
     .await?;
-    let Some((domain, enabled_from, due_at, limit)) = due else {
+    let Some((domain, enabled_from, due_at, limit, auto_submit)) = due else {
         return Ok(());
     };
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
@@ -219,8 +251,8 @@ pub(crate) async fn tick(db: &Database) -> Result<(), comment_study_catalog::Stu
     }
     sqlx::query(
         "INSERT INTO linggan_comment_research_selection_target
-            (domain_ref,selection_ref,position,work_ref,comment_external_id,source_ref)
-         SELECT $1,$2,t.position::integer,t.work_ref,t.comment_external_id,t.source_ref
+            (domain_ref,selection_ref,position,work_ref,comment_external_id,source_ref,submission_state,next_check_at)
+         SELECT $1,$2,t.position::integer,t.work_ref,t.comment_external_id,t.source_ref,CASE WHEN $6 THEN 'pending' ELSE 'manual' END, CASE WHEN $6 THEN scope_001_now() END
          FROM unnest($3::uuid[],$4::text[],$5::uuid[]) WITH ORDINALITY
             AS t(work_ref,comment_external_id,source_ref,position)",
     )
@@ -229,6 +261,7 @@ pub(crate) async fn tick(db: &Database) -> Result<(), comment_study_catalog::Stu
     .bind(works)
     .bind(comments)
     .bind(sources)
+    .bind(auto_submit)
     .execute(&mut *tx)
     .await?;
     sqlx::query("UPDATE linggan_comment_research_automation SET next_run_at=linggan_comment_research_next_run($2::timestamptz,minute_of_day,time_zone) WHERE domain_ref=$1")

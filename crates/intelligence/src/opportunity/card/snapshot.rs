@@ -45,6 +45,7 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_media_ocr_retirement",
     "linggan_media_processing_job",
     "linggan_media_processing_job_event",
+    "linggan_media_processing_work",
     "linggan_model_entry",
     "linggan_model_invocation",
     "linggan_opportunity_card_change",

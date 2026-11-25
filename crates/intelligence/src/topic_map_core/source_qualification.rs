@@ -48,7 +48,7 @@ pub(crate) async fn unavailable_definitions_in(
         .await
         .map(|(u, _)| u)
 }
-async fn qualify_definitions_and_inputs_in(
+pub(crate) async fn qualify_definitions_and_inputs_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     domain: Option<Uuid>,
     additional_scopes: &FrozenScopes,

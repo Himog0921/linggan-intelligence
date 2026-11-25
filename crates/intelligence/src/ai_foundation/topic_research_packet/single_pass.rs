@@ -41,6 +41,9 @@ pub(super) async fn prepare(
     let candidates = catalog.as_array().ok_or_else(invalid)?;
     let mut schema = output_schema(mode);
     schema["properties"]["contract"]["enum"] = json!([CONTRACT]);
+    if mode == "author" && input.comment_study.as_array().is_some_and(Vec::is_empty) {
+        schema["properties"]["projection"]["properties"]["rm"]["maxItems"] = json!(0);
+    }
     let mut unit_ids = None;
     let units = if mode == "author" {
         Vec::new()
@@ -86,8 +89,12 @@ fn input_payload(
             json!(input.fragments.iter().enumerate().map(|(index,f)|json!({
             "fragmentIndex":index,"fragmentId":f.fragment_id,"field":f.field,
             "sourceRef":f.source_ref,"sourceVersion":f.source_version,"speaker":f.speaker,
+            "citationSpeakerRole":analysis::fragment_role(f),
             "content":f.model_content(),"issues":f.issues
         })).collect::<Vec<_>>());
+        payload["citationSpeakerRule"] = json!(
+            "判断讨论的 speakerRole 时读取所引片段的 citationSpeakerRole。只有全部引用均为 author 才标 author。只有全部引用为 quoted 才标 quoted。混合、未知或归属不明用 unknown。作者作品中的引述或图片模型观察不自动成为作者原话。字段 sp 为 unknown 时，陈述用“该材料讨论”等来源中立的表达。机制、疗效或因果判断要保留为来源主张及其不确定性。若 commentStudy 为空，projection.rm 必须是空数组。"
+        );
         payload["commentStudy"] = input.comment_study.clone();
         payload["roleMetadata"] = input.role_metadata.clone();
         let mut coverage = input.coverage.clone();

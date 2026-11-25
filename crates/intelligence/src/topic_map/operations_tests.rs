@@ -1,4 +1,15 @@
 use super::*;
+
+async fn read(
+    db: &linggan_storage_postgres::Database,
+    works: &[Uuid],
+    domain: Option<Uuid>,
+) -> Result<BTreeMap<Uuid, Vec<Value>>, TopicMapError> {
+    let mut tx = db.pool().begin().await?;
+    let facts = read_in(&mut tx, works, domain).await?;
+    tx.commit().await?;
+    Ok(facts)
+}
 #[allow(dead_code)]
 #[path = "../../../evidence/tests/support/domain_fixture.rs"]
 mod domain_fixture;

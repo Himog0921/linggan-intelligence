@@ -141,6 +141,7 @@ fn error(status: StatusCode, code: &str) -> Response {
 }
 async fn snapshot(
     State(state): State<LocalWebState>,
+    Extension(model): Extension<Arc<TopicMapReadModel>>,
     query: Result<Query<TopicMapQuery>, QueryRejection>,
 ) -> Response {
     let Ok(Query(query)) = query else {
@@ -150,8 +151,8 @@ async fn snapshot(
         Ok(db) => db,
         Err(response) => return response,
     };
-    match linggan_intelligence::topic_map::read_topic_map(db, &query).await {
-        Ok(value) => Json(value).into_response(),
+    match model.read(db, &query).await {
+        Ok(value) => Json(value.as_ref()).into_response(),
         Err(err) => map_error(err),
     }
 }

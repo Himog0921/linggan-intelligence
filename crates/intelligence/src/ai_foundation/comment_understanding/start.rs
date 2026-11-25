@@ -313,22 +313,32 @@ pub async fn preview(
     selections: &[Selection],
     rerun: bool,
 ) -> Result<Value, FoundationError> {
+    let mut tx = read_only_tx(db).await?;
+    let result = preview_in(&mut tx, domain, selections, rerun).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+pub(super) async fn preview_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    selections: &[Selection],
+    rerun: bool,
+) -> Result<Value, FoundationError> {
     if domain.is_nil() || selections.is_empty() || selections.len() > MAX_SELECTIONS {
         return Err(FoundationError::Invalid);
     }
-    let mut tx = read_only_tx(db).await?;
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
     let (config, revision): (Uuid, i64) = sqlx::query_as(
         "SELECT current_config_ref,revision FROM linggan_ai_task_setting WHERE task_key='comment_understanding'",
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut **tx)
     .await?;
-    let plan = plan_in(&mut tx, domain, selections, rerun, &as_of).await?;
-    let groups = work_groups(&mut tx, domain, &plan, &as_of).await?;
-    let (excluded_targets, truncated) = excluded_targets(&mut tx, domain, &plan.report).await?;
-    tx.commit().await?;
+    let plan = plan_in(tx, domain, selections, rerun, &as_of).await?;
+    let groups = work_groups(tx, domain, &plan, &as_of).await?;
+    let (excluded_targets, truncated) = excluded_targets(tx, domain, &plan.report).await?;
     let report = &plan.report;
     let targets: usize = plan.units.iter().map(|unit| unit.targets.len()).sum();
     Ok(json!({
@@ -457,6 +467,14 @@ async fn excluded_targets(
 
 /// Freeze the previewed plan as one batch with one item per unit.
 pub async fn start(db: &Database, request: &Start) -> Result<Receipt, FoundationError> {
+    start_in(db.pool().begin().await?, request, BatchKind::Interactive).await
+}
+
+pub(super) async fn start_in(
+    tx: Transaction<'_, Postgres>,
+    request: &Start,
+    kind: BatchKind,
+) -> Result<Receipt, FoundationError> {
     if request.domain_ref.is_nil()
         || request.selections.is_empty()
         || request.selections.len() > MAX_SELECTIONS
@@ -465,8 +483,8 @@ pub async fn start(db: &Database, request: &Start) -> Result<Receipt, Foundation
     {
         return Err(FoundationError::Invalid);
     }
-    let mut command = Command::begin(
-        db,
+    let mut command = Command::begin_in(
+        tx,
         request.command_ref,
         "comment_understanding_start",
         request,
@@ -475,6 +493,14 @@ pub async fn start(db: &Database, request: &Start) -> Result<Receipt, Foundation
     if let Some(receipt) = command.replay()? {
         return Ok(receipt);
     }
+    // Two starts over the same comments must not both plan them.
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
+        .bind(format!(
+            "comment-understanding-start:{}",
+            request.domain_ref
+        ))
+        .execute(&mut *command.tx)
+        .await?;
     let config = lock_setting(
         &mut command.tx,
         TaskKey::CommentUnderstanding,
@@ -492,14 +518,6 @@ pub async fn start(db: &Database, request: &Start) -> Result<Receipt, Foundation
     if !in_the_past {
         return Err(FoundationError::Invalid);
     }
-    // Two starts over the same comments must not both plan them.
-    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,0))")
-        .bind(format!(
-            "comment-understanding-start:{}",
-            request.domain_ref
-        ))
-        .execute(&mut *command.tx)
-        .await?;
     let plan = plan_in(
         &mut command.tx,
         request.domain_ref,
@@ -532,7 +550,7 @@ pub async fn start(db: &Database, request: &Start) -> Result<Receipt, Foundation
         request.command_ref,
         TaskKey::CommentUnderstanding,
         config,
-        BatchKind::Interactive,
+        kind,
         &inputs,
         &hash,
     )

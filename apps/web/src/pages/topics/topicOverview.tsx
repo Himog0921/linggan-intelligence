@@ -1688,7 +1688,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
             <h3>{"主题定义的来源当前受限"}</h3>
             <p>
               {
-                "纳入、排除条件与定义关系暂不可展示。已有当前可读材料仍可核对，不能把来源受限解释为边界尚未定义。"
+                t.definitionText
               }
             </p>
           </section>

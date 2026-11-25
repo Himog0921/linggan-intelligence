@@ -69,6 +69,26 @@ impl ExecutorError {
                 | Self::Writing(crate::content_workbench_ai::AiError::Database(_))
         )
     }
+
+    /// Only loss of transport or session liveness calls for a fresh executor generation.
+    /// Statement, schema, receipt and ownership errors retain their existing exit semantics.
+    pub fn should_reconnect(&self) -> bool {
+        let error = match self {
+            Self::Database(error)
+            | Self::Configuration(super::store::FoundationError::Database(error))
+            | Self::Model(crate::model_settings::ModelError::Database(error))
+            | Self::Writing(crate::content_workbench_ai::AiError::Database(error)) => error,
+            Self::HeartbeatTimedOut | Self::FenceLost => return true,
+            _ => return false,
+        };
+        match error {
+            sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut | sqlx::Error::Tls(_) => true,
+            sqlx::Error::Database(error) => error.code().is_some_and(|code| {
+                code.starts_with("08") || matches!(code.as_ref(), "57P01" | "57P02" | "57P03")
+            }),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -133,6 +153,11 @@ pub struct ExecutorSession {
     fence: ExecutorFence,
 }
 impl ExecutorSession {
+    pub async fn current_process_id(db: &Database) -> Result<Option<i32>, ExecutorError> {
+        Ok(sqlx::query_scalar("SELECT i.process_id FROM linggan_ai_executor_current c JOIN linggan_ai_executor_instance i USING(instance_ref,generation)")
+            .fetch_optional(db.pool()).await?)
+    }
+
     pub async fn acquire(
         db: &Database,
         source_revision: &str,
