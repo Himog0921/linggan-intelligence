@@ -1,5 +1,7 @@
 use super::*;
 use linggan_intelligence::content_workbench_sources::{read_source_in, text_hash};
+use linggan_storage_postgres::Database;
+use std::path::Path;
 
 async fn wait_for_call(path: &std::path::Path, before: usize) {
     tokio::time::timeout(std::time::Duration::from_secs(10), async {
@@ -14,10 +16,7 @@ async fn wait_for_call(path: &std::path::Path, before: usize) {
 fn release_call(path: &std::path::Path) {
     std::fs::write(path.with_extension("release"), "owned test release").unwrap();
 }
-async fn frozen_body_source(
-    db: &linggan_storage_postgres::Database,
-    citation: &Citation,
-) -> serde_json::Value {
+async fn frozen_body_source(db: &Database, citation: &Citation) -> serde_json::Value {
     let mut tx = db.pool().begin().await.unwrap();
     let (source, _) = read_source_in(
         &mut tx,
@@ -59,36 +58,62 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     let config = foundation_fixture::configure_fake_prerequisites(&db).await;
     let work = fixture::create(&db, fixture::doc()).await;
     let (adapter, count, root) = adapter();
-    let ready = ai::readiness(&db).await.unwrap();
+    // Separate the assertion phases to bound the debug test's stack use.
+    let request_id = Box::pin(assert_dispatch_replay(&db, config, &work, &adapter, &count)).await;
+    let latest = Box::pin(assert_stale_adoption_and_rewrite(
+        &db, config, &work, request_id, &adapter,
+    ))
+    .await;
+    Box::pin(assert_dispatch_lifecycle(
+        &db, config, &latest, &adapter, &count,
+    ))
+    .await;
+    Box::pin(assert_placed_material_restriction(
+        &db, config, &adapter, &count,
+    ))
+    .await;
+    let research_count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation i WHERE i.operation='analyze' AND (NOT EXISTS(SELECT 1 FROM linggan_creation_ai_request r WHERE r.invocation_ref=i.invocation_ref) OR i.result->>'purpose' IS DISTINCT FROM 'content_workbench')").fetch_one(db.pool()).await.unwrap();
+    assert_eq!(research_count, 0);
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+async fn assert_dispatch_replay(
+    db: &Database,
+    config: Uuid,
+    work: &SaveReceipt,
+    adapter: &PiAdapter,
+    count: &Path,
+) -> Uuid {
+    let ready = ai::readiness(db).await.unwrap();
     assert_eq!(ready["configured"], true);
     assert!(ready["writingQualified"].is_null());
-    let r = request(&work, config, ai::WritingAction::Draft, "");
-    let exec = prepare(&db, &r).await;
-    assert_eq!(call_count(&count), 0);
-    ai::execute(&db, &exec).await.unwrap();
-    ai::execute(&db, &exec).await.unwrap();
+    let r = request(work, config, ai::WritingAction::Draft, "");
+    let exec = prepare(db, &r).await;
+    assert_eq!(call_count(count), 0);
+    ai::execute(db, &exec).await.unwrap();
+    ai::execute(db, &exec).await.unwrap();
     let mut changed = exec.clone();
     changed.budget_tokens += 1;
     assert!(matches!(
-        ai::execute(&db, &changed).await,
+        ai::execute(db, &changed).await,
         Err(ai::AiError::Conflict)
     ));
-    let second_preview = request(&work, config, ai::WritingAction::Draft, "different preview");
-    let mut cross_preview = prepare(&db, &second_preview).await;
+    let second_preview = request(work, config, ai::WritingAction::Draft, "different preview");
+    let mut cross_preview = prepare(db, &second_preview).await;
     cross_preview.request_id = exec.request_id;
     assert!(matches!(
-        ai::execute(&db, &cross_preview).await,
+        ai::execute(db, &cross_preview).await,
         Err(ai::AiError::Conflict)
     ));
-    let mut work_collision = prepare(&db, &second_preview).await;
+    let mut work_collision = prepare(db, &second_preview).await;
     work_collision.request_id = work.request_id;
     assert!(matches!(
-        ai::execute(&db, &work_collision).await,
+        ai::execute(db, &work_collision).await,
         Err(ai::AiError::Conflict)
     ));
     assert!(matches!(
         save(
-            &db,
+            db,
             work.work_id,
             &SaveRequest {
                 request_id: exec.request_id,
@@ -100,21 +125,31 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
         Err(WorkbenchError::RequestConflict)
     ));
     let (a, b) = tokio::join!(
-        run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter),
-        run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+        run_request(db, exec.request_id, &SyntheticModelSecrets, adapter),
+        run_request(db, exec.request_id, &SyntheticModelSecrets, adapter)
     );
     a.unwrap();
     b.unwrap();
-    assert_eq!(call_count(&count), 1);
-    let status = ai::status(&db, exec.request_id).await.unwrap();
+    assert_eq!(call_count(count), 1);
+    let status = ai::status(db, exec.request_id).await.unwrap();
     assert_eq!(status["state"], "succeeded");
     assert_eq!(status["usage"]["chargedTokens"], 20);
     assert_eq!(status["suggestion"]["paragraphs"][0]["text"], "合成起草😀");
-    assert_eq!(ai::readiness(&db).await.unwrap()["writingQualified"], true);
+    assert_eq!(ai::readiness(db).await.unwrap()["writingQualified"], true);
+    exec.request_id
+}
+
+async fn assert_stale_adoption_and_rewrite(
+    db: &Database,
+    config: Uuid,
+    work: &SaveReceipt,
+    request_id: Uuid,
+    adapter: &PiAdapter,
+) -> SaveReceipt {
     let mut doc = work.revision.document.clone();
     doc.paragraphs[0].text = "作者新编辑".into();
     let newer = save(
-        &db,
+        db,
         work.work_id,
         &SaveRequest {
             request_id: Uuid::new_v4(),
@@ -124,14 +159,11 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     )
     .await
     .unwrap();
-    assert_eq!(
-        ai::status(&db, exec.request_id).await.unwrap()["staleBase"],
-        true
-    );
+    assert_eq!(ai::status(db, request_id).await.unwrap()["staleBase"], true);
     assert!(matches!(
         ai::adopt(
-            &db,
-            exec.request_id,
+            db,
+            request_id,
             &ai::AdoptRequest {
                 rewrite_text: None,
                 request_id: Uuid::new_v4(),
@@ -145,9 +177,9 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
         Err(ai::AiError::Stale)
     ));
     let r = request(&newer, config, ai::WritingAction::RewriteSelection, "");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+    let exec = prepare(db, &r).await;
+    ai::execute(db, &exec).await.unwrap();
+    run_request(db, exec.request_id, &SyntheticModelSecrets, adapter)
         .await
         .unwrap();
     let adoption = ai::AdoptRequest {
@@ -158,8 +190,8 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
         page_indices: Some(vec![]),
         adopt_title: false,
     };
-    let adopted = ai::adopt(&db, exec.request_id, &adoption).await.unwrap();
-    let replay = ai::adopt(&db, exec.request_id, &adoption).await.unwrap();
+    let adopted = ai::adopt(db, exec.request_id, &adoption).await.unwrap();
+    let replay = ai::adopt(db, exec.request_id, &adoption).await.unwrap();
     assert_eq!(replay["replayed"], true);
     assert_eq!(replay["revision"]["id"], adopted["revision"]["id"]);
     assert_eq!(
@@ -170,112 +202,123 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
         adopted["revision"]["document"]["paragraphs"][0]["text"],
         "合成改写😀"
     );
-    let current = read_work(&db, work.work_id).await.unwrap();
-    let latest = SaveReceipt {
+    let current = read_work(db, work.work_id).await.unwrap();
+    SaveReceipt {
         request_id: Uuid::new_v4(),
         work_id: work.work_id,
         outcome: "accepted".into(),
         replayed: false,
         revision: current.revision,
-    };
-    let r = request(&latest, config, ai::WritingAction::Draft, "DELAY");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    let before = call_count(&count);
-    let future = run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter);
+    }
+}
+
+async fn assert_dispatch_lifecycle(
+    db: &Database,
+    config: Uuid,
+    latest: &SaveReceipt,
+    adapter: &PiAdapter,
+    count: &Path,
+) {
+    let dispatch =
+        |request_id| Box::pin(run_request(db, request_id, &SyntheticModelSecrets, adapter));
+    let r = request(latest, config, ai::WritingAction::Draft, "DELAY");
+    let exec = prepare(db, &r).await;
+    ai::execute(db, &exec).await.unwrap();
+    let before = call_count(count);
+    let future = dispatch(exec.request_id);
     let cancel = async {
-        wait_for_call(&count, before).await;
-        ai::cancel(&db, exec.request_id).await.unwrap();
-        release_call(&count);
+        wait_for_call(count, before).await;
+        ai::cancel(db, exec.request_id).await.unwrap();
+        release_call(count);
     };
     let (result, _) = tokio::join!(future, cancel);
     result.unwrap();
-    let status = ai::status(&db, exec.request_id).await.unwrap();
+    let status = ai::status(db, exec.request_id).await.unwrap();
     assert_eq!(status["state"], "cancelled");
     assert!(status["suggestion"].is_null());
     assert_eq!(status["usage"]["chargedTokens"], 20);
-    let r = request(&latest, config, ai::WritingAction::Draft, "INVALID");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
-    let status = ai::status(&db, exec.request_id).await.unwrap();
+    let r = request(latest, config, ai::WritingAction::Draft, "INVALID");
+    let exec = prepare(db, &r).await;
+    ai::execute(db, &exec).await.unwrap();
+    dispatch(exec.request_id).await.unwrap();
+    let status = ai::status(db, exec.request_id).await.unwrap();
     assert_eq!(status["state"], "failed");
     assert_eq!(status["usage"]["chargedTokens"], 20);
-    assert_eq!(ai::readiness(&db).await.unwrap()["writingQualified"], false);
-    let r = request(&latest, config, ai::WritingAction::PageCopy, "BADPAGE");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
+    assert_eq!(ai::readiness(db).await.unwrap()["writingQualified"], false);
+    let r = request(latest, config, ai::WritingAction::PageCopy, "BADPAGE");
+    let exec = prepare(db, &r).await;
+    ai::execute(db, &exec).await.unwrap();
+    dispatch(exec.request_id).await.unwrap();
     assert_eq!(
-        ai::status(&db, exec.request_id).await.unwrap()["state"],
+        ai::status(db, exec.request_id).await.unwrap()["state"],
         "failed"
     );
-    let r = request(&latest, config, ai::WritingAction::PageCopy, "");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
+    let r = request(latest, config, ai::WritingAction::PageCopy, "");
+    let exec = prepare(db, &r).await;
+    ai::execute(db, &exec).await.unwrap();
+    dispatch(exec.request_id).await.unwrap();
     assert_eq!(
-        ai::status(&db, exec.request_id).await.unwrap()["state"],
+        ai::status(db, exec.request_id).await.unwrap()["state"],
         "succeeded"
     );
-    let r = request(&latest, config, ai::WritingAction::Draft, "DELAY");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    let before = call_count(&count);
-    let future = run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter);
+    let r = request(latest, config, ai::WritingAction::Draft, "DELAY");
+    let exec = prepare(db, &r).await;
+    ai::execute(db, &exec).await.unwrap();
+    let before = call_count(count);
+    let future = dispatch(exec.request_id);
     let disable = async {
-        wait_for_call(&count, before).await;
+        wait_for_call(count, before).await;
         sqlx::query("UPDATE linggan_model_connection SET enabled=false")
             .execute(db.pool())
             .await
             .unwrap();
-        release_call(&count);
+        release_call(count);
     };
     let (result, _) = tokio::join!(future, disable);
     result.unwrap();
-    let status = ai::status(&db, exec.request_id).await.unwrap();
+    let status = ai::status(db, exec.request_id).await.unwrap();
     assert_eq!(status["state"], "succeeded");
     assert_eq!(status["usage"]["chargedTokens"], 20);
     sqlx::query("UPDATE linggan_model_connection SET enabled=true")
         .execute(db.pool())
         .await
         .unwrap();
-    let r = request(&latest, config, ai::WritingAction::Draft, "");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    ai::cancel(&db, exec.request_id).await.unwrap();
-    let before = call_count(&count);
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
-        .await
-        .unwrap();
-    assert_eq!(call_count(&count), before);
-    let cancelled = ai::status(&db, exec.request_id).await.unwrap();
+    let r = request(latest, config, ai::WritingAction::Draft, "");
+    let exec = prepare(db, &r).await;
+    ai::execute(db, &exec).await.unwrap();
+    ai::cancel(db, exec.request_id).await.unwrap();
+    let before = call_count(count);
+    dispatch(exec.request_id).await.unwrap();
+    assert_eq!(call_count(count), before);
+    let cancelled = ai::status(db, exec.request_id).await.unwrap();
     assert!(cancelled["invocationRef"].is_null());
     assert!(cancelled["usage"]["chargedTokens"].is_null());
     assert_eq!(cancelled["usage"]["state"], "not_reserved");
+}
+
+async fn assert_placed_material_restriction(
+    db: &Database,
+    config: Uuid,
+    adapter: &PiAdapter,
+    count: &Path,
+) {
     // Ordinary new observations preserve frozen citations. An actual current restriction
     // still forbids sending their placed text, even with no material checkbox selected.
-    let mut document = fixture::cited_doc(&db).await;
+    let mut document = fixture::cited_doc(db).await;
     let body = document.excerpts[0].citation.clone();
-    let comment = fixture::comment_doc_for_work(&db, body.work_ref.unwrap()).await;
+    let comment = fixture::comment_doc_for_work(db, body.work_ref.unwrap()).await;
     let comment_work = comment.excerpts[0].citation.work_ref.unwrap();
     let comment_excerpt = comment.excerpts[0].id;
     let comment_text = comment.excerpts[0].selected_text.clone().unwrap();
-    let frozen_body = frozen_body_source(&db, &body).await;
+    let frozen_body = frozen_body_source(db, &body).await;
     document.excerpts.extend(comment.excerpts);
     document.canvas.extend(comment.canvas);
     let canvases: Vec<_> = document.canvas.iter().map(|c| c.id).collect();
     let paragraph = document.paragraphs[0].id;
-    let mut placed = fixture::create(&db, document).await;
+    let mut placed = fixture::create(db, document).await;
     for canvas in canvases {
         placed = place(
-            &db,
+            db,
             placed.work_id,
             &PlaceRequest {
                 request_id: Uuid::new_v4(),
@@ -303,11 +346,11 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
             .contains(&comment_text)
     );
     let r = request(&placed, config, ai::WritingAction::RewriteSelection, "");
-    let exec = prepare(&db, &r).await;
-    ai::execute(&db, &exec).await.unwrap();
-    let before = call_count(&count);
-    fixture::dossier::fixture::submit_package_at(&db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成替代版本","bodyText":"新版原文","authorId":"synthetic-author"}}),"2026-08-29T10:00:00Z").await;
-    let current = linggan_evidence::research_dossier::read(&db, body.work_ref.unwrap())
+    let exec = prepare(db, &r).await;
+    ai::execute(db, &exec).await.unwrap();
+    let before = call_count(count);
+    fixture::dossier::fixture::submit_package_at(db,"content_detail",json!({"contentExternalId":"dossier-note"}),json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"dossier-note"},"payload":{"title":"合成替代版本","bodyText":"新版原文","authorId":"synthetic-author"}}),"2026-08-29T10:00:00Z").await;
+    let current = linggan_evidence::research_dossier::read(db, body.work_ref.unwrap())
         .await
         .unwrap()
         .unwrap();
@@ -319,26 +362,23 @@ async fn explicit_ai_dispatch_replay_stale_cancel_and_usage_are_separate() {
     assert_eq!(current_body.text, "新版原文");
     assert_ne!(current_body.fragment_id, body.block_ref);
     assert_ne!(current_body.source_version, body.source_version);
-    assert_eq!(frozen_body_source(&db, &body).await, frozen_body);
+    assert_eq!(frozen_body_source(db, &body).await, frozen_body);
     let still_readable = request(&placed, config, ai::WritingAction::RewriteSelection, "");
     assert!(still_readable.citations.is_empty());
-    ai::preview(&db, &still_readable).await.unwrap();
-    assert_eq!(call_count(&count), before);
-    fixture::restrict_comment(&db, comment_work).await;
-    run_request(&db, exec.request_id, &SyntheticModelSecrets, &adapter)
+    ai::preview(db, &still_readable).await.unwrap();
+    assert_eq!(call_count(count), before);
+    fixture::restrict_comment(db, comment_work).await;
+    run_request(db, exec.request_id, &SyntheticModelSecrets, adapter)
         .await
         .unwrap();
-    assert_eq!(call_count(&count), before);
-    let status = ai::status(&db, exec.request_id).await.unwrap();
+    assert_eq!(call_count(count), before);
+    let status = ai::status(db, exec.request_id).await.unwrap();
     assert_eq!(status["state"], "failed");
     assert_eq!(status["failureCode"], "ai_source_unavailable");
     assert!(status["invocationRef"].is_null());
     assert!(status["usage"]["chargedTokens"].is_null());
     assert_eq!(status["usage"]["state"], "not_reserved");
     assert!(status["suggestion"].is_null());
-    let research_count:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation i WHERE i.operation='analyze' AND (NOT EXISTS(SELECT 1 FROM linggan_creation_ai_request r WHERE r.invocation_ref=i.invocation_ref) OR i.result->>'purpose' IS DISTINCT FROM 'content_workbench')").fetch_one(db.pool()).await.unwrap();
-    assert_eq!(research_count, 0);
-    std::fs::remove_dir_all(root).unwrap();
 }
 
 #[tokio::test]
