@@ -928,6 +928,14 @@ async fn creator_context_comments_stay_out_of_the_domain_catalog_cloud_works_can
         overview["corpusSummary"]["displayableCommentCount"], 2,
         "{overview}"
     );
+    // 研究分段：四段之和等于可研究评论数；尚无任何研究时全部落在「从未进入研究」。
+    let eligible = overview["corpusSummary"]["eligibleCommentCount"].clone();
+    assert_eq!(
+        overview["researchBreakdown"],
+        json!({"withResult": 0, "running": 0, "failedWithoutResult": 0, "never": eligible}),
+        "{overview}"
+    );
+    assert_eq!(overview["recentSignals"], json!([]), "{overview}");
     let observed_comments: i64 = overview["observationSeries"]["points"]
         .as_array()
         .unwrap()

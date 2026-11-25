@@ -1,12 +1,13 @@
 {
-  "kind": "implementation_fix",
-  "reason": "在写稿对照按目标段采用，并复用写稿工具撤销",
-  "authorization": "Mog 确认继续推进 S2 目标段采用与撤销",
+  "kind": "page_exception",
+  "reason": "评论研究概览趋势图的「图表/表格」与时间范围切换按 B-04 对齐稿使用 32px 文字页签（12px、2px 信号下划线），与 C26 ViewSwitch（40px、13px、3px）不同；ObservationSeries 不再作为 C26 消费者登记。C26 组件本身、其他消费者和全站外观不变。同页 ActionButton 的 32px 小号与图标间距 8px 也按稿件在页面内覆盖，不改 C09。",
+  "authorization": "Mog 已逐轮确认的 B-04 对齐稿（apps/web/design-reference/comment-research-b04.html），本次评论研究 1:1 复刻任务授权以稿件为准。",
+  "exceptionScope": "apps/web/src/pages/corpus/comments/（评论研究页：ObservationSeries 趋势切换、CommentResearch.module.css 的 .small/.quiet-small/.icon-gap）",
   "componentFingerprints": {
     "C09": "aeae573f6a3930a9a642ab28bbc745e0985ad3c87de461c8e16b70387c347692",
     "C16": "f702e1ecdb4c66c8773e8b675459b0cc19790c6453496fd0f23aee76a2ae960e",
     "ICON-B-001": "5561180601213c88b2f1645e5b1e59e28b5de6dd2dccd560d7d6f2e715663e54",
-    "C26": "e0e3d1f3088b7cc0e309b92ad77e110e0bf89fbca12830655cfa437f0f721dcd",
+    "C26": "0b623ec8bf9a75ae598681f059578649b71b0a8b5fe08f909bba9cdd0c3f8028",
     "C17": "5d5c858e936070d802a20f01cd9f7395ae9dc879314690aed3bc6eb6fd9adb5f",
     "C42": "59267d41aaf2b6adabfe34d78251e68ed269d956c822e080f17003e2449bedb1",
     "C41": "4aa129123e26f9436eb99d13c8b86ae52822d2a6be5df31b77e4aba469c9a778",

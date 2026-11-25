@@ -24,6 +24,16 @@ export function wordCloud(domain = DOMAIN, days = 56) {
 export function overview(domain=DOMAIN) {
  return {contract:'comment-research.overview.v1',domainRef:domain,asOf:'2026-10-28T08:00:00Z',corpusSummary:{displayableCommentCount:200,eligibleCommentCount:100,rawReadableCommentCount:200},indexCoverage:{indexedCount:200,pendingCount:0},researchSummary:{studiedCommentCount:0,succeededCommentCount:0,noSignalCommentCount:0,currentSignalCount:0},knowledgeSummary:{problemCount:0,pendingCandidateCount:0,solutionSignalCount:0,experienceSignalCount:0,solutionWorkCount:0,experienceWorkCount:0,solutionPreview:[],experiencePreview:[],problemPreview:[]},yesterdayNewProblemCount:0,observationSeries:{timezone:'Asia/Shanghai',points:Array.from({length:56},(_,i)=>({date:new Date(Date.UTC(2026,8,3+i)).toISOString().slice(0,10),newObservedCommentCount:i===55?200:0,studiedCommentCount:0,acceptedSignalCount:0,coveredWorkCount:i===55?2:0,observationCoverage:i===55?'partial':'none'}))}};
 }
+export function plan(overrides: Record<string, unknown> = {}) {
+ return { domainRef: DOMAIN, knowledgeCutoff: '2026-11-20T00:00:00Z', planHash: 'e'.repeat(64), taskConfigRef: 'config', taskRevision: 2,
+  selectedCount: 1, researchableCount: 1, workCount: 1, unitCount: 1, expectedModelCalls: 1, waitingL1: { targetCount: 0, workRefs: [] },
+  alreadyResearchedCount: 0, alreadyQueuedCount: 0, dispatchUnresolvedCount: 0, excludedCounts: {}, ...overrides };
+}
+export function problemRow(ref = 'problem-1', overrides: Record<string, unknown> = {}) {
+ return { problemRef: ref, label: '合成问题：作业启动困难', state: 'formal', authorCount: 2, commentCount: 2, workCount: 1, lastResearchedAt: '2026-11-20T02:00:00Z', ...overrides };
+}
+/** Only these POSTs are read-only (the plan preview); everything else is a write. */
+export const writes = () => calls.filter(call => call.method === 'POST' && !call.url.pathname.endsWith('/v2/preview'));
 export const calls: { url: URL; method: string; body: Record<string, unknown> | null; signal: AbortSignal | null }[] = [];
 export function defaultReply(url: URL) {
  if (url.pathname === '/api/local/ai-settings') return businessSettingsFixture();
@@ -40,6 +50,8 @@ export function defaultReply(url: URL) {
  };
  if (url.pathname === '/api/local/comment-research/v2/runs') return { domainRef: domain, runs: [], consolidationTaskRevision: 1, consolidations: [] };
  if (url.pathname === '/api/local/comment-research/v2/problems') return { domainRef: domain, problems: [], candidates: [] };
+ if (url.pathname === '/api/local/comment-research/v2/preview') return plan();
+ if (url.pathname === '/api/local/topic-map/comment-assignments') return { domainRef: domain, items: [] };
  throw new Error('Unexpected test endpoint ' + url.pathname);
 }
 export function installFetch(custom?: (url: URL, options: RequestInit) => Promise<Response> | Response | undefined) {

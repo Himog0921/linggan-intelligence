@@ -1,0 +1,27 @@
+<dialog class="inspector" id="inspector" aria-labelledby="inspectorTitle"><header class="dialog-head"><div><h2 id="inspectorTitle"></h2></div><button class="icon-btn" id="inspectorClose" aria-label="关闭检查器"><span data-icon="X"></span></button></header><div class="dialog-body" id="inspectorBody"></div><footer class="dialog-footer" id="inspectorFooter"></footer></dialog>
+<dialog class="preview-dialog" id="previewDialog" aria-labelledby="previewTitle"><header class="dialog-head"><div><h2 id="previewTitle">本次研究预览</h2><small>按所属作品分组，共享作品语境</small></div><button type="button" class="icon-btn" id="previewClose" aria-label="关闭研究预览"><span data-icon="X"></span></button></header><div class="dialog-body" id="previewBody"></div><footer class="dialog-footer"><span class="footer-note" id="previewFootnote"></span><div class="actions"><button class="btn" id="previewBack">返回修改</button><button class="btn primary" id="startResearch">开始研究</button></div></footer></dialog>
+<dialog id="recordsDialog" class="records-dialog" aria-labelledby="recordsTitle">
+  <div class="records-frame">
+    <header class="records-head">
+      <div class="records-heading"><span class="records-eyebrow" aria-hidden="true">RESEARCH / LOG</span><h2 id="recordsTitle">研究记录</h2></div>
+      <div class="records-head-actions"><span id="recordsActivity" class="records-activity"></span><button type="button" class="btn small" id="recordsClose" aria-label="关闭研究记录">关闭 <span aria-hidden="true">×</span></button></div>
+    </header>
+    <div class="records-toolbar">
+      <div class="field records-search-field"><label for="recordsSearch">搜索记录</label><input type="search" id="recordsSearch" placeholder="批次编号或作品标题" autocomplete="off"></div>
+      <div class="field records-filter-field"><label for="recordsState">执行状态</label><select id="recordsState"><option value="all">全部状态</option><option value="running">进行中</option><option value="completed">已完成</option><option value="errors">有失败</option></select></div>
+      <div class="field records-filter-field"><label for="recordsSort">时间顺序</label><select id="recordsSort"><option value="newest">最新在前</option><option value="oldest">最早在前</option></select></div>
+      <button type="button" class="btn" id="recordsRefresh">刷新进度</button>
+    </div>
+    <div class="records-scroll" id="recordsScroll" tabindex="0" aria-label="研究批次表格">
+      <table class="records-table">
+        <caption class="records-visually-hidden">研究批次、执行状态、任务规模与研究结果。展开批次可查看研究单元。</caption>
+        <colgroup><col class="records-col-batch"><col class="records-col-state"><col class="records-col-size"><col class="records-col-progress"><col class="records-col-result"><col class="records-col-action"></colgroup>
+        <thead><tr><th scope="col">批次 / 发起时间</th><th scope="col">执行状态</th><th scope="col">任务规模</th><th scope="col">处理情况</th><th scope="col">结果摘要</th><th scope="col" class="records-action-heading">操作</th></tr></thead>
+        <tbody id="recordsRows"></tbody>
+      </table>
+    </div>
+    <footer class="records-footer"><span id="recordsCount" role="status" aria-live="polite"></span><span id="recordsUpdated">按发起时间排序</span></footer>
+  </div>
+</dialog>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
