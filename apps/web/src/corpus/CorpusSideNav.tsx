@@ -23,11 +23,10 @@ interface CorpusSideNavProps {
 const COMMENT_VIEWS: readonly { key: CorpusCommentsView; label: string; code: string }[] = [
   { key: 'overview', label: '概览', code: 'OV' },
   { key: 'comments', label: '用户评论', code: 'UC' },
-  { key: 'runs', label: '研究记录', code: 'RUN' },
   { key: 'problems', label: '用户问题', code: 'Q' },
 ];
 
-/** 语料导航：二级页面为主项；评论研究的四个真实视图作为三级子项。 */
+/** 语料导航：二级页面为主项；评论研究的三个视图作为三级子项（研究记录是上下文栏右侧的对话框，不在侧栏）。 */
 export function CorpusSideNav({ active, domain, view = 'overview', onViewSelect, foot, evidenceCount = null }: CorpusSideNavProps) {
   const scope = domain ? `?domain=${encodeURIComponent(domain)}` : '';
   const commentHref = (next: CorpusCommentsView) => `/corpus/comments${scope ? `${scope}&view=${next}` : `?view=${next}`}`;

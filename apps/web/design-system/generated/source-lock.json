@@ -1,5 +1,5 @@
 {
-  "fingerprint": "32c30b7fc5a4f164d6a26f3196ff729fa9a4a26dac30dc20e3a0ce01288126ce",
+  "fingerprint": "d682febf28750c7b9d62675dade08bc23d173bdc715689819853990ff96adbda",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -239,7 +239,7 @@
     },
     {
       "path": "apps/web/src/corpus/CorpusSideNav.tsx",
-      "sha256": "a0c1e8480fe62afa0f821c818569d7a476d49b7a36f3df7fe2101ebc5eb85584"
+      "sha256": "abbbd61d8c01826c5125b8c9c0864405f8053bb2e019ea8ee34c094033e340f3"
     },
     {
       "path": "apps/web/src/corpus/DomainPicker.tsx",
@@ -247,7 +247,7 @@
     },
     {
       "path": "apps/web/src/corpus/corpusPages.ts",
-      "sha256": "63eb9b56b9f8b840a3dac9c863e90695496ac11e5f6d6b140f26fbcc914254e7"
+      "sha256": "5db79aa755aaab2af44c414d9a12bab4b5bc08324fe837c9ea72680cbd2ebc8b"
     },
     {
       "path": "apps/web/src/pages/collection/CollectionFrame.tsx",
@@ -319,15 +319,15 @@
     },
     {
       "path": "apps/web/src/pages/corpus/comments/CommentsPage.tsx",
-      "sha256": "d068db800526887621eef48e880b4d1800744998a723f54cb90e5c3604fd8da0"
+      "sha256": "c3e8922fa2a3a5613429f69744e644a01ef209e8c36bef0c87a89bff818bcc1c"
     },
     {
       "path": "apps/web/src/pages/corpus/comments/CommentsView.tsx",
-      "sha256": "ee830e4c2cc4d98babfe23c6d86225c0b678451bd4a247795ff9f5100969a824"
+      "sha256": "2632fced37e0b741ed89dbef4e7e7ead8b8e6906cb83c9fb79751dd628a4b59c"
     },
     {
       "path": "apps/web/src/pages/corpus/comments/ObservationSeries.tsx",
-      "sha256": "6e4fe15d3f7c145bd32a6c4550026ed704fc271cbe2e81c3cda602502fc7afc6"
+      "sha256": "68c703edd8ac038ebad5ce6bc0294dbe05f0dae325528d1612a03f8d8c56b6e6"
     },
     {
       "path": "apps/web/src/pages/corpus/creators/CreatorControls.tsx",
@@ -659,7 +659,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "3d3d74b1171a9262ac6e211cbb75d628f46e9c2964dafcdc2cc720a8c500abd1"
+      "sha256": "6e2f61a835891ce17f9eaa76625b2aac07fb8525a8d9fda2be1f56c3ca873348"
     },
     {
       "path": "docs/design/lids/catalog-source.json",
@@ -671,7 +671,7 @@
     },
     {
       "path": "docs/design/lids/component-contracts.json",
-      "sha256": "7370b3fcfad2e1b06fa0a42e04f2b824e3cd32a304bb11c62033b12cdea1286d"
+      "sha256": "0721675e45cc23279bc56e0d4bf9bbac1e12c4d3479a439b93e78340b2e73e8f"
     },
     {
       "path": "docs/design/lids/component-reuse.json",

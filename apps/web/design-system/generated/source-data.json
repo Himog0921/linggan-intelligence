@@ -1597,7 +1597,7 @@
     "interactions": 32,
     "businessBlocks": 41
   },
-  "fingerprint": "32c30b7fc5a4f164d6a26f3196ff729fa9a4a26dac30dc20e3a0ce01288126ce",
+  "fingerprint": "d682febf28750c7b9d62675dade08bc23d173bdc715689819853990ff96adbda",
   "sharedComponents": {
     "C09": {
       "name": "动作按钮",
@@ -1840,7 +1840,6 @@
       "consumers": [
         "apps/web/src/pages/corpus/evidence/EvidenceControls.tsx",
         "apps/web/src/pages/corpus/creators/CreatorHomepagePanel.tsx",
-        "apps/web/src/pages/corpus/comments/ObservationSeries.tsx",
         "apps/web/src/pages/topics/topicOverview.tsx"
       ],
       "certified": false,

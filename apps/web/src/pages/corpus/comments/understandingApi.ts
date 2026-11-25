@@ -1,5 +1,5 @@
 import { ApiError, isRecord, requestJson } from '../../../shared/api';
-import { bool, decode, list, num, obj, optNum, optObj, optStr, str, strList } from '../../../shared/decode';
+import { bool, decode, list, num, obj, optBool, optNum, optObj, optStr, str, strList } from '../../../shared/decode';
 import { REASONS } from './researchModel';
 import type { SelectedComment } from './studyApi';
 
@@ -49,10 +49,22 @@ export async function previewSelection(domain: string, selected: SelectedComment
       researched: num(row, 'alreadyResearchedCount'), active: num(row, 'alreadyQueuedCount'),
       unresolved: num(row, 'dispatchUnresolvedCount'),
       exclusions: Object.keys(obj(row, 'excludedCounts')).map(code => ({ code, count: num(obj(row, 'excludedCounts'), code) })),
+      // CONTRACT 第二轮 §6：逐作品计划与逐条排除是可选增量；旧服务缺失时为 null，预览沿用按所选评论分组的降级显示。
+      groups: row.groups == null ? null : list(row, 'groups', item => ({
+        workRef: str(item, 'workRef'), workTitle: optStr(item, 'workTitle'), selected: num(item, 'selectedCount'),
+        researchable: num(item, 'researchableCount'), units: num(item, 'unitCount'), researched: num(item, 'alreadyResearchedCount'),
+        waitingL1: bool(item, 'waitingL1'), active: num(item, 'activeCount'),
+      })),
+      excludedTargets: row.excludedTargets == null ? null : list(row, 'excludedTargets', item => ({
+        workRef: str(item, 'workRef'), commentExternalId: str(item, 'commentExternalId'), reason: str(item, 'reason'),
+      })),
+      excludedTruncated: optBool(row, 'excludedTargetsTruncated') ?? false,
     };
   });
 }
 export type PreviewPlan = Awaited<ReturnType<typeof previewSelection>>;
+export type ResearchRun = Awaited<ReturnType<typeof readRuns>>['runs'][number];
+export type ProblemDetail = Awaited<ReturnType<typeof readProblem>>;
 export async function startSelection(domain: string, selected: SelectedComment[], rerun: boolean, plan: PreviewPlan, commandRef: string) {
   return decode(await post('/runs', {
     domainRef: domain, commandRef, selections: selected.map(selection), rerun,
@@ -62,8 +74,18 @@ export async function startSelection(domain: string, selected: SelectedComment[]
 }
 export async function readRuns(domain: string, signal?: AbortSignal) {
   return decode(await read('/runs', domain, {}, signal), row => ({
-    runs: list(row, 'runs', item => ({ batchRef: str(item, 'batchRef'), createdAt: str(item, 'createdAt'),
-      state: str(item, 'state'), unitCount: num(item, 'unitCount'), cancelRequested: bool(item, 'cancelRequested') })),
+    runs: list(row, 'runs', item => {
+      // CONTRACT §1：以下四项是可选增量；旧服务缺失时为 null，记录表显示「—」。
+      const units = optObj(item, 'unitCounts'), outcomes = optObj(item, 'outcomes');
+      const counts = units && [optNum(units, 'completed'), optNum(units, 'failed'), optNum(units, 'pending')];
+      const results = outcomes && [optNum(outcomes, 'signals'), optNum(outcomes, 'needsContext'), optNum(outcomes, 'noSignal')];
+      return { batchRef: str(item, 'batchRef'), createdAt: str(item, 'createdAt'),
+        state: str(item, 'state'), unitCount: num(item, 'unitCount'), cancelRequested: bool(item, 'cancelRequested'),
+        targetCount: optNum(item, 'targetCount'), workCount: optNum(item, 'workCount'),
+        // 后端实际还返回 cancelled（含 skipped），四项之和 = unitCount；旧服务没有该键时按 0。
+        unitCounts: counts && counts.every(value => value != null) ? { completed: counts[0]!, failed: counts[1]!, pending: counts[2]!, cancelled: optNum(units!, 'cancelled') ?? 0 } : null,
+        outcomes: results && results.every(value => value != null) ? { signals: results[0]!, needsContext: results[1]!, noSignal: results[2]! } : null };
+    }),
     consolidationTaskRevision: num(row, 'consolidationTaskRevision'),
     consolidations: list(row, 'consolidations', item => ({ batchRef: str(item, 'batchRef'), createdAt: str(item, 'createdAt'),
       state: str(item, 'state'), failureCode: optStr(item, 'failureCode'), researchBatchRef: optStr(item, 'researchBatchRef'),
@@ -78,8 +100,14 @@ export async function readRun(domain: string, batch: string, signal?: AbortSigna
       cancelRequested: bool(row, 'cancelRequested'),
       retrySelections: list(row, 'retrySelections', item => ({ sourceRef: str(item, 'sourceRef'),
         observationRole: str(item, 'observationRole'), commentKey: { workRef: str(item, 'workRef'), commentExternalId: str(item, 'commentExternalId') } })),
-      units: list(row, 'units', item => ({ unitRef: str(item, 'unitRef'), workRef: str(item, 'workRef'), state: str(item, 'state'),
-        failureCode: optStr(item, 'failureCode'), targetCount: num(item, 'targetCount') })),
+      units: list(row, 'units', item => {
+        // CONTRACT 第二轮 §7：workTitle / outcomes 是可选增量；旧服务缺失或单元未成功时为 null。
+        const outcomes = optObj(item, 'outcomes');
+        const results = outcomes && [optNum(outcomes, 'signals'), optNum(outcomes, 'needsContext'), optNum(outcomes, 'noSignal')];
+        return { unitRef: str(item, 'unitRef'), workRef: str(item, 'workRef'), workTitle: optStr(item, 'workTitle'), state: str(item, 'state'),
+          failureCode: optStr(item, 'failureCode'), targetCount: num(item, 'targetCount'),
+          outcomes: results && results.every(value => value != null) ? { signals: results[0]!, needsContext: results[1]!, noSignal: results[2]! } : null };
+      }),
       targets: list(row, 'targets', item => ({ state: str(item, 'state'), failureCode: optStr(item, 'failureCode'), count: num(item, 'count') })),
       usage: { calls: num(usage, 'modelCalls'), input: num(usage, 'inputTokens'), output: num(usage, 'outputTokens') },
     };
@@ -97,8 +125,10 @@ function problemSummary(row: Record<string, unknown>) {
   return { problemRef: str(row, 'problemRef'), label: str(row, 'label'), state: str(row, 'state'), authors: num(row, 'authorCount') };
 }
 function catalogRow(row: Record<string, unknown>) {
-  return { ...problemSummary(row), comments: num(row, 'commentCount'), works: num(row, 'workCount'), lastResearchedAt: optStr(row, 'lastResearchedAt') };
+  // summary 是 CONTRACT §2 的可选增量；缺失或 null 时卡片不显示描述行。
+  return { ...problemSummary(row), comments: num(row, 'commentCount'), works: num(row, 'workCount'), lastResearchedAt: optStr(row, 'lastResearchedAt'), summary: optStr(row, 'summary') };
 }
+export type ProblemCatalogRow = ReturnType<typeof catalogRow>;
 export async function readProblems(domain: string, signal?: AbortSignal) {
   return decode(await read('/problems', domain, {}, signal), row => list(row, 'problems', catalogRow));
 }

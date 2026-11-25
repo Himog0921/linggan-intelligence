@@ -1,142 +1,103 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { calls, comment, DOMAIN, installFetch, json, renderPage, WORK } from './testKit';
+import { calls, comment, DOMAIN, installFetch, json, plan, renderPage, WORK, writes } from './testKit';
 
 afterEach(() => vi.unstubAllGlobals());
-describe('D3 actual four-view React boundary', () => {
- it('renders literal source text, unknown likes and server-owned eligibility without executing markup',async()=>{
-  installFetch();renderPage(`domain=${DOMAIN}&view=comments`);
+const commentReads = () => calls.filter(call => call.url.pathname.endsWith('/comment-study/comments'));
+const page = (items: unknown[], extra: Record<string, unknown> = {}) => json({ domainRef: DOMAIN, items, summary: { displayableCommentCount: items.length, eligibleCommentCount: items.length }, indexCoverage: { indexedCount: items.length, pendingCount: 0 }, page: { nextCursor: null, ...extra } });
+
+describe('B-04 用户评论', () => {
+ it('renders literal source text, keeps eligibility server-owned and moves research records out of the sidebar', async () => {
+  installFetch(); renderPage(`domain=${DOMAIN}&view=comments`);
   await screen.findByRole('table');
   const side = screen.getByRole('complementary', { name: '语料导航' });
-  expect(within(side).getByRole('link', { name: '评论研究' })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}`);
   expect(within(side).getByRole('link', { name: '用户评论' })).toHaveAttribute('aria-current', 'page');
-  expect(within(side).getByRole('link', { name: '研究记录' })).toHaveAttribute('href', `/corpus/comments?domain=${DOMAIN}&view=runs`);
+  expect(within(side).queryByRole('link', { name: '研究记录' })).toBeNull();
+  expect(screen.getByRole('button', { name: /^研究记录/ })).toHaveAttribute('aria-haspopup', 'dialog');
   expect(screen.getByRole('navigation', { name: '当前位置' })).toHaveTextContent(/评论研究.*用户评论/);
-  expect(screen.queryByRole('navigation', { name: '评论研究视图' })).not.toBeInTheDocument();
-  expect(screen.getAllByRole('button',{name:'SYNTHETIC 原声 <script>不执行</script>'})).toHaveLength(2);
+  expect(screen.queryByRole('heading', { name: '用户评论', level: 2 })).toBeNull();
+  expect(screen.getAllByRole('button', { name: 'SYNTHETIC 原声 <script>不执行</script>' })).toHaveLength(2);
   expect(document.querySelector('script')).toBeNull();
-  expect(document.querySelector('select[aria-label="搜索范围"]')).toBeNull();
+  expect(document.querySelector('select')).toBeNull();
+  for (const name of ['搜索范围', '研究状态', '研究标签', '排序']) expect(screen.getByRole('combobox', { name })).toBeInTheDocument();
+  expect(screen.getByRole('combobox', { name: '研究状态' })).toHaveTextContent('全部状态');
   expect(screen.getByTitle('点赞数未知：采集时没有取得这条评论的点赞')).toHaveTextContent('—');
-  expect(screen.queryByRole('checkbox',{name:'选择这条评论'})).not.toBeInTheDocument();
-  expect(screen.getByRole('button',{name:'选择评论'})).toHaveAttribute('title','进入批量选择模式');
-  const selectMode = screen.getByRole('button',{name:'选择评论'});await userEvent.click(selectMode);
-  const boxes=screen.getAllByRole('checkbox',{name:'选择这条评论'});expect(boxes[0]).toBeEnabled();expect(boxes[1]).toBeDisabled();
-  const pageSelect=screen.getByRole('button',{name:/勾选本页/});expect(pageSelect.compareDocumentPosition(screen.getByRole('button',{name:'取消选择'})) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();await userEvent.click(boxes[0]!);expect(screen.getByRole('button',{name:/勾选本页/})).toBeInTheDocument();expect(screen.queryByText('已选 1 条 · 来自 1 篇作品')).not.toBeInTheDocument();expect(screen.queryByRole('button',{name:'研究所选评论'})).not.toBeInTheDocument();
-  expect(calls.every(call=>call.method==='GET')).toBe(true);
+  expect(screen.getAllByRole('columnheader')).toHaveLength(9);
+  expect(screen.queryByRole('checkbox', { name: '选择这条评论' })).toBeNull();
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '选择评论' }));
+  expect(screen.getAllByRole('columnheader')).toHaveLength(10);
+  const boxes = screen.getAllByRole('checkbox', { name: '选择这条评论' });
+  expect(boxes[0]).toBeEnabled(); expect(boxes[1]).toBeDisabled();
+  await user.click(boxes[0]!);
+  const bar = screen.getByRole('region', { name: '已选评论' });
+  expect(bar).toHaveTextContent('已选 1 条评论');
+  await within(bar).findByText(/将提交/);
+  await waitFor(() => expect(bar).toHaveTextContent('将提交 1 条 · 预计调用 1 次'));
+  expect(writes()).toEqual([]);
  });
- it('freezes the first 300 filtered rows as eligible selections and submits only after preview and confirmation', async () => {
-  const planHash = 'e'.repeat(64);
+
+ it('exits selection by clearing it and announcing what was cleared', async () => {
+  installFetch(); renderPage(`domain=${DOMAIN}&view=comments`);
+  await screen.findByRole('table');
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: '选择评论' }));
+  await user.click(screen.getAllByRole('checkbox', { name: '选择这条评论' })[0]!);
+  await user.click(screen.getByRole('button', { name: '退出选择' }));
+  expect(screen.queryByRole('region', { name: '已选评论' })).toBeNull();
+  expect(screen.getAllByText('已退出选择，清空了 1 条已选评论').length).toBeGreaterThan(0);
+  await user.click(screen.getByRole('button', { name: '选择评论' }));
+  expect(screen.getAllByRole('checkbox', { name: '选择这条评论' })[0]).not.toBeChecked();
+ });
+
+ it('freezes the first 300 filtered rows, previews them and submits only after explicit confirmation', async () => {
+  const planHash = 'f'.repeat(64);
   const filteredPages: string[] = [];
   installFetch(url => {
-    if (url.pathname.endsWith('/comments') && url.searchParams.get('limit') === '100') {
-      expect(url.searchParams.get('q')).toBe('样本');
-      const cursor = url.searchParams.get('cursor') || 'first';
-      filteredPages.push(cursor);
-      const offset = cursor === 'first' ? 0 : Number(cursor);
-      return json({
-        domainRef: DOMAIN,
-        items: Array.from({ length: 100 }, (_, i) => comment(`batch-${offset + i}`, offset + i !== 100)),
-        summary: { displayableCommentCount: 400, eligibleCommentCount: 399 },
-        indexCoverage: { indexedCount: 400, pendingCount: 0 },
-        page: { nextCursor: String(offset + 100) },
-      });
-    }
-    if (url.pathname.endsWith('/v2/preview')) return json({
-      domainRef: DOMAIN, knowledgeCutoff: '2026-11-20T00:00:00Z', planHash, taskConfigRef: 'config', taskRevision: 2,
-      selectedCount: 299, researchableCount: 280, workCount: 1, unitCount: 14, expectedModelCalls: 14,
-      waitingL1: { targetCount: 0, workRefs: [] }, alreadyResearchedCount: 19, alreadyQueuedCount: 0,
-      dispatchUnresolvedCount: 0, excludedCounts: {},
-    });
-    if (url.pathname.endsWith('/v2/runs')) return json({ batchRef: 'batch', unitCount: 14, targetCount: 280 });
-    return undefined;
+   if (url.pathname.endsWith('/comments') && url.searchParams.get('limit') === '100') {
+    expect(url.searchParams.get('q')).toBe('样本');
+    const cursor = url.searchParams.get('cursor') || 'first';
+    filteredPages.push(cursor);
+    const offset = cursor === 'first' ? 0 : Number(cursor);
+    return json({ domainRef: DOMAIN, items: Array.from({ length: 100 }, (_, i) => comment(`batch-${offset + i}`, offset + i !== 100)),
+     summary: { displayableCommentCount: 400, eligibleCommentCount: 399 }, indexCoverage: { indexedCount: 400, pendingCount: 0 }, page: { nextCursor: String(offset + 100) } });
+   }
+   if (url.pathname.endsWith('/v2/preview')) return json(plan({ planHash, selectedCount: 299, researchableCount: 280, unitCount: 14, expectedModelCalls: 14, alreadyResearchedCount: 19 }));
+   if (url.pathname.endsWith('/v2/runs') && url.searchParams.size === 0) return json({ batchRef: 'batch-new', unitCount: 14, targetCount: 280 });
+   return undefined;
   });
-  renderPage(`domain=${DOMAIN}&view=comments&q=${encodeURIComponent('样本')}&cursor=visible-page`);
+  const { router } = renderPage(`domain=${DOMAIN}&view=comments&q=${encodeURIComponent('样本')}`);
   await screen.findByRole('table');
   const user = userEvent.setup();
   await user.click(screen.getByRole('button', { name: '选择评论' }));
   await user.click(screen.getByRole('button', { name: '按当前筛选生成研究清单' }));
-  await screen.findByText('已检查当前筛选结果的前 300 条，选入 299 条。');
+  await screen.findByText(/已检查当前筛选结果的前 300 条，选入 299 条。/);
   expect(filteredPages).toEqual(['first', '100', '200']);
-  expect(calls.filter(call => call.method === 'POST')).toEqual([]);
-  await user.click(screen.getByRole('button', { name: '预览所选评论' }));
-  expect(await screen.findByText('已有结果，跳过 19 条。')).toBeVisible();
-  const preview = calls.filter(call => call.method === 'POST');
-  expect(preview).toHaveLength(1);
-  expect(preview[0]?.body?.selections).toHaveLength(299);
-  expect(preview[0]?.body?.selections).not.toContainEqual({ workRef: WORK, sourceRef: 'source-batch-100', observationRole: 'primary' });
-  await user.click(screen.getByRole('button', { name: '开始所选评论研究' }));
-  await screen.findByText(/已提交 280 条评论，共 14 个研究单元/);
-  const starts = calls.filter(call => call.method === 'POST' && call.url.pathname.endsWith('/v2/runs'));
+  await user.click(screen.getByRole('button', { name: /预览研究计划/ }));
+  const dialog = await screen.findByRole('dialog', { name: '本次研究预览' });
+  await within(dialog).findByText('按所属作品分组');
+  expect(dialog.querySelector('strong')).toHaveTextContent('将提交 280 条评论 · 预计调用 14 次');
+  expect(within(dialog).getByText('不会提交 19 条')).toBeInTheDocument();
+  expect(within(dialog).getByText('已有研究结果，本次跳过')).toBeInTheDocument();
+  const previews = calls.filter(call => call.url.pathname.endsWith('/v2/preview'));
+  expect(previews.at(-1)?.body?.selections).toHaveLength(299);
+  expect(previews.at(-1)?.body?.selections).not.toContainEqual({ workRef: WORK, sourceRef: 'source-batch-100', observationRole: 'primary' });
+  expect(writes()).toEqual([]);
+  await user.click(within(dialog).getByRole('button', { name: '提交 280 条研究' }));
+  await waitFor(() => expect(new URLSearchParams(router.state.location.search).get('runRef')).toBe('batch-new'));
+  expect(await screen.findByRole('dialog', { name: '研究记录' })).toBeInTheDocument();
+  const starts = writes();
   expect(starts).toHaveLength(1);
-  expect(starts[0]?.body).toMatchObject({ expectedPlanHash: planHash, selections: preview[0]?.body?.selections });
- });
-
- it('saves the daily schedule from research records and leaves launch to the operator', async () => {
-  const time = '2026-11-20T01:00:00Z';
-  let enabled = false;
-  let sourceRef = 'source-c1';
-  installFetch((url, request) => {
-    if (url.pathname.endsWith('/v2/automation')) {
-      if (request.method === 'POST') enabled = true;
-      const setting = { domainRef: DOMAIN, enabled, minuteOfDay: 540, timeZone: 'Asia/Shanghai',
-        selectionLimit: enabled ? 25 : 300, revision: enabled ? 1 : 0,
-        enabledFrom: enabled ? time : null, nextRunAt: enabled ? time : null };
-      if (request.method === 'POST') return json(setting);
-      return json({ setting, nextBefore: null, selections: enabled
-        ? [{ selectionRef: 'daily-1', scheduledAt: time, generatedAt: time, targetCount: 1 }] : [] });
-    }
-    if (url.pathname.endsWith('/automation/selections/daily-1')) return json({
-      domainRef: DOMAIN, selectionRef: 'daily-1',
-      selections: [{ workRef: WORK, sourceRef, commentExternalId: 'c1', observationRole: 'primary' }],
-    });
-    if (url.pathname.endsWith('/v2/preview')) return json({
-      domainRef: DOMAIN, knowledgeCutoff: time, planHash: 'e'.repeat(64), taskConfigRef: 'config', taskRevision: 2,
-      selectedCount: 1, researchableCount: 1, workCount: 1, unitCount: 1, expectedModelCalls: 1,
-      waitingL1: { targetCount: 0, workRefs: [] }, alreadyResearchedCount: 0, alreadyQueuedCount: 0,
-      dispatchUnresolvedCount: 0, excludedCounts: {},
-    });
-    return undefined;
-  });
-  renderPage(`domain=${DOMAIN}&view=runs`);
-  const user = userEvent.setup();
-  await user.click(await screen.findByRole('button', { name: '自动化设置' }));
-  const dialog = within(screen.getByRole('dialog', { name: '评论研究自动化设置' }));
-  await user.click(await dialog.findByRole('checkbox', { name: '启用定时生成清单' }));
-  const limit = dialog.getByRole('spinbutton', { name: '每份清单最多评论数' });
-  await user.clear(limit);
-  await user.type(limit, '25');
-  await user.click(dialog.getByRole('button', { name: '保存设置' }));
-  await screen.findByText('自动化设置已保存。');
-  await user.click(await screen.findByRole('button', { name: '查看清单' }));
-  const preview = await screen.findByRole('button', { name: '预览所选评论' });
-  expect(calls.filter(call => call.method === 'POST').map(call => call.url.pathname)).toEqual(['/api/local/comment-research/v2/automation']);
-  expect(calls.find(call => call.method === 'POST')?.body).toMatchObject({
-    domainRef: DOMAIN, enabled: true, minuteOfDay: 540, selectionLimit: 25, expectedRevision: 0, timeZone: 'Asia/Shanghai',
-  });
-  await user.click(preview);
-  expect(await screen.findByRole('button', { name: '开始所选评论研究' })).toBeVisible();
-  expect(calls.filter(call => call.method === 'POST').map(call => call.url.pathname)).toEqual([
-    '/api/local/comment-research/v2/automation', '/api/local/comment-research/v2/preview',
-  ]);
-
-  sourceRef = 'source-c1-reobserved';
-  await user.click(screen.getByRole('button', { name: '刷新清单' }));
-  await waitFor(() => expect(screen.queryByRole('button', { name: '开始所选评论研究' })).toBeNull());
-  await user.click(screen.getByRole('button', { name: '预览所选评论' }));
-  expect(await screen.findByRole('button', { name: '开始所选评论研究' })).toBeVisible();
-  const previews = calls.filter(call => call.method === 'POST' && call.url.pathname.endsWith('/v2/preview'));
-  expect(previews.at(-1)?.body?.selections).toEqual([{ workRef: WORK, sourceRef, observationRole: 'primary' }]);
-  expect(calls.some(call => call.method === 'POST' && call.url.pathname.endsWith('/v2/runs'))).toBe(false);
+  expect(starts[0]?.body).toMatchObject({ expectedPlanHash: planHash, selections: previews.at(-1)?.body?.selections });
+  expect(screen.queryByRole('region', { name: '已选评论' })).toBeNull();
  });
 
  it('does not expose a partial selection when a later directory page fails', async () => {
   installFetch(url => {
-    if (!url.pathname.endsWith('/comments') || url.searchParams.get('limit') !== '100') return undefined;
-    if (url.searchParams.has('cursor')) return json({ code: 'read_unavailable' }, 503);
-    return json({
-      domainRef: DOMAIN, items: [comment()], summary: {}, indexCoverage: {}, page: { nextCursor: 'second' },
-    });
+   if (!url.pathname.endsWith('/comments') || url.searchParams.get('limit') !== '100') return undefined;
+   if (url.searchParams.has('cursor')) return json({ code: 'read_unavailable' }, 503);
+   return json({ domainRef: DOMAIN, items: [comment()], summary: {}, indexCoverage: {}, page: { nextCursor: 'second' } });
   });
   renderPage(`domain=${DOMAIN}&view=comments`);
   await screen.findByRole('table');
@@ -144,59 +105,93 @@ describe('D3 actual four-view React boundary', () => {
   await user.click(screen.getByRole('button', { name: '选择评论' }));
   await user.click(screen.getByRole('button', { name: '按当前筛选生成研究清单' }));
   expect(await screen.findByText('未能生成评论清单，请重试。')).toBeVisible();
-  expect(screen.queryByRole('button', { name: '预览所选评论' })).toBeNull();
+  expect(screen.queryByRole('region', { name: '已选评论' })).toBeNull();
   expect(calls.every(call => call.method === 'GET')).toBe(true);
  });
 
- it('sends the complete submitted filter to the server and records it in the deep link',async()=>{
-  installFetch();const {router}=renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
-  await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'两字');await userEvent.click(screen.getByRole('combobox',{name:'研究标签'}));await userEvent.click(screen.getByRole('option',{name:'需求'}));await userEvent.click(screen.getByRole('button',{name:'筛选'}));await userEvent.click(screen.getByRole('combobox',{name:'点赞'}));await userEvent.click(screen.getByRole('option',{name:'100 以上'}));await userEvent.click(screen.getByRole('button',{name:'完成'}));
-  await waitFor(()=>expect(calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('q')).toBe('两字'));
-  const call=calls.filter(call=>call.url.pathname.endsWith('/comments')).at(-1)!;expect(call.url.searchParams.get('signalKind')).toBe('need');expect(call.url.searchParams.get('minLikes')).toBe('100');expect(router.state.location.search).toContain('signalKind=need');expect(call.url.searchParams.get('domain')).toBe(DOMAIN);
+ it('applies dropdown filters at once, keeps the search draft local until submitted, and applies the popover on 完成', async () => {
+  installFetch(); const { router } = renderPage(`domain=${DOMAIN}&view=comments`); await screen.findByRole('table');
+  const user = userEvent.setup();
+  await user.type(screen.getByRole('searchbox', { name: '字面搜索' }), '两字');
+  expect(commentReads()).toHaveLength(1);
+  await user.click(screen.getByRole('combobox', { name: '研究标签' })); await user.click(screen.getByRole('option', { name: '需求' }));
+  await waitFor(() => expect(commentReads().at(-1)?.url.searchParams.get('signalKind')).toBe('need'));
+  expect(commentReads().at(-1)?.url.searchParams.get('q')).toBe('');
+  await user.click(screen.getByRole('button', { name: '搜索' }));
+  await waitFor(() => expect(commentReads().at(-1)?.url.searchParams.get('q')).toBe('两字'));
+  await user.click(screen.getByRole('button', { name: /^筛选/ }));
+  const pop = screen.getByRole('dialog', { name: '更多筛选' });
+  await user.type(within(pop).getByRole('spinbutton', { name: '最低点赞' }), '100');
+  await user.click(within(pop).getByRole('combobox', { name: '改帖标记' })); await user.click(screen.getByRole('option', { name: '已标记' }));
+  expect(commentReads().at(-1)?.url.searchParams.get('minLikes')).toBeNull();
+  await user.click(within(pop).getByRole('button', { name: '完成' }));
+  await waitFor(() => expect(commentReads().at(-1)?.url.searchParams.get('minLikes')).toBe('100'));
+  const call = commentReads().at(-1)!;
+  expect(call.url.searchParams.get('postUsage')).toBe('used'); expect(call.url.searchParams.get('domain')).toBe(DOMAIN);
+  expect(router.state.location.search).toContain('signalKind=need'); expect(router.state.location.search).toContain('minLikes=100');
+  expect(screen.getByLabelText('2 项生效')).toHaveTextContent('2');
  });
+
  it('shows the promotion label in the comment directory', async () => {
-  installFetch(url => url.pathname.endsWith('/comments') ? json({
-   domainRef: DOMAIN,
-   items: [{ ...comment(), signalKinds: ['promotion'] }],
-   summary: { displayableCommentCount: 1, eligibleCommentCount: 1 },
-   indexCoverage: { indexedCount: 1, pendingCount: 0 },
-   page: { nextCursor: null },
-  }) : undefined);
+  installFetch(url => url.pathname.endsWith('/comments') ? page([{ ...comment(), signalKinds: ['promotion'] }]) : undefined);
   renderPage(`domain=${DOMAIN}&view=comments`);
   const table = await screen.findByRole('table');
   expect(within(table).getByText('引流话术')).toBeVisible();
   await userEvent.click(screen.getByRole('combobox', { name: '研究标签' }));
   await userEvent.click(screen.getByRole('option', { name: '引流话术' }));
-  await userEvent.click(screen.getByRole('button', { name: '筛选' }));
-  await userEvent.click(screen.getByRole('button', { name: '完成' }));
-  await waitFor(() => expect(calls.filter(call => call.url.pathname.endsWith('/comments')).at(-1)?.url.searchParams.get('signalKind')).toBe('promotion'));
+  await waitFor(() => expect(commentReads().at(-1)?.url.searchParams.get('signalKind')).toBe('promotion'));
  });
- it('keeps FIND clearing local until the user explicitly applies the comment filter',async()=>{
-  installFetch();renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
-  const reads=()=>calls.filter(call=>call.url.pathname.endsWith('/comments')).length;
-  await userEvent.type(screen.getByRole('searchbox',{name:'字面搜索'}),'待清空');
-  await userEvent.click(screen.getByRole('button',{name:'清空字面搜索'}));
-  expect(reads()).toBe(1);
-  expect(screen.getByRole('searchbox',{name:'字面搜索'})).toHaveValue('');
+
+ it('pages by offset when the server reports totalCount and falls back to cursors when it does not', async () => {
+  installFetch(url => {
+   if (!url.pathname.endsWith('/comments')) return undefined;
+   const offset = Number(url.searchParams.get('offset') || 0);
+   return page(Array.from({ length: 10 }, (_, i) => comment(`n${offset + i}`)), { totalCount: 24, nextCursor: 'next-cursor', ...(url.searchParams.has('offset') ? { offset } : {}) });
+  });
+  const { router } = renderPage(`domain=${DOMAIN}&view=comments`); await screen.findByRole('table');
+  expect(screen.getByText('第 1–10 条 · 共 24 条')).toBeInTheDocument();
+  expect(commentReads()[0]?.url.searchParams.get('limit')).toBe('10');
+  expect(commentReads()[0]?.url.searchParams.has('offset')).toBe(false);
+  await userEvent.click(screen.getByRole('button', { name: '第 3 页' }));
+  await waitFor(() => expect(commentReads().at(-1)?.url.searchParams.get('offset')).toBe('20'));
+  expect(await screen.findByText('第 21–24 条 · 共 24 条')).toBeInTheDocument();
+  expect(router.state.location.search).toContain('page=3');
+  await userEvent.click(screen.getByRole('combobox', { name: '每页条数' })); await userEvent.click(screen.getByRole('option', { name: '20 条/页' }));
+  await waitFor(() => expect(commentReads().at(-1)?.url.searchParams.get('limit')).toBe('20'));
+  expect(commentReads().at(-1)?.url.searchParams.has('offset')).toBe(false);
  });
- it('keeps comment-directory failures local',async()=>{
-  installFetch(url=>url.pathname.endsWith('/comments')?json({error:'unavailable'},503):undefined);
+
+ it('keeps cursor paging when totalCount is absent', async () => {
+  installFetch(url => url.pathname.endsWith('/comments') ? page([comment(url.searchParams.get('cursor') ? 'second' : 'first')], { nextCursor: url.searchParams.get('cursor') ? null : 'cursor-2' }) : undefined);
+  renderPage(`domain=${DOMAIN}&view=comments`); await screen.findByRole('table');
+  expect(screen.getByText('第 1 页')).toBeInTheDocument();
+  expect(screen.queryByRole('spinbutton', { name: '跳转到页码' })).toBeNull();
+  await userEvent.click(screen.getByRole('button', { name: '下一页' }));
+  await waitFor(() => expect(commentReads().at(-1)?.url.searchParams.get('cursor')).toBe('cursor-2'));
+  expect(commentReads().every(call => !call.url.searchParams.has('offset'))).toBe(true);
+  expect(await screen.findByText('第 2 页')).toBeInTheDocument();
+ });
+
+ it('keeps comment-directory failures local', async () => {
+  installFetch(url => url.pathname.endsWith('/comments') ? json({ error: 'unavailable' }, 503) : undefined);
   renderPage(`domain=${DOMAIN}&view=comments`);
   await screen.findByText(/评论目录读取失败/);
-  expect(document.querySelector('.v7-context-count summary b')).toHaveTextContent('—');
-  expect(screen.queryByRole('button',{name:'发起研究'})).not.toBeInTheDocument();
-  expect(screen.queryByRole('link',{name:'去 AI 设置'})).not.toBeInTheDocument();
-  expect(calls.every(call=>call.method==='GET')).toBe(true);
+  expect(screen.getByRole('combobox', { name: '研究状态' })).toBeInTheDocument();
+  expect(calls.every(call => call.method === 'GET')).toBe(true);
  });
 
- it('retains an uncertain post-usage request identity and never updates optimistically',async()=>{
-  let attempts=0;installFetch((url,options)=>{
-   if(url.pathname.endsWith('/comments/post-usage')){attempts++;if(attempts===1)return Promise.reject(new TypeError('lost receipt'));const body=JSON.parse(String(options.body));return json({contract:'comment-post-usage.v1',requestRef:body.requestRef,commentKey:body, outcome:'replayed',postUsage:{state:'used',markedAt:null}});}
-   if(url.pathname.endsWith('/comments')&&attempts>1)return json({domainRef:DOMAIN,items:[{...comment(),postUsage:{state:'used',markedAt:null}}],summary:{displayableCommentCount:1,eligibleCommentCount:1},indexCoverage:{indexedCount:1,pendingCount:0},page:{nextCursor:null}});
+ it('retains an uncertain post-usage request identity and never updates optimistically', async () => {
+  let attempts = 0; installFetch((url, options) => {
+   if (url.pathname.endsWith('/comments/post-usage')) { attempts++; if (attempts === 1) return Promise.reject(new TypeError('lost receipt')); const body = JSON.parse(String(options.body)); return json({ contract: 'comment-post-usage.v1', requestRef: body.requestRef, commentKey: body, outcome: 'replayed', postUsage: { state: 'used', markedAt: null } }); }
+   if (url.pathname.endsWith('/comments') && attempts > 1) return page([{ ...comment(), postUsage: { state: 'used', markedAt: null } }]);
    return undefined;
-  });renderPage(`domain=${DOMAIN}&view=comments`);await screen.findByRole('table');
-  await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);const receiptStatus=await screen.findByText(/保存未获确认/);expect(receiptStatus.tagName).toBe('P');expect(receiptStatus).toHaveAttribute('data-comment-toast');expect(receiptStatus).toHaveAttribute('data-error','true');expect(screen.queryByText('已改成帖子',{exact:true})).not.toBeInTheDocument();await userEvent.click(screen.getAllByRole('button',{name:'标记已改成帖子'})[0]!);await screen.findByRole('button',{name:'撤销标记'});expect(screen.getByText('已确认原请求回执，没有重复记录。')).toHaveAttribute('data-comment-toast');
-  const writes=calls.filter(call=>call.method==='POST');expect(writes).toHaveLength(2);expect(writes[0]!.body?.requestRef).toBe(writes[1]!.body?.requestRef);expect(writes[0]!.body?.workRef).toBe(WORK);
+  }); renderPage(`domain=${DOMAIN}&view=comments`); await screen.findByRole('table');
+  await userEvent.click(screen.getAllByRole('button', { name: '添加改帖标记' })[0]!);
+  expect(await screen.findByText(/保存未获确认/)).toHaveAttribute('role', 'status');
+  expect(screen.getAllByRole('button', { name: '添加改帖标记' })[0]).toHaveAttribute('aria-pressed', 'false');
+  await userEvent.click(screen.getAllByRole('button', { name: '添加改帖标记' })[0]!);
+  expect(await screen.findByRole('button', { name: '取消改帖标记' })).toHaveTextContent('已标');
+  expect(screen.getByText('已确认原请求回执，没有重复记录。')).toBeInTheDocument();
+  const posted = writes(); expect(posted).toHaveLength(2); expect(posted[0]!.body?.requestRef).toBe(posted[1]!.body?.requestRef); expect(posted[0]!.body?.workRef).toBe(WORK);
  });
-
 });

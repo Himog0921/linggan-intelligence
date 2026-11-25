@@ -1,6 +1,6 @@
 /** 语料模块的二级页面及评论研究的三级视图。 */
 export type CorpusPageKey = 'evidence' | 'comments' | 'creators';
-export type CorpusCommentsView = 'overview' | 'comments' | 'runs' | 'problems';
+export type CorpusCommentsView = 'overview' | 'comments' | 'problems';
 
 export interface CorpusEntry {
   ordinal: string;

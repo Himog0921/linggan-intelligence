@@ -269,6 +269,48 @@
   --lgi-studio-phone-line: #eee;
   --lgi-studio-phone-muted: #888;
 
+  /* 评论研究（B-04 对齐稿 apps/web/design-reference/comment-research-b04.html）：稿内有、LIDS 尚未登记的取值。Mog 2026-11-23 确认稿件。 */
+  /* —— 页面骨架 —— */
+  --lgi-cr-metric-col: 296px;            /* 概览左列读数宽度 */
+  --lgi-cr-overview-gap: 32px;           /* 概览左右两栏间距 */
+  --lgi-cr-chart-height: 194px;          /* 趋势图高度 */
+  --lgi-cr-chart-table-height: 202px;    /* 趋势表格视图高度 */
+  --lgi-cr-wordcloud-min: 132px;         /* 词云区最小高度 */
+  --lgi-cr-rail: 4px;                    /* 覆盖率/进度/支持度细条高度 */
+  --lgi-cr-row-height: 48px;             /* 评论表行高 */
+  --lgi-cr-check-col: 34px;              /* 选择列宽 */
+  --lgi-cr-filter-width: 152px;          /* 工具栏下拉框统一宽度 */
+  --lgi-cr-popover-width: 296px;         /* 「筛选」浮层宽度 */
+
+  /* —— 问题档案卡（Problem Atlas） —— */
+  --lgi-cr-card-height: 272px;
+  --lgi-cr-card-banner: 56px;
+  --lgi-cr-card-gap: 18px;
+  --lgi-cr-card-shadow: 0 1px 2px rgba(11, 15, 18, 0.03), 0 5px 14px rgba(11, 15, 18, 0.025);
+  --lgi-cr-card-shadow-hover: 0 3px 7px rgba(11, 15, 18, 0.05), 0 12px 24px rgba(11, 15, 18, 0.075);
+  --lgi-cr-card-lift: -2px;
+  --lgi-cr-card-metrics-cols: 98px minmax(72px, 1fr) 54px 54px;
+  --lgi-cr-banner-base: #929491;         /* 纹理图未加载时的底色 */
+  --lgi-cr-banner-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.17), rgba(255, 255, 255, 0) 42%, rgba(11, 15, 18, 0.075));
+  --lgi-cr-banner-scan: repeating-linear-gradient(0deg, rgba(11, 15, 18, 0.055) 0 1px, transparent 1px 4px);
+  --lgi-cr-banner-edge: inset 0 1px rgba(255, 255, 255, 0.45), inset 0 -1px rgba(11, 15, 18, 0.18);
+  --lgi-cr-banner-ink: #242d2e;          /* 横幅上的微型标签墨色 */
+  --lgi-cr-banner-pixel: #151a1b;         /* 横幅像素编号 */
+  --lgi-cr-particle-dark: #333b39;        /* 横幅粒子尾迹 · 深 */
+  --lgi-cr-particle-light: #e8e9e1;       /* 横幅粒子尾迹 · 浅 */
+  --lgi-cr-banner-micro: 8px;            /* 装饰性横幅标签（aria-hidden，不承载信息） */
+  --lgi-cr-emblem-size: 42px;
+  --lgi-cr-emblem-filter: grayscale(1) brightness(1.16) contrast(0.82);
+  --lgi-cr-support-cells: 8;             /* 作者支持度刻度格数（每格 1 位作者） */
+
+  /* —— 研究记录对话框 —— */
+  --lgi-cr-records-width: 1320px;
+  --lgi-cr-records-row: 84px;
+
+  /* —— 右侧检查器 —— */
+  --lgi-cr-inspector-width: 620px;
+  --lgi-cr-inspector-shadow: -10px 0 36px rgba(11, 15, 18, 0.16);
+
   /* LIDS-UI-001 generated: start */
   --lgi-font-ui: "Linggan UI Digits","Linggan Albert","Linggan OPPO",Arial,Helvetica,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
   --lgi-font-chinese: "Linggan OPPO","PingFang SC","Microsoft YaHei",system-ui,sans-serif;

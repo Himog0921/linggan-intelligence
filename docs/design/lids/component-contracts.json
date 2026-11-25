@@ -243,7 +243,6 @@
       "consumers": [
         "apps/web/src/pages/corpus/evidence/EvidenceControls.tsx",
         "apps/web/src/pages/corpus/creators/CreatorHomepagePanel.tsx",
-        "apps/web/src/pages/corpus/comments/ObservationSeries.tsx",
         "apps/web/src/pages/topics/topicOverview.tsx"
       ],
       "certified": false,
