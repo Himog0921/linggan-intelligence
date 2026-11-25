@@ -72,13 +72,13 @@ describe('B-04 研究记录对话框', () => {
  });
 
  it('keeps the #643 daily schedule usable inside the records dialog and previews a freshly re-read list', async () => {
-  let enabled = false, sourceRef = 'source-c1';
+  let enabled = false, autoSubmit = false, sourceRef = 'source-c1';
   installFetch((url, request) => {
    if (url.pathname.endsWith('/v2/automation')) {
-    if (request.method === 'POST') enabled = true;
-    const setting = { domainRef: DOMAIN, enabled, minuteOfDay: 540, timeZone: 'Asia/Shanghai', selectionLimit: enabled ? 25 : 300, revision: enabled ? 1 : 0, enabledFrom: enabled ? TIME : null, nextRunAt: enabled ? TIME : null };
+    if (request.method === 'POST') { enabled = true; autoSubmit = JSON.parse(String(request.body)).autoSubmit === true; }
+    const setting = { domainRef: DOMAIN, enabled, autoSubmit, minuteOfDay: 540, timeZone: 'Asia/Shanghai', selectionLimit: enabled ? 25 : 300, revision: enabled ? 1 : 0, enabledFrom: enabled ? TIME : null, nextRunAt: enabled ? TIME : null };
     if (request.method === 'POST') return json(setting);
-    return json({ setting, nextBefore: null, selections: enabled ? [{ selectionRef: 'daily-1', scheduledAt: TIME, generatedAt: TIME, targetCount: 1 }] : [] });
+    return json({ setting, nextBefore: null, selections: enabled ? [{ selectionRef: 'daily-1', scheduledAt: TIME, generatedAt: TIME, targetCount: 1, submissionCounts: autoSubmit ? { waiting_l1: 1 } : {} }] : [] });
    }
    if (url.pathname.endsWith('/automation/selections/daily-1')) return json({ domainRef: DOMAIN, selectionRef: 'daily-1', selections: [{ workRef: WORK, sourceRef, commentExternalId: 'c1', observationRole: 'primary' }] });
    return undefined;
@@ -93,7 +93,7 @@ describe('B-04 研究记录对话框', () => {
   await user.click(settings.getByRole('button', { name: '保存设置' }));
   expect((await screen.findAllByText('自动化设置已保存。')).length).toBeGreaterThan(0);
   expect(writes().map(call => call.url.pathname)).toEqual(['/api/local/comment-research/v2/automation']);
-  expect(writes()[0]?.body).toMatchObject({ domainRef: DOMAIN, enabled: true, minuteOfDay: 540, selectionLimit: 25, expectedRevision: 0, timeZone: 'Asia/Shanghai' });
+  expect(writes()[0]?.body).toMatchObject({ domainRef: DOMAIN, enabled: true, minuteOfDay: 540, selectionLimit: 25, expectedRevision: 0, timeZone: 'Asia/Shanghai', autoSubmit: false });
   await user.click(await screen.findByRole('button', { name: /预览清单/ }));
   const preview = await screen.findByRole('dialog', { name: '本次研究预览' });
   await within(preview).findByRole('button', { name: '提交 1 条研究' });
@@ -104,6 +104,14 @@ describe('B-04 研究记录对话框', () => {
   const previews = calls.filter(call => call.url.pathname.endsWith('/v2/preview'));
   expect(previews.at(-1)?.body?.selections).toEqual([{ workRef: WORK, sourceRef, observationRole: 'primary' }]);
   expect(calls.some(call => call.method === 'POST' && call.url.pathname.endsWith('/v2/runs'))).toBe(false);
+  await user.click(within(screen.getByRole('dialog', { name: '本次研究预览' })).getByRole('button', { name: '返回修改' }));
+  await user.click(screen.getByRole('button', { name: '自动化设置' }));
+  const updatedSettings = within(screen.getByRole('dialog', { name: '评论研究自动化设置' }));
+  await user.click(updatedSettings.getByRole('checkbox', { name: '自动提交符合条件的评论' }));
+  await user.click(updatedSettings.getByRole('button', { name: '保存设置' }));
+  expect(await screen.findByText('等待作品底稿 1 条')).toBeInTheDocument();
+  expect(writes().at(-1)?.body).toMatchObject({ autoSubmit: true });
+
  });
 });
 

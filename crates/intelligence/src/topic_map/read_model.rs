@@ -111,6 +111,7 @@ impl TopicMapReadModel {
 /// research qualification. The invocation ledger feeds independent live progress,
 /// never this snapshot. The dedicated AI executor's instance, leases, batches,
 /// rounds and command/control ledgers likewise cannot change Topic Map source facts.
+/// Comment intake schedules and selection receipts are also independent of saved research.
 /// Semantic row signatures omit only audited worker fields;
 /// all their business fields (including future columns) remain in the signature.
 pub async fn source_revision(db: &Database) -> Result<SourceRevision, sqlx::Error> {
@@ -122,7 +123,7 @@ pub async fn source_revision(db: &Database) -> Result<SourceRevision, sqlx::Erro
     sqlx::query("SET LOCAL statement_timeout='5s'")
         .execute(&mut *tx)
         .await?;
-    let tables = sqlx::query("SELECT c.oid::text AS id,c.relname AS relation,format('%I.%I',n.nspname,c.relname) AS name,c.relfilenode::text AS file FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relkind='r' AND c.relname NOT IN ('collection_scheduler_run','collection_scheduler_run_step','collection_scheduler_heartbeat','collection_dispatch_lane_fairness','linggan_model_invocation','linggan_ai_failure_code','linggan_ai_executor_instance','linggan_ai_executor_current','linggan_ai_execution_attempt','linggan_ai_late_usage_receipt','linggan_ai_batch','linggan_ai_batch_control','linggan_ai_batch_item','linggan_ai_batch_item_control','linggan_ai_trial_comparison','linggan_ai_round','linggan_ai_task_round_state','linggan_ai_command','linggan_ai_control','linggan_ai_control_event') ORDER BY c.oid")
+    let tables = sqlx::query("SELECT c.oid::text AS id,c.relname AS relation,format('%I.%I',n.nspname,c.relname) AS name,c.relfilenode::text AS file FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relkind='r' AND c.relname NOT IN ('collection_scheduler_run','collection_scheduler_run_step','collection_scheduler_heartbeat','collection_dispatch_lane_fairness','linggan_model_invocation','linggan_ai_failure_code','linggan_ai_executor_instance','linggan_ai_executor_current','linggan_ai_execution_attempt','linggan_ai_late_usage_receipt','linggan_ai_batch','linggan_ai_batch_control','linggan_ai_batch_item','linggan_ai_batch_item_control','linggan_ai_trial_comparison','linggan_ai_round','linggan_ai_task_round_state','linggan_ai_command','linggan_ai_control','linggan_ai_control_event','linggan_comment_research_selection','linggan_comment_research_selection_target') ORDER BY c.oid")
         .fetch_all(&mut *tx).await?;
     let mut parts = Vec::new();
     let mut names = BTreeMap::new();

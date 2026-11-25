@@ -502,11 +502,17 @@ pub(crate) async fn core_cards_in(
             &packet.snapshot.material_snapshot_identity,
             ready,
         );
-        let usable = match serde_json::from_value::<source::Packet>(row.get("input_manifest")) {
-            Ok(saved) => source::saved_result_available(tx, work, cutoff, &saved, &packet).await?,
-            Err(_) => false,
+        let usable = if same {
+            true
+        } else {
+            match serde_json::from_value::<source::Packet>(row.get("input_manifest")) {
+                Ok(saved) => {
+                    source::saved_result_available(tx, work, cutoff, &saved, &packet).await?
+                }
+                Err(_) => false,
+            }
         };
-        if same || usable {
+        if usable {
             cards.push(row.get("card"));
         }
     }

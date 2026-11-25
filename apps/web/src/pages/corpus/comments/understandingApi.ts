@@ -19,6 +19,12 @@ export const detailReasons: Record<string, string> = {
   comment_l1_unavailable: 'L1 尚不可用', comment_catalog_too_large: '领域需求目录超过全量处理上限',
   comment_consolidation_no_pairs: '没有可比较的需求配对', unit_output_invalid: '单元输出无效',
   unit_truncated: '单元输出被截断', target_missing: '缺少这条评论的结果', target_invalid: '评论结果无效',
+  global_off: '全局 AI 已暂停', executor_off: 'AI 执行器已暂停',
+  task_comment_understanding_off: '评论理解任务已暂停', billing_paused: '连接因计费问题暂停',
+  daily_budget_unconfigured: '评论理解未配置额度', daily_budget_exhausted: '已用完当日额度',
+  egress_not_approved: '作品材料未授权外发', comment_egress_not_approved: '评论材料未授权外发',
+  waiting_l1: '等待作品底稿', previous_dispatch: '此前已派发', already_queued: '已有研究任务',
+  dispatch_unresolved: '此前发送状态待对账', already_researched: '已有有效研究结果',
   target_all_signals_invalid: '各项信号均未通过原声检查',
 };
 export function why(code: string) { return detailReasons[code] ?? '请查看任务设置或执行记录'; }
@@ -175,6 +181,7 @@ export async function submitL1(plan: Awaited<ReturnType<typeof planL1>>, command
 function automationSetting(row: Record<string, unknown>) {
   return {
     domainRef: str(row, 'domainRef'), enabled: bool(row, 'enabled'), revision: num(row, 'revision'),
+    autoSubmit: optBool(row, 'autoSubmit') ?? false,
     minuteOfDay: num(row, 'minuteOfDay'), timeZone: str(row, 'timeZone'), selectionLimit: num(row, 'selectionLimit'),
     enabledFrom: optStr(row, 'enabledFrom'), nextRunAt: optStr(row, 'nextRunAt'),
   };
@@ -189,13 +196,16 @@ export async function readAutomation(domain: string, before: string | null, sign
       selections: list(row, 'selections', item => ({
         selectionRef: str(item, 'selectionRef'), scheduledAt: str(item, 'scheduledAt'),
         generatedAt: str(item, 'generatedAt'), targetCount: num(item, 'targetCount'),
+        submissionCounts: optObj(item, 'submissionCounts') ?? {},
+        submissionReasons: item.submissionReasons === undefined ? [] : strList(item, 'submissionReasons'),
+        batchRefs: item.batchRefs === undefined ? [] : strList(item, 'batchRefs'),
       })),
     };
   });
 }
 export interface CommentAutomationChange {
   commandRef: string; domainRef: string; expectedRevision: number; enabled: boolean;
-  minuteOfDay: number; timeZone: string; selectionLimit: number;
+  minuteOfDay: number; timeZone: string; selectionLimit: number; autoSubmit: boolean;
 }
 export async function changeAutomation(change: CommentAutomationChange) {
   return decode(await post('/automation', change), row => {

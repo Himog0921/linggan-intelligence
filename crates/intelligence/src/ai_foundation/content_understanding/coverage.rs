@@ -37,7 +37,7 @@ pub(crate) async fn coverage_from_dossiers(
     cutoff: &str,
     mut dossiers: BTreeMap<Uuid, linggan_evidence::research_dossier::ResearchDossier>,
 ) -> Result<BTreeMap<Uuid, &'static str>, FoundationError> {
-    let rows = sqlx::query("SELECT core.work_ref,core.material_snapshot_identity,request.input_manifest FROM linggan_content_understanding_saved_core core JOIN linggan_content_understanding_request request USING(request_ref) WHERE core.work_ref=ANY($1) AND core.method_version=$2 AND core.result IS NOT NULL AND core.created_at<=$3::timestamptz")
+    let rows = sqlx::query("SELECT core.work_ref,core.material_snapshot_identity,request.input_manifest FROM linggan_content_understanding_saved_core core JOIN linggan_content_understanding_request request USING(request_ref) WHERE core.work_ref=ANY($1) AND core.method_version=$2 AND core.result IS NOT NULL AND core.created_at<=$3::timestamptz ORDER BY core.created_at DESC,core.request_ref DESC")
         .bind(works).bind(METHOD).bind(cutoff).fetch_all(&mut **tx).await?;
     let mut identities = BTreeMap::<Uuid, Vec<(String, Option<source::Packet>)>>::new();
     for row in rows {
@@ -52,17 +52,12 @@ pub(crate) async fn coverage_from_dossiers(
             None => "unknown",
             Some(dossier) => {
                 let packet = source::from_dossier(dossier, cutoff)?;
-                let mut available = false;
-                for (identity, previous) in &saved {
-                    if qualified(
-                        identity,
-                        &packet.snapshot.material_snapshot_identity,
-                        packet.coverage["materialReadiness"]["state"] == "ready",
-                    ) {
-                        available = true;
-                        break;
-                    }
-                    if let Some(prior) = previous {
+                let ready = packet.coverage["materialReadiness"]["state"] == "ready";
+                let mut available = saved.iter().any(|(identity, _)| {
+                    qualified(identity, &packet.snapshot.material_snapshot_identity, ready)
+                });
+                if !available {
+                    for prior in saved.iter().filter_map(|(_, prior)| prior.as_ref()) {
                         if source::saved_result_available(tx, work, cutoff, prior, &packet).await? {
                             available = true;
                             break;

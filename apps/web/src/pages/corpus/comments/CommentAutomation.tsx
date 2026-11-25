@@ -6,7 +6,7 @@ import { studyTime } from './format';
 import { StudyDialog } from './StudyDialog';
 import type { StudyNavigation } from './studyApi';
 import { c } from './styles';
-import { changeAutomation, readAutomation, readAutomationSelection, uncertain, type CommentAutomationChange, type CommentAutomationSetting } from './understandingApi';
+import { changeAutomation, readAutomation, readAutomationSelection, uncertain, why, type CommentAutomationChange, type CommentAutomationSetting } from './understandingApi';
 
 const asTime = (minute: number) => [Math.floor(minute / 60), minute % 60].map(value => String(value).padStart(2, '0')).join(':');
 
@@ -14,6 +14,7 @@ function AutomationForm({ current, saved, reload, close }: {
   current: CommentAutomationSetting; saved: () => void; reload: () => void; close: () => void;
 }) {
   const [enabled, setEnabled] = useState(current.enabled);
+  const [autoSubmit, setAutoSubmit] = useState(current.autoSubmit);
   const [time, setTime] = useState(asTime(current.minuteOfDay));
   const [timeZone, setTimeZone] = useState(current.timeZone);
   const [limit, setLimit] = useState(String(current.selectionLimit));
@@ -27,7 +28,7 @@ function AutomationForm({ current, saved, reload, close }: {
     const [hour = 0, minute = 0] = time.split(':').map(Number);
     const change = retry ?? {
       commandRef: crypto.randomUUID(), domainRef: current.domainRef, expectedRevision: current.revision,
-      enabled, minuteOfDay: hour * 60 + minute, timeZone: timeZone.trim(), selectionLimit: Number(limit),
+      enabled, autoSubmit: enabled && autoSubmit, minuteOfDay: hour * 60 + minute, timeZone: timeZone.trim(), selectionLimit: Number(limit),
     };
     setBusy(true); setNotice('');
     try {
@@ -49,11 +50,14 @@ function AutomationForm({ current, saved, reload, close }: {
       <p>启用后，每天按首次接纳时间从早到晚选取本领域的新增评论。超出本批上限的评论留到下一次。</p>
       <fieldset disabled={busy || retry !== null}>
         <label className={c('check')}><input type="checkbox" checked={enabled} onChange={event => setEnabled(event.target.checked)} /> 启用定时生成清单</label>
+        <label className={c('check')}><input type="checkbox" checked={enabled && autoSubmit} disabled={!enabled} onChange={event => setAutoSubmit(event.target.checked)} /> 自动提交符合条件的评论</label>
         <label>每天生成时间<input type="time" required value={time} onChange={event => setTime(event.target.value)} /></label>
         <label>时区<input required maxLength={128} value={timeZone} onChange={event => setTimeZone(event.target.value)} placeholder="Asia/Shanghai" /></label>
         <label>每份清单最多评论数<input type="number" required min={1} max={1000} step={1} value={limit} onChange={event => setLimit(event.target.value)} /></label>
       </fieldset>
-      <p>生成清单后，在研究记录里预览，再由运营确认提交。</p>
+      <p>{enabled && autoSubmit
+        ? '保存后，新清单中的合格评论会使用本领域已授权的材料与任务模型自动提交。缺少作品底稿的评论将在条件满足后接续。'
+        : '清单可在研究记录中预览并手动提交。'}</p>
       {notice ? <p role="alert" className={c('inline-alert')}>{notice}</p> : null}
     </div>
     <footer className={c('dialog-footer')}><span />
@@ -66,7 +70,20 @@ function AutomationForm({ current, saved, reload, close }: {
   </form>;
 }
 
-/** #643 定时清单：设置对话框 + 清单列表；清单只生成待预览的评论，提交仍需运营在预览里确认。 */
+const submissionLabels = {
+  pending: '等待提交',
+  waiting_l1: '等待作品底稿',
+  admission_blocked: '提交条件未满足',
+  skipped: '已跳过',
+  submitted: '已提交',
+};
+
+function submissionSummary(counts: Record<string, unknown>) {
+  return Object.entries(submissionLabels).flatMap(([key, label]) => {
+    const count = counts[key];
+    return typeof count === 'number' && count > 0 ? [`${label} ${count} 条`] : [];
+  }).join(' · ');
+}
 export function CommentAutomation({ domain, nav, showingSettings, closeSettings }: {
   domain: string; nav: StudyNavigation; showingSettings: boolean; closeSettings: () => void;
 }) {
@@ -96,11 +113,19 @@ export function CommentAutomation({ domain, nav, showingSettings, closeSettings 
   return <>
     {setting && (setting.enabled || automation.data?.selections.length || before) ? <section aria-label="自动研究清单">
       <h3>自动研究清单</h3>
-      <p>{setting.enabled ? `每天 ${asTime(setting.minuteOfDay)} · ${setting.timeZone} · 每批最多 ${setting.selectionLimit} 条` : '已暂停生成新清单'}</p>
-      {automation.data?.selections.length ? <ul>{automation.data.selections.map(item => <li key={item.selectionRef}>
+      <p>{setting.enabled ? `每天 ${asTime(setting.minuteOfDay)} · ${setting.timeZone} · 每批最多 ${setting.selectionLimit} 条${setting.autoSubmit ? " · 自动提交已开启" : ""}` : '已暂停生成新清单'}</p>
+      {automation.data?.selections.length ? <ul>{automation.data.selections.map(item => {
+        const submission = submissionSummary(item.submissionCounts);
+        const reasons = [...new Set(item.submissionReasons.flatMap(value => value.split(',')).map(why))];
+        return <li key={item.selectionRef}>
         <span>{studyTime(item.generatedAt)} · {item.targetCount ? `${item.targetCount} 条评论` : '无符合条件的新增评论'}</span>
+        {submission ? <span>{submission}</span> : null}
+        {reasons.length ? <span>{reasons.join('、')}</span> : null}
+        {item.batchRefs.map(batch => <button type="button" key={batch} className={c('text-action')} onClick={() => nav.records(batch)}>
+          打开批次 {batch.slice(0, 8)}
+        </button>)}
         {item.targetCount ? <button type="button" className={c('text-action')} disabled={opening !== null} onClick={() => void preview(item.selectionRef)}>{opening === item.selectionRef ? '正在读取清单…' : '预览清单'} <CrIcon name="ArrowRight" /></button> : null}
-      </li>)}</ul> : <p>暂无自动研究清单。</p>}
+      </li>; })}</ul> : <p>暂无自动研究清单。</p>}
       {before || nextBefore ? <div className={c('records-detail-actions')}>
         {before ? <ActionButton className={c('small')} onClick={() => setBefore(null)}>最新清单</ActionButton> : null}
         {nextBefore ? <ActionButton className={c('small')} onClick={() => setBefore(nextBefore)}>更早清单</ActionButton> : null}

@@ -251,6 +251,16 @@ pub(crate) async fn saved_result_available(
     saved: &Packet,
     current: &Packet,
 ) -> Result<bool, FoundationError> {
+    // DEC-0013 removed video-frame text from the canonical reader at every cutoff.
+    // Its old packets can never be requalified by rereading a historical dossier.
+    if saved
+        .snapshot
+        .texts
+        .iter()
+        .any(|text| text.kind == "frame_text")
+    {
+        return Ok(false);
+    }
     let within_cutoff: bool = sqlx::query_scalar("SELECT $1::timestamptz <= $2::timestamptz")
         .bind(&saved.snapshot.material_as_of)
         .bind(cutoff)

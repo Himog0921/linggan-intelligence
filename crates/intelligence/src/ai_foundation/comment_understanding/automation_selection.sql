@@ -7,7 +7,9 @@ SELECT jsonb_build_object(
     'selections', COALESCE((
         SELECT jsonb_agg(jsonb_build_object(
             'workRef', t.work_ref, 'sourceRef', head.material_ref,
-            'commentExternalId', t.comment_external_id, 'observationRole', 'primary'
+            'commentExternalId', t.comment_external_id, 'observationRole', 'primary',
+            'submissionState', t.submission_state, 'submissionReason', t.submission_reason,
+            'submittedBatchRef', t.submitted_batch_ref
         ) ORDER BY t.position)
         FROM linggan_comment_research_selection_target t
         CROSS JOIN cutoff
@@ -21,7 +23,7 @@ SELECT jsonb_build_object(
             ORDER BY linggan_opportunity_observed_at(c.observed_at) DESC, c.created_at DESC, c.material_ref DESC
             LIMIT 1
         ) head ON head.body_state = 'KNOWN' AND head.has_body
-        WHERE t.selection_ref = s.selection_ref
+        WHERE t.selection_ref = s.selection_ref AND ($3::integer[] IS NULL OR t.position=ANY($3))
           AND EXISTS (
               SELECT 1 FROM linggan_material_domain_usage u
               WHERE u.content_public_ref = t.work_ref AND u.domain_ref = s.domain_ref

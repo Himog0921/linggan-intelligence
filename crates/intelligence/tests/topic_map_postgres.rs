@@ -1093,6 +1093,11 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
     .unwrap();
     sqlx::query("INSERT INTO plugin_installation(installation_ref,install_key,plugin_version) VALUES($1,'read-model-heartbeat','1')")
         .bind(install).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_comment_research_automation(domain_ref) VALUES($1)")
+        .bind(domain())
+        .execute(db.pool())
+        .await
+        .unwrap();
     let settings = model.read(&db, &query).await.unwrap();
     let before_tick = source_revision(&db).await.unwrap();
     let mut executor = linggan_intelligence::ai_foundation::executor::ExecutorSession::acquire(
@@ -1106,6 +1111,8 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
         .bind(station).execute(db.pool()).await.unwrap();
     sqlx::query("UPDATE plugin_installation SET last_seen_at=now(),selector_health='{}' WHERE installation_ref=$1")
         .bind(install).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_comment_research_selection(selection_ref,domain_ref,scheduled_at,generated_at) VALUES($1,$2,now(),now())")
+        .bind(Uuid::new_v4()).bind(domain()).execute(db.pool()).await.unwrap();
     executor.heartbeat().await.unwrap();
     executor.request_drain().await.unwrap();
     executor.complete_drain().await.unwrap();
