@@ -246,5 +246,27 @@ pub async fn read_work_resource_overviews(
     public_refs: &[Uuid],
     as_of: &str,
 ) -> Result<Vec<WorkResource>, WorkResourceReadError> {
-    crate::material_projection::read_work_overviews(database, domain, public_refs, as_of).await
+    let mut tx = database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let page = read_work_resource_overviews_in(&mut tx, domain, public_refs, as_of).await?;
+    tx.commit().await?;
+    Ok(page.items)
+}
+
+/// A bounded, domain-qualified overview with the source dossiers used to construct it.
+#[derive(Default)]
+pub struct WorkOverviewPage {
+    pub items: Vec<WorkResource>,
+    pub dossiers: std::collections::BTreeMap<Uuid, crate::research_dossier::ResearchDossier>,
+}
+
+pub async fn read_work_resource_overviews_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    domain: Uuid,
+    public_refs: &[Uuid],
+    as_of: &str,
+) -> Result<WorkOverviewPage, WorkResourceReadError> {
+    crate::material_projection::read_work_overviews_in(tx, domain, public_refs, as_of).await
 }

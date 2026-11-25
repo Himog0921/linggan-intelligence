@@ -4,7 +4,7 @@ FROM linggan_topic_research_automation a
 JOIN observation_domain d USING(domain_ref)
 JOIN linggan_material_domain_usage usage USING(domain_ref)
 JOIN LATERAL (
- SELECT r.request_ref,r.work_ref FROM linggan_content_understanding_result r
+ SELECT r.request_ref,r.work_ref FROM linggan_content_understanding_saved_core r
  WHERE r.work_ref=usage.content_public_ref AND r.result IS NOT NULL
  ORDER BY r.created_at DESC,r.request_ref DESC LIMIT 1
 ) core ON true

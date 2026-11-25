@@ -1,5 +1,5 @@
 use super::*;
-use linggan_evidence::read_work_resource_overviews;
+use crate::ai_foundation::content_understanding::{count_coverage, coverage_from_dossiers};
 use linggan_storage_postgres::Database;
 use serde_json::json;
 use sqlx::Row;
@@ -72,6 +72,7 @@ pub async fn read_topic_map(
         })
         .collect();
     let mut works = Vec::new();
+    let mut core_states = BTreeMap::new();
     let mut material_states = HashMap::new();
     let mut seen = HashSet::new();
     for (domain_ref, references) in domain_batches {
@@ -79,12 +80,15 @@ pub async fn read_topic_map(
         // snapshot and cutoff; ordered concatenation preserves cross-domain ownership.
         for pair in references.chunks(1000) {
             let (first, second) = pair.split_at(pair.len().min(500));
-            let (mut resources, remaining) = tokio::try_join!(
-                read_work_resource_overviews(database, domain_ref, first, &as_of),
-                read_work_resource_overviews(database, domain_ref, second, &as_of),
-            )
-            .map_err(|e| TopicMapError::Source(e.to_string()))?;
-            resources.extend(remaining);
+            let (first, second) = tokio::try_join!(
+                overview_page(database, domain_ref, first, &as_of),
+                overview_page(database, domain_ref, second, &as_of),
+            )?;
+            let mut resources = first.0;
+            resources.extend(second.0);
+            for (work, state) in first.1.into_iter().chain(second.1) {
+                core_states.entry(work).or_insert(state);
+            }
             for resource in resources {
                 let source_manifest = canonical_source_manifest(&resource);
                 let reference = resource.identity.public_ref;
@@ -370,14 +374,7 @@ pub async fn read_topic_map(
     // Topic membership and the author's journey stage are independent: an
     // automatically assigned work may legitimately have no identified stage.
     let pending = selected.iter().filter(|w| w.topic_refs.is_empty()).count();
-    let selected_work_refs: Vec<_> = selected.iter().map(|w| w.work_ref).collect();
-    let understanding = crate::ai_foundation::content_understanding::scope_coverage(
-        database,
-        &selected_work_refs,
-        &as_of,
-    )
-    .await
-    .map_err(|e| TopicMapError::Source(e.to_string()))?;
+    let understanding = count_coverage(selected.iter().map(|work| &work.work_ref), &core_states);
     let mut material = json!({"ready":0,"preparing":0,"blocked":0,"unknown":0});
     for work in &selected {
         use linggan_evidence::research_dossier::MaterialState;
@@ -649,4 +646,39 @@ async fn attach_research(
         return Ok(candidates);
     }
     super::core_read::attach_windows(database, q, works, topics).await
+}
+
+async fn overview_page(
+    database: &Database,
+    domain: Uuid,
+    references: &[Uuid],
+    cutoff: &str,
+) -> Result<
+    (
+        Vec<linggan_evidence::WorkResource>,
+        BTreeMap<Uuid, &'static str>,
+    ),
+    TopicMapError,
+> {
+    if references.is_empty() {
+        return Ok((Vec::new(), BTreeMap::new()));
+    }
+    let mut tx = database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let page =
+        linggan_evidence::read_work_resource_overviews_in(&mut tx, domain, references, cutoff)
+            .await
+            .map_err(|e| TopicMapError::Source(e.to_string()))?;
+    let allowed: Vec<_> = page
+        .items
+        .iter()
+        .map(|item| item.identity.public_ref)
+        .collect();
+    let states = coverage_from_dossiers(&mut tx, &allowed, cutoff, page.dossiers)
+        .await
+        .map_err(|e| TopicMapError::Source(e.to_string()))?;
+    tx.commit().await?;
+    Ok((page.items, states))
 }

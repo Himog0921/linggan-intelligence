@@ -38,10 +38,6 @@ pub(super) fn routes(
                     ..Default::default()
                 };
                 let _ = model.read(&db, &query).await;
-                loop {
-                    tokio::time::sleep(std::time::Duration::from_secs(20)).await;
-                    let _ = model.refresh(&db, &query).await;
-                }
             }
         });
     }

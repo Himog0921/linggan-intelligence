@@ -73,6 +73,40 @@ pub(crate) async fn current_reference_in(
         .and_then(|value| Uuid::parse_str(value).ok()))
 }
 
+// Source versions are opaque strings. Only a canonical UUID string can match the
+// original SQL comparisons against material_ref::text and materialization_ref::text.
+fn version_ref(version: &str) -> Option<Uuid> {
+    Uuid::parse_str(version)
+        .ok()
+        .filter(|id| id.to_string() == version)
+}
+
+async fn eligibility(
+    conn: &mut PgConnection,
+    rows: &[sqlx::postgres::PgRow],
+    historical: bool,
+) -> Result<Vec<(i32, bool, bool)>, sqlx::Error> {
+    let inputs: Vec<_> = rows
+        .iter()
+        .enumerate()
+        .map(|(index, row)| {
+            let unit = Unit::from_row(row);
+            let reading = row.get::<Option<&str>, _>("reading_source_version");
+            let source = reading.unwrap_or(&unit.source);
+            json!({
+                "position": index, "work": unit.work, "kind": unit.kind, "slot": unit.slot,
+                "derivative": row.get::<Option<Uuid>, _>("derivative_ref"),
+                "source": version_ref(source),
+                "bytes_source": version_ref(if historical { source } else { &unit.source })
+            })
+        })
+        .collect();
+    sqlx::query_as(include_str!("eligibility.sql"))
+        .bind(sqlx::types::Json(inputs))
+        .fetch_all(conn)
+        .await
+}
+
 async fn read_rows(
     conn: &mut PgConnection,
     works: &[Uuid],
@@ -116,18 +150,15 @@ async fn read_rows(
             .await?
     };
     let mut result: BTreeMap<Uuid, Vec<Value>> = works.iter().map(|w| (*w, vec![])).collect();
-    for row in rows {
+    let permissions = eligibility(conn, &rows, readings.is_some()).await?;
+    if permissions.len() != rows.len() {
+        return Err(invalid("reading_eligibility_incomplete"));
+    }
+    for (row, (_, unrestricted, bytes_available)) in rows.into_iter().zip(permissions) {
         let mut unit = Unit::from_row(&row);
         let reading: Option<Uuid> = row.get("reading_ref");
         let version: Option<String> = row.get("reading_source_version");
         let derivative: Option<Uuid> = row.get("derivative_ref");
-        let unrestricted = source::unrestricted(
-            conn,
-            &unit,
-            derivative,
-            version.as_deref().unwrap_or(&unit.source),
-        )
-        .await?;
         if readings.is_some() && !unrestricted {
             continue;
         }
@@ -173,7 +204,7 @@ async fn read_rows(
             unit.state = "restricted".into();
         }
         let mut material = project(&unit, &row, unrestricted && reading.is_some())?;
-        if !source::bytes_available(conn, &unit).await? {
+        if !bytes_available {
             if let Some(object) = material.as_object_mut() {
                 object.remove("originalUrl");
             }
