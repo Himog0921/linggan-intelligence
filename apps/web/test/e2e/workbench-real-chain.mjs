@@ -292,6 +292,44 @@ try {
     const saved=await envelope();assert.equal(saved.revision.document.title,'作业启动');assert.equal(saved.revision.document.accountRef,accountRef);assert.equal(saved.revision.document.paragraphs.length,1);
     await screenshot('workbench-1440-topic');
   });
+  await step('正文中文组字提交一次撤销和重做，取消组字不改变历史', async () => {
+    const body = page.getByLabel('正文第 1 段', { exact: true });
+    const original = await body.inputValue();
+    await openWritingTools(page);
+    const undo = page.getByRole('button', { name: '撤销', exact: true });
+    const redo = page.getByRole('button', { name: '重做', exact: true });
+    const input = await context.newCDPSession(page);
+    const compose = text => input.send('Input.imeSetComposition', {
+      text, selectionStart: text.length, selectionEnd: text.length,
+    });
+    const selectAll = async () => {
+      await body.focus();
+      await body.press('ControlOrMeta+A');
+    };
+    try {
+      await selectAll();
+      await compose('zhong');
+      await compose('zhongwen');
+      assert.equal(await body.inputValue(), 'zhongwen');
+      assert.equal(await undo.isDisabled(), true);
+      await input.send('Input.insertText', { text: '中文' });
+      assert.equal(await body.inputValue(), '中文');
+      await undo.click();
+      assert.equal(await body.inputValue(), original);
+      await selectAll();
+      await compose('quxiao');
+      assert.equal(await redo.isDisabled(), true);
+      await compose('');
+      assert.equal(await body.inputValue(), original);
+      await redo.click();
+      assert.equal(await body.inputValue(), '中文');
+      await undo.click();
+      assert.equal(await body.inputValue(), original);
+      await save();
+    } finally {
+      await input.detach();
+    }
+  });
   await step('创作归属运营，三个工作分区共用同一导航，稿件步骤按需展开', async()=>{
     const primary=page.getByRole('navigation',{name:'一级导航'});
     assert.deepEqual(await primary.locator('.v7-nav-zh').allTextContents(),['雷达','主题图谱','语料','洞察','采集','运营']);

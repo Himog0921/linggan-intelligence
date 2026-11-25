@@ -1090,7 +1090,7 @@ function WorkEditor({
         comparisonDirty.current = hasManualComparisonEdits();
       }
       setAi(status);
-      if(status.suggestion){setAiOpen(false);setAiComparison(true);if(view !== 'body') onView('body');}
+      if (status.suggestion && !composition.current) { setAiOpen(false); setAiComparison(true); if (view !== 'body') onView('body'); }
       identities.settle('execute');
       aiPending.current = null;
       setAiUnknown(false);
@@ -1282,6 +1282,7 @@ function WorkEditor({
     }
   }
   function redoHistory() {
+    if (lock.current || pending.current || composition.current || sourceInvalidated || resetRequired || recheckStatus !== 'ready') return;
     const next = redo.current.pop();
     if (next) {
       undo.current.push(live.current);
@@ -1346,8 +1347,8 @@ function WorkEditor({
 </div>
 <div className="tm-sec"><span className="tm-label">编辑</span>
 <div className="tm-row">
-<ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={() => undoHistory()}>撤销</ActionButton>
-<ActionButton variant="quiet" disabled={!undoState.canRedo || busy} onClick={redoHistory}>重做</ActionButton>
+<ActionButton variant="quiet" disabled={!undoState.canUndo || busy || composing} onClick={() => undoHistory()}>撤销</ActionButton>
+<ActionButton variant="quiet" disabled={!undoState.canRedo || busy || composing} onClick={redoHistory}>重做</ActionButton>
 <span className="aux tm-count">{Array.from(document.paragraphs.map(p => p.text).join('\n\n')).length} 字</span>
 </div>
 </div>
@@ -1570,7 +1571,7 @@ function WorkEditor({
 <del>{document.title}</del>
 <ins>{ai.suggestion.title}</ins>
 <ActionButton variant="outline" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt([], [], true)}>采用这个标题</ActionButton>
-</section> : null}<ActionButton variant="outline" onClick={()=>{setAiComparison(true);setAiOpen(false);onView('body');}}>打开改稿对照</ActionButton>{ai.suggestion.pages.map((p, i) => <section className={styles.diff} key={`p${i}`}>
+</section> : null}<ActionButton variant="outline" disabled={composing} onClick={()=>{if(composition.current) return;setAiComparison(true);setAiOpen(false);onView('body');}}>打开改稿对照</ActionButton>{ai.suggestion.pages.map((p, i) => <section className={styles.diff} key={`p${i}`}>
 <ins>{p.heading}\n{p.body}</ins>
 <ActionButton variant="outline" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt([], [i], false)}>采用这页文案</ActionButton>
 </section>)}{!focusedRewrite ? <ActionButton variant="primary" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt(null, null, true)}>采用全部建议</ActionButton> : null}

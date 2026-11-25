@@ -285,7 +285,8 @@ describe('React workbench author control', () => {
     expect(api.save).not.toHaveBeenCalled();
     expect(api.execute).not.toHaveBeenCalled();
     expect(api.preview).not.toHaveBeenCalled();
-    fireEvent.compositionEnd(body);
+    fireEvent.compositionEnd(body, { data: '中文输入中😀' });
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled());
     vi.mocked(api.save).mockImplementation(async (_id, r) => ({
       requestId: r.requestId,
       workId: work,
@@ -304,6 +305,109 @@ describe('React workbench author control', () => {
     await waitFor(() => expect(api.save).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.save).mock.calls[0]?.[1].document.paragraphs[0]?.text).toBe('中文输入中😀');
   });
+  it('undoes and redoes an entire committed Mandarin composition as one edit', async () => {
+    show();
+    const body = await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByLabelText('写稿工具，已保存'));
+    const undo = screen.getByRole('button', { name: '撤销' });
+    const redo = screen.getByRole('button', { name: '重做' });
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: 'zh' } });
+    fireEvent.change(body, { target: { value: 'zhongwen' } });
+    expect(body).toHaveValue('zhongwen');
+    expect(undo).toBeDisabled();
+    fireEvent.blur(body);
+    fireEvent.compositionEnd(body, { data: '中文' });
+    // Chromium may emit compositionend before the final input updates the field.
+    fireEvent.change(body, { target: { value: '中文' } });
+    await waitFor(() => expect(undo).toBeEnabled());
+    fireEvent.click(undo);
+    expect(body).toHaveValue('甲😀\n原始正文');
+    expect(undo).toBeDisabled();
+    fireEvent.click(redo);
+    expect(body).toHaveValue('中文');
+    expect(redo).toBeDisabled();
+  });
+
+  it('settles a committed composition before another starts in the same paragraph', async () => {
+    show();
+    const body = await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByLabelText('写稿工具，已保存'));
+    const undo = screen.getByRole('button', { name: '撤销' });
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: '中文' } });
+    fireEvent.compositionEnd(body, { data: '中文' });
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: '中文pin' } });
+    expect(undo).toBeDisabled();
+    fireEvent.change(body, { target: { value: '中文拼' } });
+    fireEvent.compositionEnd(body, { data: '拼' });
+    await waitFor(() => expect(undo).toBeEnabled());
+    fireEvent.click(undo);
+    expect(body).toHaveValue('中文');
+    fireEvent.click(undo);
+    expect(body).toHaveValue('甲😀\n原始正文');
+  });
+
+  it('keeps the previous undo and redo after composition is cancelled', async () => {
+    show();
+    const body = await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByLabelText('写稿工具，已保存'));
+    const undo = screen.getByRole('button', { name: '撤销' });
+    const redo = screen.getByRole('button', { name: '重做' });
+    fireEvent.change(body, { target: { value: '上次有效编辑' } });
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: 'wei xuan ci' } });
+    fireEvent.compositionEnd(body, { data: '' });
+    expect(body).toHaveValue('上次有效编辑');
+    fireEvent.click(undo);
+    expect(body).toHaveValue('甲😀\n原始正文');
+
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: 'wei xuan ci' } });
+    expect(redo).toBeDisabled();
+    fireEvent.compositionEnd(body, { data: '' });
+    fireEvent.click(redo);
+    expect(body).toHaveValue('上次有效编辑');
+  });
+
+  it('keeps the editor mounted when a writing candidate arrives during composition', async () => {
+    vi.mocked(api.readiness).mockResolvedValue({
+      configured: true, transportCallable: true, writingQualified: true, configRef: domain, methodVersion: 'writing.v1'
+    });
+    vi.mocked(api.preview).mockResolvedValue({
+      previewRef: paragraph, inputRevision: revision, inputHash: 'hash', action: 'draft', methodVersion: 'writing.v1',
+      configRef: domain, modelRef: domain, connectionVersionRef: domain, sourceCount: 0, inputCharacterCount: 20,
+      estimatedInputTokens: 20, reservedTokens: 200, maxCalls: 1, outboundInput: {}, confirmationRequired: true
+    });
+    let finish!: (status: AiStatus) => void;
+    vi.mocked(api.execute).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    show();
+    const body = await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByRole('button', { name: '按材料起草' }));
+    const prepare = await screen.findByRole('button', { name: '准备并核对输入' });
+    await waitFor(() => expect(prepare).toBeEnabled());
+    fireEvent.click(prepare);
+    fireEvent.click(await screen.findByRole('checkbox', { name: '已核对不含真实姓名、学校、密码和点赞数，确认输入及额度' }));
+    fireEvent.click(screen.getByRole('button', { name: '执行一次' }));
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: 'zhongwen' } });
+    await act(async () => finish({
+      requestId: paragraph, workRef: work, invocationRef: paragraph, state: 'completed', inputRevision: revision,
+      action: 'draft', methodVersion: 'writing.v1', sourceQualification: 'readable', failureCode: null, staleBase: false,
+      suggestion: { title: null, paragraphs: [{ paragraphId: paragraph, text: '合成建议' }], pages: [] },
+      usage: { state: 'measured', inputTokens: 20, outputTokens: 20, chargedTokens: 40, costUsd: null }
+    }));
+    expect(screen.getByLabelText('正文第 1 段')).toBe(body);
+    expect(body).toHaveValue('zhongwen');
+    const compare = screen.getByRole('button', { name: '打开改稿对照' });
+    expect(compare).toBeDisabled();
+    fireEvent.change(body, { target: { value: '中文' } });
+    fireEvent.compositionEnd(body, { data: '中文' });
+    expect(body).toHaveValue('中文');
+    await waitFor(() => expect(compare).toBeEnabled());
+  });
+
   it('keeps later local typing and resolves an uncertain save by request receipt without a second command', async () => {
     vi.mocked(api.save).mockRejectedValueOnce(new ApiError({
       kind: 'network'
