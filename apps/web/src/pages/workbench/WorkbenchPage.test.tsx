@@ -285,7 +285,8 @@ describe('React workbench author control', () => {
     expect(api.save).not.toHaveBeenCalled();
     expect(api.execute).not.toHaveBeenCalled();
     expect(api.preview).not.toHaveBeenCalled();
-    fireEvent.compositionEnd(body);
+    fireEvent.compositionEnd(body, { data: '中文输入中😀' });
+    await waitFor(() => expect(screen.getByRole('button', { name: '保存' })).toBeEnabled());
     vi.mocked(api.save).mockImplementation(async (_id, r) => ({
       requestId: r.requestId,
       workId: work,
@@ -304,6 +305,109 @@ describe('React workbench author control', () => {
     await waitFor(() => expect(api.save).toHaveBeenCalledTimes(1));
     expect(vi.mocked(api.save).mock.calls[0]?.[1].document.paragraphs[0]?.text).toBe('中文输入中😀');
   });
+  it('undoes and redoes an entire committed Mandarin composition as one edit', async () => {
+    show();
+    const body = await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByLabelText('写稿工具，已保存'));
+    const undo = screen.getByRole('button', { name: '撤销' });
+    const redo = screen.getByRole('button', { name: '重做' });
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: 'zh' } });
+    fireEvent.change(body, { target: { value: 'zhongwen' } });
+    expect(body).toHaveValue('zhongwen');
+    expect(undo).toBeDisabled();
+    fireEvent.blur(body);
+    fireEvent.compositionEnd(body, { data: '中文' });
+    // Chromium may emit compositionend before the final input updates the field.
+    fireEvent.change(body, { target: { value: '中文' } });
+    await waitFor(() => expect(undo).toBeEnabled());
+    fireEvent.click(undo);
+    expect(body).toHaveValue('甲😀\n原始正文');
+    expect(undo).toBeDisabled();
+    fireEvent.click(redo);
+    expect(body).toHaveValue('中文');
+    expect(redo).toBeDisabled();
+  });
+
+  it('settles a committed composition before another starts in the same paragraph', async () => {
+    show();
+    const body = await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByLabelText('写稿工具，已保存'));
+    const undo = screen.getByRole('button', { name: '撤销' });
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: '中文' } });
+    fireEvent.compositionEnd(body, { data: '中文' });
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: '中文pin' } });
+    expect(undo).toBeDisabled();
+    fireEvent.change(body, { target: { value: '中文拼' } });
+    fireEvent.compositionEnd(body, { data: '拼' });
+    await waitFor(() => expect(undo).toBeEnabled());
+    fireEvent.click(undo);
+    expect(body).toHaveValue('中文');
+    fireEvent.click(undo);
+    expect(body).toHaveValue('甲😀\n原始正文');
+  });
+
+  it('keeps the previous undo and redo after composition is cancelled', async () => {
+    show();
+    const body = await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByLabelText('写稿工具，已保存'));
+    const undo = screen.getByRole('button', { name: '撤销' });
+    const redo = screen.getByRole('button', { name: '重做' });
+    fireEvent.change(body, { target: { value: '上次有效编辑' } });
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: 'wei xuan ci' } });
+    fireEvent.compositionEnd(body, { data: '' });
+    expect(body).toHaveValue('上次有效编辑');
+    fireEvent.click(undo);
+    expect(body).toHaveValue('甲😀\n原始正文');
+
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: 'wei xuan ci' } });
+    expect(redo).toBeDisabled();
+    fireEvent.compositionEnd(body, { data: '' });
+    fireEvent.click(redo);
+    expect(body).toHaveValue('上次有效编辑');
+  });
+
+  it('keeps the editor mounted when a writing candidate arrives during composition', async () => {
+    vi.mocked(api.readiness).mockResolvedValue({
+      configured: true, transportCallable: true, writingQualified: true, configRef: domain, methodVersion: 'writing.v1'
+    });
+    vi.mocked(api.preview).mockResolvedValue({
+      previewRef: paragraph, inputRevision: revision, inputHash: 'hash', action: 'draft', methodVersion: 'writing.v1',
+      configRef: domain, modelRef: domain, connectionVersionRef: domain, sourceCount: 0, inputCharacterCount: 20,
+      estimatedInputTokens: 20, reservedTokens: 200, maxCalls: 1, outboundInput: {}, confirmationRequired: true
+    });
+    let finish!: (status: AiStatus) => void;
+    vi.mocked(api.execute).mockReturnValue(new Promise(resolve => { finish = resolve; }));
+    show();
+    const body = await screen.findByLabelText('正文第 1 段');
+    fireEvent.click(screen.getByRole('button', { name: '按材料起草' }));
+    const prepare = await screen.findByRole('button', { name: '准备并核对输入' });
+    await waitFor(() => expect(prepare).toBeEnabled());
+    fireEvent.click(prepare);
+    fireEvent.click(await screen.findByRole('checkbox', { name: '已核对不含真实姓名、学校、密码和点赞数，确认输入及额度' }));
+    fireEvent.click(screen.getByRole('button', { name: '执行一次' }));
+    fireEvent.compositionStart(body);
+    fireEvent.change(body, { target: { value: 'zhongwen' } });
+    await act(async () => finish({
+      requestId: paragraph, workRef: work, invocationRef: paragraph, state: 'completed', inputRevision: revision,
+      action: 'draft', methodVersion: 'writing.v1', sourceQualification: 'readable', failureCode: null, staleBase: false,
+      suggestion: { title: null, paragraphs: [{ paragraphId: paragraph, text: '合成建议' }], pages: [] },
+      usage: { state: 'measured', inputTokens: 20, outputTokens: 20, chargedTokens: 40, costUsd: null }
+    }));
+    expect(screen.getByLabelText('正文第 1 段')).toBe(body);
+    expect(body).toHaveValue('zhongwen');
+    const compare = screen.getByRole('button', { name: '打开改稿对照' });
+    expect(compare).toBeDisabled();
+    fireEvent.change(body, { target: { value: '中文' } });
+    fireEvent.compositionEnd(body, { data: '中文' });
+    expect(body).toHaveValue('中文');
+    await waitFor(() => expect(compare).toBeEnabled());
+  });
+
   it('keeps later local typing and resolves an uncertain save by request receipt without a second command', async () => {
     vi.mocked(api.save).mockRejectedValueOnce(new ApiError({
       kind: 'network'
@@ -840,7 +944,7 @@ it('retains right hand author edits when a lost AI adoption response is reconcil
   vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:20,estimatedInputTokens:20,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
   vi.mocked(api.execute).mockImplementation(async request=>({requestId:request.requestId,workRef:work,invocationRef:paragraph,state:'completed',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:{title:null,paragraphs:[{paragraphId:paragraph,text:'模型建议保留来源'}],pages:[]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:20,outputTokens:20,chargedTokens:40,costUsd:null}}));
   vi.mocked(api.adopt).mockRejectedValueOnce(new ApiError({kind:'network'}));
-  vi.mocked(api.lookupWorkRequest).mockImplementation(async requestId=>({requestId,workId:work,outcome:'accepted',replayed:true,revision:{...envelope().revision,id:crypto.randomUUID(),number:2,document:{...envelope().revision.document,paragraphs:[{id:paragraph,text:'模型建议保留来源'}]}}}));
+  vi.mocked(api.lookupWorkRequest).mockImplementation(async requestId=>({requestId,workId:work,outcome:'accepted',replayed:true,revision:{...envelope().revision,id:crypto.randomUUID(),number:2,document:{...envelope().revision.document,paragraphs:[{id:paragraph,text:'作者在对照右侧写的新句子😀'}]}}}));
   show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));
   const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);
   fireEvent.click(await screen.findByRole('checkbox',{name:'已核对不含真实姓名、学校、密码和点赞数，确认输入及额度'}));fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
@@ -848,6 +952,7 @@ it('retains right hand author edits when a lost AI adoption response is reconcil
   fireEvent.click(screen.getByRole('button',{name:'采用这一段'}));
   fireEvent.click(await screen.findByRole('button',{name:'沿用原请求重试'}));
   expect(await screen.findByLabelText('正文第 1 段')).toHaveValue('作者在对照右侧写的新句子😀');
+  expect(api.adopt).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({draftEdits:[{index:0,text:'作者在对照右侧写的新句子😀'}]}));
   expect(api.adopt).toHaveBeenCalledTimes(1);expect(api.lookupWorkRequest).toHaveBeenCalledTimes(1);
 });
 
@@ -881,7 +986,7 @@ it('retains both AI edits after partial adoption and keeps the unadopted draft a
  vi.mocked(api.readiness).mockResolvedValue({configured:true,transportCallable:true,writingQualified:true,configRef:domain,methodVersion:'writing.v1'});
  vi.mocked(api.preview).mockResolvedValue({previewRef:paragraph,inputRevision:revision,inputHash:'hash',action:'draft',methodVersion:'writing.v1',configRef:domain,modelRef:domain,connectionVersionRef:domain,sourceCount:0,inputCharacterCount:20,estimatedInputTokens:20,reservedTokens:200,maxCalls:1,outboundInput:{},confirmationRequired:true});
  vi.mocked(api.execute).mockImplementation(async request=>({requestId:request.requestId,workRef:work,invocationRef:paragraph,state:'completed',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:{title:null,paragraphs:[{paragraphId:paragraph,text:'建议一'},{paragraphId:second,text:'建议二'}],pages:[]},sourceQualification:'readable',failureCode:null,staleBase:false,usage:{state:'measured',inputTokens:20,outputTokens:20,chargedTokens:40,costUsd:null}}));
- vi.mocked(api.adopt).mockImplementation(async(_id,request)=>({requestId:request.requestId,workId:work,outcome:'accepted',replayed:false,revision:{...initial.revision,id:crypto.randomUUID(),number:2,document:{...initial.revision.document,paragraphs:[{id:paragraph,text:'建议一'},{id:second,text:'原二'}]}}}));
+ vi.mocked(api.adopt).mockImplementation(async(_id,request)=>({requestId:request.requestId,workId:work,outcome:'accepted',replayed:false,revision:{...initial.revision,id:crypto.randomUUID(),number:2,document:{...initial.revision.document,paragraphs:[{id:paragraph,text:request.draftEdits?.[0]?.text ?? '建议一'},{id:second,text:'原二'}]}}}));
  vi.mocked(api.aiStatus).mockImplementation(async requestId=>({requestId,workRef:work,invocationRef:paragraph,state:'completed',inputRevision:revision,action:'draft',methodVersion:'writing.v1',suggestion:{title:null,paragraphs:[{paragraphId:paragraph,text:'建议一'},{paragraphId:second,text:'建议二'}],pages:[]},sourceQualification:'readable',failureCode:null,staleBase:true,usage:{state:'measured',inputTokens:20,outputTokens:20,chargedTokens:40,costUsd:null}}));
  show();await screen.findByLabelText('正文第 1 段');fireEvent.click(screen.getByRole('button',{name:'按材料起草'}));const prepare=await screen.findByRole('button',{name:'准备并核对输入'});await waitFor(()=>expect(prepare).toBeEnabled());fireEvent.click(prepare);fireEvent.click(await screen.findByRole('checkbox',{name:'已核对不含真实姓名、学校、密码和点赞数，确认输入及额度'}));fireEvent.click(screen.getByRole('button',{name:'执行一次'}));
  fireEvent.change(await screen.findByLabelText('编辑改稿 第 1 段'),{target:{value:'作者采用第一段'}});fireEvent.change(screen.getByLabelText('编辑改稿 第 2 段'),{target:{value:'作者未采用第二段😀'}});fireEvent.click(screen.getAllByRole('button',{name:'采用这一段'})[0]!);

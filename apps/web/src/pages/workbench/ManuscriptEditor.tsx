@@ -1,6 +1,6 @@
 import { ActionButton } from '../../shared/ActionButton';
 import { IdeaBoxLink } from './IdeaBoxLink';
-import type { ReactNode } from 'react';
+import { useEffect, useEffectEvent, useRef, useState, type ReactNode } from 'react';
 import type { IdeaBoxSummary } from './workbenchModel';
 import { stepNames, type Step, type WorkDocument } from "./workbenchModel";
 import { ExperiencePicker } from './assets/ExperiencePicker';
@@ -56,6 +56,34 @@ export function ManuscriptEditor({
   /** The recovery card of a published draft; sits first in the body, as in the demo. */
   publication?: ReactNode;
 }) {
+  const bodyComposition = useRef<string | null>(null);
+  const bodySettlement = useRef<{ timer: number; field?: HTMLTextAreaElement } | null>(null);
+  const releaseComposition = useEffectEvent(() => compose(false));
+  useEffect(() => () => {
+    if (bodySettlement.current) window.clearTimeout(bodySettlement.current.timer);
+    if (bodyComposition.current !== null) releaseComposition();
+  }, []);
+  const [bodyInput, setBodyInput] = useState<{ paragraphId: string; text: string } | null>(null);
+  function updateBodyText(id: string, text: string) {
+    if (document.paragraphs.find(paragraph => paragraph.id === id)?.text === text) return;
+    edit({ ...document, paragraphs: document.paragraphs.map(paragraph =>
+      paragraph.id === id ? { ...paragraph, text } : paragraph
+    ) });
+  }
+  function finishBodyComposition(id: string, text?: string) {
+    if (bodyComposition.current !== id) return;
+    bodyComposition.current = null;
+    if (bodySettlement.current) window.clearTimeout(bodySettlement.current.timer);
+    bodySettlement.current = null;
+    setBodyInput(null);
+    if (text !== undefined) updateBodyText(id, text);
+    compose(false);
+  }
+  function settleBodyComposition(id: string, field?: HTMLTextAreaElement) {
+    if (bodyComposition.current !== id) return;
+    if (bodySettlement.current) window.clearTimeout(bodySettlement.current.timer);
+    bodySettlement.current = { field, timer: window.setTimeout(() => finishBodyComposition(id, field?.value), 0) };
+  }
   const cover = document.pages.find(page => page.kind === 'cover');
   const coverCandidate = draftInputs.cover;
   const noteCandidate = draftInputs.note;
@@ -143,10 +171,28 @@ export function ManuscriptEditor({
                   aria-label={`正文第 ${i + 1} 段`}
                   placeholder="写下这一段…"
                   readOnly={document.experienceGaps.includes(p.id)}
-                  value={p.text}
-                  onCompositionStart={() => compose(true)}
-                  onCompositionEnd={() => compose(false)}
-                  onChange={(e) => edit({ ...document, paragraphs: document.paragraphs.map((x) => x.id === p.id ? { ...x, text: e.target.value } : x) })}
+                  value={bodyInput?.paragraphId === p.id ? bodyInput.text : p.text}
+                  onCompositionStart={event => {
+                    const previous = bodyComposition.current;
+                    if (previous !== null) finishBodyComposition(previous, bodySettlement.current?.field?.value);
+                    bodyComposition.current = p.id;
+                    setBodyInput({ paragraphId: p.id, text: event.currentTarget.value });
+                    compose(true);
+                  }}
+                  onCompositionEnd={event => {
+                    if (!event.data) {
+                      finishBodyComposition(p.id);
+                      return;
+                    }
+                    // Chromium can deliver the final input after compositionend.
+                    settleBodyComposition(p.id, event.currentTarget);
+                  }}
+                  onBlur={() => { if (bodySettlement.current === null) settleBodyComposition(p.id); }}
+                  onChange={event => {
+                    const text = event.currentTarget.value;
+                    if (bodyComposition.current === p.id) setBodyInput({ paragraphId: p.id, text });
+                    else updateBodyText(p.id, text);
+                  }}
                   onSelect={(e) => textSelection(p.id, e.currentTarget)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing && !isComposing()) {

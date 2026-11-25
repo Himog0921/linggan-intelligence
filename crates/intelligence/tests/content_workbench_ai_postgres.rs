@@ -41,6 +41,7 @@ p=json.loads(r['prompt'])
 counter=Path({})
 if p['authorInstruction']=='CONTEXT_PROOF':
     counter.with_suffix('.prompt').write_text(r['prompt'])
+    counter.with_suffix('.system').write_text(r['system'])
 if 'PRE_SEND' in p['authorInstruction']:
     counter.with_suffix('.waiting').write_text('waiting')
     permit=counter.with_suffix('.permit');deadline=time.monotonic()+10
@@ -61,6 +62,9 @@ a=p['action']
 out={{'title':None,'paragraphs':[],'pages':[]}}
 if a=='title_ideas': out={{'coverTitles':['先从一小步开始','根治拖延'],'noteTitles':['孩子开始困难时先缩小第一步']}}
 if a=='draft': out['paragraphs']=[{{'paragraphId':None,'text':'合成起草😀'}}]
+if p['authorInstruction']=='COPY_RESTRICTED_SENTENCE':
+    raw=p['materials'][0]['content']['text']
+    out['paragraphs']=[{{'paragraphId':None,'text':'候选用了这句：'+raw.split('。')[1]+'。'}}]
 if a=='rewrite_selection': out['paragraphs']=[{{'paragraphId':p['paragraphs'][0]['id'],'text':'合成改写😀'}}]
 if a=='page_copy': out['pages']=[{{'pageId':p['pages'][0]['pageId'],'heading':'合成图页','body':'合成图页正文'}}]
 if 'QUOTE' in p['authorInstruction']:
@@ -173,6 +177,7 @@ async fn rewrite_adoption_checks_only_the_frozen_target_and_undo_restores_the_ac
         json!({"paragraphId": target,"start":3,"end":6})
     );
     let mut command = ai::AdoptRequest {
+        draft_edits: None,
         request_id: Uuid::new_v4(),
         expected_revision: work.revision.id,
         paragraph_indices: Some(vec![0]),
@@ -338,8 +343,17 @@ async fn selected_draft_context_matches_dispatch_and_rechecks_template_approval(
         .unwrap();
     assert_eq!(
         std::fs::read_to_string(counter.with_extension("prompt")).unwrap(),
+        result["outboundPrompt"].as_str().unwrap()
+    );
+    assert_eq!(
+        result["outboundPrompt"].as_str().unwrap(),
         input.to_string()
     );
+    assert_eq!(
+        std::fs::read_to_string(counter.with_extension("system")).unwrap(),
+        result["outboundSystem"].as_str().unwrap()
+    );
+    assert_eq!(result["draftMaterialCards"][0]["purpose"], "reference_only");
     assert_eq!(
         ai::status(&db, execute.request_id).await.unwrap()["suggestion"]["paragraphs"][0]["text"],
         "合成起草😀"
@@ -371,6 +385,153 @@ async fn selected_draft_context_matches_dispatch_and_rechecks_template_approval(
 }
 
 #[tokio::test]
+#[ignore = "isolated PostgreSQL material-purpose proof with local fake transport"]
+async fn restricted_draft_sentences_are_blocked_at_generation_and_adoption() {
+    let db = fixture::db("creation_ai_material_quotes").await;
+    let config = foundation_fixture::configure_fake_prerequisites(&db).await;
+    let document = fixture::comment_doc_with_text(
+        &db,
+        "这句只是合成材料的背景。第二句原文只供核对🙂。最后还有一句。",
+    )
+    .await;
+    for group in [
+        CanvasGroup::ReferenceOnly,
+        CanvasGroup::Counterexample,
+        CanvasGroup::Argument,
+    ] {
+        Box::pin(assert_restricted_material(
+            &db,
+            config,
+            document.clone(),
+            group,
+        ))
+        .await;
+    }
+}
+
+async fn assert_restricted_material(
+    db: &linggan_storage_postgres::Database,
+    config: Uuid,
+    mut document: WorkDocument,
+    group: CanvasGroup,
+) {
+    let restricted = group != CanvasGroup::Argument;
+    let suppress_card_ids = group == CanvasGroup::Counterexample;
+    document.canvas[0].group = group;
+    let work = fixture::create(db, document).await;
+    let mut preview = request(
+        &work,
+        config,
+        ai::WritingAction::Draft,
+        "COPY_RESTRICTED_SENTENCE",
+    );
+    // The canonical block is still sent if a caller omits the card ID list.
+    preview.draft_context_excerpt_ids =
+        (!suppress_card_ids).then(|| vec![work.revision.document.excerpts[0].id]);
+    preview.citations = vec![work.revision.document.excerpts[0].citation.clone()];
+    if suppress_card_ids {
+        // Comment work scope can be omitted without changing the canonical source.
+        preview.citations[0].work_ref = None;
+    }
+
+    let execute = prepare(db, &preview).await;
+    let (adapter, calls, _owned) = adapter();
+    ai::execute(db, &execute).await.unwrap();
+    run_request(db, execute.request_id, &SyntheticModelSecrets, &adapter)
+        .await
+        .unwrap();
+    let status = ai::status(db, execute.request_id).await.unwrap();
+    if !restricted {
+        assert_eq!(status["state"], "succeeded");
+        let adopted = ai::adopt(
+            db,
+            execute.request_id,
+            &ai::AdoptRequest {
+                draft_edits: None,
+                request_id: Uuid::new_v4(),
+                expected_revision: work.revision.id,
+                paragraph_indices: None,
+                page_indices: Some(vec![]),
+                adopt_title: false,
+                rewrite_text: None,
+            },
+        )
+        .await
+        .unwrap();
+        let document = &adopted["revision"]["document"];
+        assert!(
+            document["paragraphs"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("第二句原文只供核对🙂。")
+        );
+        assert!(
+            document["derivedSources"]
+                .as_array()
+                .is_some_and(|sources| !sources.is_empty())
+        );
+        return;
+    }
+    assert_eq!(status["state"], "failed");
+    assert_eq!(
+        status["failureCode"],
+        "creation_ai_material_quote_forbidden"
+    );
+    assert!(status["suggestion"].is_null());
+    assert_eq!(call_count(&calls), 1);
+    assert_eq!(status["usage"]["chargedTokens"], 20);
+
+    // A safe candidate must still reject a restricted sentence pasted into the comparison.
+    preview.preview_ref = Uuid::new_v4();
+    preview.instruction = String::new();
+    let safe = prepare(db, &preview).await;
+    ai::execute(db, &safe).await.unwrap();
+    run_request(db, safe.request_id, &SyntheticModelSecrets, &adapter)
+        .await
+        .unwrap();
+    assert_eq!(
+        ai::status(db, safe.request_id).await.unwrap()["state"],
+        "succeeded"
+    );
+    let restricted_edited = ai::AdoptRequest {
+        draft_edits: Some(vec![ai::DraftParagraphEdit {
+            index: 0,
+            text: "第二句原文只供核对🙂。".into(),
+        }]),
+        request_id: Uuid::new_v4(),
+        expected_revision: work.revision.id,
+        paragraph_indices: Some(vec![0]),
+        page_indices: Some(vec![]),
+        adopt_title: false,
+        rewrite_text: None,
+    };
+    assert!(matches!(
+        ai::adopt(db, safe.request_id, &restricted_edited).await,
+        Err(ai::AiError::MaterialQuoteForbidden)
+    ));
+    assert_eq!(
+        read_work(db, work.work_id).await.unwrap().revision.id,
+        work.revision.id
+    );
+    let cleaned = ai::AdoptRequest {
+        draft_edits: Some(vec![ai::DraftParagraphEdit {
+            index: 0,
+            text: "作者重新组织后的句子。".into(),
+        }]),
+        request_id: Uuid::new_v4(),
+        ..restricted_edited
+    };
+    let adopted = ai::adopt(db, safe.request_id, &cleaned).await.unwrap();
+    assert_eq!(
+        adopted["revision"]["document"]["paragraphs"][1]["text"],
+        "作者重新组织后的句子。"
+    );
+    let replay = ai::adopt(db, safe.request_id, &cleaned).await.unwrap();
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(replay["revision"]["id"], adopted["revision"]["id"]);
+}
+
+#[tokio::test]
 #[ignore = "isolated PostgreSQL source adoption proof with local fake transport"]
 async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_public_projection()
 {
@@ -399,6 +560,7 @@ async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_
         .await
         .unwrap();
     let adoption = ai::AdoptRequest {
+        draft_edits: None,
         rewrite_text: None,
         request_id: Uuid::new_v4(),
         expected_revision: first.revision.id,
@@ -431,6 +593,7 @@ async fn preview_only_citation_adoption_preserves_exact_spans_and_revokes_every_
     .await
     .unwrap();
     let pages = ai::AdoptRequest {
+        draft_edits: None,
         rewrite_text: None,
         request_id: Uuid::new_v4(),
         expected_revision: adopted.revision.id,
@@ -666,6 +829,7 @@ async fn selected_unicode_range_rewrite_splices_only_the_confirmed_substring() {
         &db,
         execute.request_id,
         &ai::AdoptRequest {
+            draft_edits: None,
             rewrite_text: None,
             request_id: Uuid::new_v4(),
             expected_revision: first.revision.id,
@@ -980,6 +1144,7 @@ async fn adopted_paraphrase_keeps_source_through_edits_and_later_generation() {
             &db,
             execute.request_id,
             &ai::AdoptRequest {
+                draft_edits: None,
                 rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: first.revision.id,
@@ -1138,6 +1303,7 @@ async fn adopted_paraphrase_keeps_source_through_edits_and_later_generation() {
             &db,
             next_execute.request_id,
             &ai::AdoptRequest {
+                draft_edits: None,
                 rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: saved.revision.id,
@@ -1543,6 +1709,7 @@ async fn experience_rewrite_retains_erasable_lineage_and_replay_after_withdrawal
     .unwrap();
     assert!(!public.contains("合成改写"));
     let adoption = ai::AdoptRequest {
+        draft_edits: None,
         rewrite_text: None,
         request_id: Uuid::new_v4(),
         expected_revision: work.revision.id,
@@ -1788,6 +1955,7 @@ async fn experience_model_preview_and_result_are_unavailable_after_person_replac
             &db,
             command.request_id,
             &ai::AdoptRequest {
+                draft_edits: None,
                 rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: work.revision.id,
@@ -1924,6 +2092,7 @@ async fn experience_rewrite_with_public_citation_keeps_source_uses_erasable() {
         &db,
         command.request_id,
         &ai::AdoptRequest {
+            draft_edits: None,
             rewrite_text: None,
             request_id: Uuid::new_v4(),
             expected_revision: work.revision.id,
@@ -2118,6 +2287,7 @@ async fn experience_adoption_waits_for_work_before_locking_experiences() {
             &other_db,
             request_id,
             &ai::AdoptRequest {
+                draft_edits: None,
                 rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: revision_id,

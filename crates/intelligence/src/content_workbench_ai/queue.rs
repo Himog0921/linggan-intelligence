@@ -69,7 +69,7 @@ pub(super) async fn preview(db: &Database, r: &PreviewRequest) -> Result<Value, 
     if r.config_ref != model.config_ref {
         return Err(AiError::Stale);
     }
-    let (revision, payload, body_hash) = inputs_in(&mut tx, r).await?;
+    let (revision, payload, body_hash, _) = inputs_in(&mut tx, r).await?;
     let protected = super::protected_experience(&revision.document, r)?;
     let system = execution::system_in(&mut tx, config, task).await?;
     let prompt = payload.to_string();
@@ -130,11 +130,22 @@ pub(super) async fn preview(db: &Database, r: &PreviewRequest) -> Result<Value, 
         }
     }
     tx.commit().await?;
+    let draft_material_cards: Vec<_> = super::selected_draft_cards(&revision.document, r)
+        .filter_map(|(card, _)| {
+            let excerpt = revision
+                .document
+                .excerpts
+                .iter()
+                .find(|excerpt| Some(excerpt.id) == card.excerpt_id)?;
+            let text: String = excerpt.selected_text.as_deref()?.chars().take(64).collect();
+            Some(json!({"purpose":card.group,"excerpt":text}))
+        })
+        .collect();
     Ok(
         json!({"previewRef":r.preview_ref,"inputRevision":r.expected_revision,"inputHash":hash,"action":r.action,"methodVersion":method,
         "configRef":r.config_ref,"taskConfigRef":config,"modelRef":model.current_model_ref,"connectionVersionRef":model.connection_version_ref,
         "sourceCount":r.citations.len(),"inputCharacterCount":prompt.chars().count(),"estimatedInputTokens":estimated,
-        "reservedTokens":reserved,"maxCalls":1,"outboundInput":payload,"outboundSystem":system,"confirmationRequired":true}),
+        "reservedTokens":reserved,"maxCalls":1,"outboundInput":payload,"outboundPrompt":prompt,"draftMaterialCards":draft_material_cards,"outboundSystem":system,"confirmationRequired":true}),
     )
 }
 pub(super) async fn enqueue(db: &Database, r: &ExecuteRequest) -> Result<Value, AiError> {

@@ -359,6 +359,8 @@ export interface AiPreview {
   reservedTokens: number;
   maxCalls: number;
   outboundInput: unknown;
+  outboundPrompt?: string;
+  draftMaterialCards?: { purpose: CanvasGroup; excerpt: string }[];
   outboundSystem?: string;
   confirmationRequired: boolean;
   taskConfigRef?: string;
@@ -488,10 +490,11 @@ const excerpt = shape<Excerpt>({
   selectedText: nullable(str),
   textHash: str
 });
+const canvasGroup = choice('inbox', 'opening', 'resonance', 'experience', 'argument', 'example', 'ending', 'title_reference', 'reference_only', 'counterexample');
 const canvas = shape<CanvasBlock>({
   id: uuid,
   excerptId: nullable(uuid),
-  group: choice('inbox', 'opening', 'resonance', 'experience', 'argument', 'example', 'ending', 'title_reference', 'reference_only', 'counterexample'),
+  group: canvasGroup,
   note: str,
   expression: str,
   expressionRevision: integer
@@ -843,6 +846,8 @@ export const parsePreview = shape<AiPreview>({
   reservedTokens: integer,
   maxCalls: integer,
   outboundInput: v => v,
+  outboundPrompt: optional(str),
+  draftMaterialCards: optional(array(shape({ purpose: canvasGroup, excerpt: str }))),
   outboundSystem: optional(str),
   confirmationRequired: bool,
   taskConfigRef: optional(uuid)
