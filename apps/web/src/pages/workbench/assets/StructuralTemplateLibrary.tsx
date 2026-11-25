@@ -12,7 +12,7 @@ import { SelectField } from '../../../shared/SelectField';
 
 type ReviewAction = 'approve' | 'disable' | 'enable';
 type Pending = { kind: 'review'; code: string; requestId: string; expectedRevision: number; action: ReviewAction }
-  | { kind: 'revise'; code: string; requestId: string; expectedRevision: number; steps: Step[]; labels: api.TemplateLabels };
+  | { kind: 'revise'; code: string; requestId: string; expectedRevision: number; steps: Step[]; labels?: api.TemplateLabels };
 
 export function StructuralTemplateLibrary({ domainRef, onPendingChange, onDirtyChange = () => {} }: { domainRef: string; onPendingChange: (pending: boolean) => void; onDirtyChange?: (dirty: boolean) => void }) {
   const client = useQueryClient();
@@ -65,7 +65,7 @@ export function StructuralTemplateLibrary({ domainRef, onPendingChange, onDirtyC
   function revise() {
     if (!current || !canWrite || !editing?.steps.length || stale || !validLabels) return;
     const { baseRevision, steps } = editing;
-    void run({ kind: 'revise', code: current.code, requestId: identities.keyFor('template-command', `${current.code}:${baseRevision}:revise`), expectedRevision: baseRevision, steps, labels });
+    void run({ kind: 'revise', code: current.code, requestId: identities.keyFor('template-command', `${current.code}:${baseRevision}:revise`), expectedRevision: baseRevision, steps, labels: current.evidenceSource ? undefined : labels });
   }
   function editTemplate(template: api.Template) {
     setEditing({ baseRevision: template.revision, steps: [...template.steps] });
@@ -93,7 +93,7 @@ export function StructuralTemplateLibrary({ domainRef, onPendingChange, onDirtyC
     <header className="as-head">
       <div className="grow">
         <h1 className="h-obj">样板库</h1>
-        <p>从稿件提炼的结构；样板不保存正文。来源不可用时会自动标记。</p>
+        <p>从稿件或证据库提炼的结构。样板不保存正文，来源不可用时会标记。</p>
       </div>
     </header>
     <div className="lib-tools">
@@ -120,8 +120,10 @@ export function StructuralTemplateLibrary({ domainRef, onPendingChange, onDirtyC
           })}</tbody>
         </table>
       </div>
-      <aside className="lib-insp" aria-label="样板详情">{current ? <><h3>{current.labels?.name || current.code}</h3><p>{current.labels?.name ? `${current.code} · ` : null}第 {current.revision} 版</p><p>{state(current)}</p>{current.labels?.tags.length ? <p>标签：{current.labels.tags.join('、')}</p> : null}<p>结构：{current.steps.map(step => stepNames[step]).join(' → ')}</p><p className={styles.hint}>来源：创建样板时保存的稿件版本。 <Link to={`/ops/creation?domain=${encodeURIComponent(domainRef)}&work=${encodeURIComponent(current.sourceWorkId)}&view=body`}>查看来源稿件当前版本 ↗</Link></p>
-        {editing ? <section aria-label="编辑样板结构"><TemplateLabelFields name={name} tags={tags} onName={setName} onTags={setTags} disabled={busy || !!pending} />{!validLabels ? <p role="status">名称或标签超过长度或数量上限。</p> : null}<p>新版本：{editing.steps.map(step => stepNames[step]).join(' → ') || '尚未选择'}</p><div className={styles.actions}>{Object.entries(stepNames).map(([key, name]) => <ActionButton key={key} variant="quiet" disabled={busy || !!pending || editing.steps.length >= 12} onClick={() => setEditing(value => value && { ...value, steps: [...value.steps, key as Step] })}>＋ {name}</ActionButton>)}</div><div className={styles.actions}><ActionButton variant="quiet" disabled={busy || !!pending || !editing.steps.length} onClick={() => setEditing(value => value && { ...value, steps: value.steps.slice(0, -1) })}>撤销上一步</ActionButton><ActionButton variant="quiet" disabled={busy || !!pending} onClick={() => { setEditing(null); onDirtyChange(false); }}>取消编辑</ActionButton><ActionButton variant="primary" disabled={busy || !!pending || stale || !canWrite || !editing.steps.length || !validLabels || !current.sourceAvailable || current.status === 'off'} onClick={revise}>保存新版本</ActionButton></div></section> : null}
+      <aside className="lib-insp" aria-label="样板详情">{current ? <><h3>{current.labels?.name || current.code}</h3><p>{current.labels?.name ? `${current.code} · ` : null}第 {current.revision} 版</p><p>{state(current)}</p>{current.labels?.tags.length ? <p>标签：{current.labels.tags.join('、')}</p> : null}<p>结构：{current.steps.map(step => stepNames[step]).join(' → ')}</p><p className={styles.hint}>{current.evidenceSource
+          ? <>来源：证据库研究底稿。 {current.sourceAvailable ? <Link to={`/corpus/evidence?domain=${encodeURIComponent(domainRef)}&work=${encodeURIComponent(current.evidenceSource.workRef)}`}>查看来源作品 ↗</Link> : null}</>
+          : <>来源：创建样板时保存的稿件版本。 {current.sourceWorkId ? <Link to={`/ops/creation?domain=${encodeURIComponent(domainRef)}&work=${encodeURIComponent(current.sourceWorkId)}&view=body`}>查看来源稿件当前版本 ↗</Link> : null}</>}</p>
+        {editing ? <section aria-label="编辑样板结构">{!current.evidenceSource ? <TemplateLabelFields name={name} tags={tags} onName={setName} onTags={setTags} disabled={busy || !!pending} /> : null}{!validLabels ? <p role="status">名称或标签超过长度或数量上限。</p> : null}<p>新版本：{editing.steps.map(step => stepNames[step]).join(' → ') || '尚未选择'}</p><div className={styles.actions}>{Object.entries(stepNames).map(([key, name]) => <ActionButton key={key} variant="quiet" disabled={busy || !!pending || editing.steps.length >= 12} onClick={() => setEditing(value => value && { ...value, steps: [...value.steps, key as Step] })}>＋ {name}</ActionButton>)}</div><div className={styles.actions}><ActionButton variant="quiet" disabled={busy || !!pending || !editing.steps.length} onClick={() => setEditing(value => value && { ...value, steps: value.steps.slice(0, -1) })}>撤销上一步</ActionButton><ActionButton variant="quiet" disabled={busy || !!pending} onClick={() => { setEditing(null); onDirtyChange(false); }}>取消编辑</ActionButton><ActionButton variant="primary" disabled={busy || !!pending || stale || !canWrite || !editing.steps.length || !validLabels || !current.sourceAvailable || current.status === 'off'} onClick={revise}>保存新版本</ActionButton></div></section> : null}
         <div className={styles.actions}>{pending ? <ActionButton variant="outline" busy={busy} onClick={() => void run(pending)}>重试上次操作</ActionButton> : <>{current.status === 'review' ? <ActionButton variant="outline" disabled={!canWrite || !current.sourceAvailable || busy || !!editing} onClick={() => review('approve')}>审核通过</ActionButton> : null}{current.status !== 'off' ? <><ActionButton variant="quiet" disabled={!canWrite || busy || !!editing} onClick={() => review('disable')}>停用</ActionButton><ActionButton variant="quiet" disabled={!canWrite || busy || !current.sourceAvailable || !!editing} onClick={() => editTemplate(current)}>编辑结构</ActionButton></> : <ActionButton variant="quiet" disabled={!canWrite || busy || !!editing} onClick={() => review('enable')}>恢复待审核</ActionButton>}</>}</div>{notice ? <p role="status">{notice}</p> : null}
         {stale ? <p>样板已有新版本，当前编辑仍保留。<ActionButton variant="outline" busy={busy} onClick={() => void refreshBase()}>读取最新版本</ActionButton></p> : null}
         {!canWrite && history.isError ? <p role="alert">读取样板当前版本失败。<ActionButton variant="quiet" onClick={() => void history.refetch()}>重新读取样板</ActionButton></p> : null}

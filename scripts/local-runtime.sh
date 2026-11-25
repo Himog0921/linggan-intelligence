@@ -553,6 +553,7 @@ migrate() {
   apply_migration_once "0239_comment_research_automation" "$project_root/database/migrations/0239_comment_research_automation.sql"
   apply_migration_once "0240_ops_lens_refresh" "$project_root/database/migrations/0240_ops_lens_refresh.sql"
   apply_migration_once "0242_creation_template_labels" "$project_root/database/migrations/0242_creation_template_labels.sql"
+  apply_migration_once "0243_creation_evidence_templates" "$project_root/database/migrations/0243_creation_evidence_templates.sql"
 }
 
 case "$command_name" in

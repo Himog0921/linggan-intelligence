@@ -1,5 +1,5 @@
 import { ApiError, requestJson } from '../../../shared/api';
-import { ShapeError, bool, decode, field, num, obj, optObj, str, type Json } from '../../../shared/decode';
+import { ShapeError, bool, decode, field, num, obj, optObj, optStr, str, type Json } from '../../../shared/decode';
 import { stepNames, type Step } from '../workbenchModel';
 
 export function readTemplateLabels(name: string, tags: string): TemplateLabels {
@@ -12,10 +12,11 @@ export function validTemplateLabels({ name, tags }: TemplateLabels): boolean {
 }
 
 export type TemplateLabels = { name: string; tags: string[] };
-export type Template = { code: string; revision: number; sourceWorkId: string; sourceRevisionId: string; sourceAvailable: boolean; status: 'review' | 'ok' | 'off'; steps: Step[]; labels?: TemplateLabels; createdAt: string };
+export type Template = { code: string; revision: number; sourceWorkId: string | null; sourceRevisionId: string | null; evidenceSource?: { workRef: string; materialRevision: string }; sourceAvailable: boolean; status: 'review' | 'ok' | 'off'; steps: Step[]; labels?: TemplateLabels; createdAt: string };
 export type CreateCommand = { requestId: string; workId: string; expectedRevision: string; steps: Step[]; labels?: TemplateLabels };
+export type EvidenceTemplateCommand = { requestId: string; workRef: string; domainRef: string; materialRevision: string; steps: Step[] };
 export function rejectedTemplateCommand(error: unknown): error is ApiError {
-  return error instanceof ApiError && error.failure.kind === 'http' && ['creation_assets_parameter_invalid', 'creation_assets_not_found', 'creation_assets_request_conflict', 'creation_assets_stale', 'creation_assets_source_unavailable'].includes(error.failure.code ?? '');
+  return error instanceof ApiError && error.failure.kind === 'http' && ['creation_assets_parameter_invalid', 'creation_assets_not_found', 'creation_assets_request_conflict', 'creation_assets_stale', 'creation_assets_source_unavailable', 'creation_assets_template_already_imported'].includes(error.failure.code ?? '');
 }
 function parseTemplate(item: Json): Template {
   const status = str(item, 'status');
@@ -31,7 +32,12 @@ function parseTemplate(item: Json): Template {
     if (!Array.isArray(tags) || tags.some(tag => typeof tag !== 'string')) throw new ShapeError('tags');
     parsedLabels = { name: str(labels, 'name'), tags: tags as string[] };
   }
-  return { labels: parsedLabels, code: str(item, 'code'), revision, sourceWorkId: str(item, 'sourceWorkId'), sourceRevisionId: str(item, 'sourceRevisionId'), sourceAvailable: bool(item, 'sourceAvailable'), status, steps: steps as Step[], createdAt: str(item, 'createdAt') };
+  const evidence = optObj(item, 'evidenceSource');
+  const sourceWorkId = optStr(item, 'sourceWorkId');
+  const sourceRevisionId = optStr(item, 'sourceRevisionId');
+  if (evidence ? sourceWorkId !== null || sourceRevisionId !== null : !sourceWorkId || !sourceRevisionId) throw new ShapeError('source');
+  return { labels: parsedLabels, code: str(item, 'code'), revision, sourceWorkId, sourceRevisionId,
+    evidenceSource: evidence ? { workRef: str(evidence, 'workRef'), materialRevision: str(evidence, 'materialRevision') } : undefined, sourceAvailable: bool(item, 'sourceAvailable'), status, steps: steps as Step[], createdAt: str(item, 'createdAt') };
 }
 const receipt = (value: unknown) => decode(value, root => ({ template: parseTemplate(obj(root, 'template')), replayed: bool(root, 'replayed') }));
 const base = '/ops/api/creation/structural-templates';
@@ -55,4 +61,8 @@ export async function templateHistory(code: string, signal?: AbortSignal): Promi
 }
 export async function reviseTemplate(code: string, command: { requestId: string; expectedRevision: number; steps: Step[]; labels?: TemplateLabels }) {
   return receipt(await requestJson(`${base}/${encodeURIComponent(code)}/revisions`, { method: 'POST', body: command }));
+}
+
+export async function createEvidenceTemplate(command: EvidenceTemplateCommand) {
+  return receipt(await requestJson(`${base}/from-evidence`, { method: 'POST', body: command }));
 }

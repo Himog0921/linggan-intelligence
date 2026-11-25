@@ -30,6 +30,188 @@ fn without_migration(schema: &str, id: &str, migration: &str) -> String {
 }
 
 #[tokio::test]
+#[ignore = "isolated PostgreSQL evidence template import"]
+async fn evidence_template_is_deduplicated_and_keeps_only_structural_steps() {
+    let db = db("evidence_template_import").await;
+    let work_ref = dossier::work(&db).await;
+    let canonical = linggan_evidence::research_dossier::read(&db, work_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    let command = CreateEvidenceTemplate {
+        request_id: Uuid::new_v4(),
+        work_ref,
+        domain_ref: dossier::DOMAIN,
+        material_revision: canonical.material_revision.clone(),
+        steps: vec![StructuralStep::Opening, StructuralStep::Action],
+    };
+
+    let bad_domain = CreateEvidenceTemplate {
+        request_id: Uuid::new_v4(),
+        domain_ref: Uuid::new_v4(),
+        material_revision: command.material_revision.clone(),
+        steps: command.steps.clone(),
+        ..command
+    };
+    let mut tx = db.pool().begin().await.unwrap();
+    assert!(matches!(
+        create_evidence_template_in(&mut tx, &bad_domain, None).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    tx.rollback().await.unwrap();
+
+    let bad_revision = CreateEvidenceTemplate {
+        request_id: Uuid::new_v4(),
+        material_revision: "0".repeat(64),
+        steps: command.steps.clone(),
+        ..command
+    };
+    let mut tx = db.pool().begin().await.unwrap();
+    assert!(matches!(
+        create_evidence_template_in(&mut tx, &bad_revision, None).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    tx.rollback().await.unwrap();
+
+    async fn submit(
+        db: &Database,
+        cmd: &CreateEvidenceTemplate,
+    ) -> Result<TemplateReceipt, AssetsError> {
+        let mut tx = db.pool().begin().await?;
+        let receipt = create_evidence_template_in(&mut tx, cmd, None).await?;
+        tx.commit().await?;
+        Ok(receipt)
+    }
+    let duplicate = CreateEvidenceTemplate {
+        request_id: Uuid::new_v4(),
+        material_revision: command.material_revision.clone(),
+        steps: command.steps.clone(),
+        ..command
+    };
+    let (first, second) = tokio::join!(submit(&db, &command), submit(&db, &duplicate));
+    let (saved, accepted) = match (first, second) {
+        (Ok(saved), Err(AssetsError::TemplateAlreadyImported)) => (saved, &command),
+        (Err(AssetsError::TemplateAlreadyImported), Ok(saved)) => (saved, &duplicate),
+        _ => panic!("exactly one evidence candidate must be saved"),
+    };
+    assert!(!saved.replayed);
+    let code = saved.template.code;
+    assert_eq!(saved.template.status, "review");
+    assert!(saved.template.source_work_id.is_none());
+    assert!(saved.template.labels.is_none());
+    assert_eq!(saved.template.evidence_source.unwrap().work_ref, work_ref);
+    assert_eq!(saved.template.steps, command.steps);
+    assert!(submit(&db, accepted).await.unwrap().replayed);
+    let stored: (serde_json::Value, Option<serde_json::Value>) = sqlx::query_as(
+        "SELECT r.steps,r.labels FROM linggan_creation_template_revision r
+         JOIN linggan_creation_template t USING(template_ref) WHERE t.evidence_work_ref=$1",
+    )
+    .bind(work_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(stored.0, serde_json::json!(["opening", "action"]));
+    assert!(stored.1.is_none());
+    assert_eq!(
+        list_structural_templates(&db, dossier::DOMAIN)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(matches!(
+        revise_structural_template(
+            &db,
+            &code,
+            &ReviseTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                steps: command.steps.clone(),
+                labels: Some(TemplateLabels {
+                    name: "试图写入原句".into(),
+                    tags: vec![]
+                }),
+            }
+        )
+        .await,
+        Err(AssetsError::Invalid("evidence_template_labels"))
+    ));
+    let approved = review_structural_template(
+        &db,
+        &code,
+        &ReviewTemplate {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            action: TemplateAction::Approve,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(approved.template.status, "ok");
+    let external = "dossier-note";
+    dossier::fixture::submit_package(
+        &db,
+        "content_detail",
+        serde_json::json!({"contentExternalId":external}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":external},
+            "payload":{"title":"合成更新","bodyText":"合成更新后的正文。","authorId":"synthetic-author"}
+        }),
+    ).await;
+    let updated = linggan_evidence::research_dossier::read(&db, work_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(updated.material_revision, canonical.material_revision);
+    let current = list_structural_templates(&db, dossier::DOMAIN)
+        .await
+        .unwrap();
+    assert!(!current[0].source_available);
+    for action in [TemplateAction::Disable, TemplateAction::Enable] {
+        review_structural_template(
+            &db,
+            &code,
+            &ReviewTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                action,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    assert!(matches!(
+        review_structural_template(
+            &db,
+            &code,
+            &ReviewTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                action: TemplateAction::Approve,
+            }
+        )
+        .await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+
+    assert!(matches!(
+        revise_structural_template(
+            &db,
+            &code,
+            &ReviseTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                steps: command.steps,
+                labels: None,
+            }
+        )
+        .await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+}
+
+#[tokio::test]
 #[ignore = "isolated PostgreSQL template catalog migration"]
 async fn template_labels_migration_keeps_existing_immutable_revision() {
     let migration = include_str!("../../../database/migrations/0242_creation_template_labels.sql");
@@ -68,7 +250,7 @@ async fn template_labels_migration_keeps_existing_immutable_revision() {
         .await
         .unwrap();
     assert_eq!(items.len(), 1);
-    assert_eq!(items[0].source_revision_id, work.revision.id);
+    assert_eq!(items[0].source_revision_id, Some(work.revision.id));
     assert_eq!(items[0].steps, [StructuralStep::Opening]);
     assert_eq!(items[0].revision, 1);
     assert!(items[0].labels.is_none());

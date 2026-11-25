@@ -12,6 +12,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
     Router::new()
         .route("/ops/api/creation/accounts", get(accounts))
         .route(
+            "/ops/api/creation/structural-templates/from-evidence",
+            post(create_evidence_template),
+        )
+        .route(
             "/ops/api/creation/structural-templates",
             get(list_structural_templates).post(create_structural_template),
         )
@@ -189,6 +193,10 @@ fn failure(error: AssetsError) -> Response {
         AssetsError::NotFound => (StatusCode::NOT_FOUND, "creation_assets_not_found"),
         AssetsError::RequestConflict => (StatusCode::CONFLICT, "creation_assets_request_conflict"),
         AssetsError::Stale => (StatusCode::CONFLICT, "creation_assets_stale"),
+        AssetsError::TemplateAlreadyImported => (
+            StatusCode::CONFLICT,
+            "creation_assets_template_already_imported",
+        ),
         AssetsError::SourceUnavailable => {
             (StatusCode::CONFLICT, "creation_assets_source_unavailable")
         }
@@ -242,6 +250,20 @@ async fn create_structural_template(
     };
     let result =
         assets::create_structural_template_in(&mut tx, &command, Some(member.member_ref)).await;
+    finish_write(tx, result).await
+}
+async fn create_evidence_template(
+    State(state): State<LocalWebState>,
+    axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,
+    Json(command): Json<assets::CreateEvidenceTemplate>,
+) -> Response {
+    let mut tx = match super::creation_members::transaction(database!(state).pool(), &member).await
+    {
+        Ok(tx) => tx,
+        Err(response) => return response,
+    };
+    let result =
+        assets::create_evidence_template_in(&mut tx, &command, Some(member.member_ref)).await;
     finish_write(tx, result).await
 }
 async fn review_structural_template(

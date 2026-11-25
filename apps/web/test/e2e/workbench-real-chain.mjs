@@ -884,6 +884,50 @@ try {
       await screenshot('workbench-rewrite-target-changed');
     }
   });
+  await step('从证据库结构化提炼、去重并审核样板', async () => {
+    const evidenceRef = fixture.noteRefs[0];
+    await page.goto(`${origin}/corpus/evidence?domain=${domainRef}&work=${evidenceRef}`);
+    await page.getByRole('tab', { name: /^研究底稿/ }).click();
+    const open = page.getByRole('button', { name: '复刻成样板', exact: true });
+    const forged = await context.request.post(`${origin}/ops/api/creation/structural-templates/from-evidence`, {
+      headers: { Origin: origin },
+      data: { requestId: randomUUID(), workRef: evidenceRef, domainRef, materialRevision: '0'.repeat(64),
+        steps: ['scene'], rawText: '浏览器原文锚点一' },
+    });
+    assert.equal(forged.status(), 422);
+    await open.click();
+    const dialog = page.getByRole('dialog', { name: '复刻成样板' });
+    await dialog.getByRole('button', { name: '＋ 场景' }).click();
+    await dialog.getByRole('button', { name: '＋ 观点' }).click();
+    await dialog.getByRole('button', { name: '保存待审核' }).click();
+    const saved = await dialog.getByText(/已保存 YB-\d+，等待审核。/).textContent();
+    const code = saved.match(/YB-\d+/)[0];
+    const libraryHref = await dialog.getByRole('link', { name: '打开样板库' }).getAttribute('href');
+    assert.ok(libraryHref);
+    await page.reload();
+    await page.getByRole('tab', { name: /^研究底稿/ }).click();
+    await open.click();
+    await dialog.getByRole('button', { name: '＋ 开头' }).click();
+    await dialog.getByRole('button', { name: '保存待审核' }).click();
+    await dialog.getByText(/这篇作品已经入库/).waitFor();
+    assert.equal(await dialog.getByRole('link', { name: '打开样板库' }).count(), 0);
+    await page.goto(new URL(libraryHref, origin).href);
+    await page.getByRole('navigation', { name: '资产类型' }).getByRole('button', { name: '样板库' }).click();
+    const library = page.getByRole('region', { name: '样板库' });
+    await library.getByRole('button', { name: code, exact: true }).click();
+    await library.getByRole('link', { name: /查看来源作品/ }).waitFor();
+    await library.getByText('结构：场景 → 观点', { exact: true }).waitFor();
+    await library.getByRole('button', { name: '审核通过' }).click();
+    await library.locator('p').filter({ hasText: /^已通过$/ }).waitFor();
+    const items = await creationJson(`/structural-templates?domainRef=${domainRef}`);
+    const derived = items.filter(item => item.evidenceSource?.workRef === evidenceRef);
+    assert.equal(derived.length, 1);
+    assert.deepEqual(derived[0].steps, ['scene', 'reflection']);
+    assert.equal(derived[0].status, 'ok');
+    assert.ok(!JSON.stringify(derived).includes('浏览器原文锚点一'));
+    await screenshot('evidence-structural-template-approved');
+    await page.goto(workUrl);
+  });
   await step('没有外部请求、未授权模型执行或页面脚本错误',async()=>{
     assert.deepEqual(report.externalRequests,[]);assert.deepEqual(report.pageErrors,[]);
     const expectedCalls = (process.env.CW_BROWSER_TITLE_PROOF === '1' ? 2 : 0) + (process.env.CW_BROWSER_DRAFT_CONTEXT_PROOF === '1' ? 3 : 0);

@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
+mod evidence;
+pub use evidence::{CreateEvidenceTemplate, EvidenceTemplateSource, create_evidence_template_in};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum StructuralStep {
@@ -95,8 +98,10 @@ pub struct ReviseTemplate {
 pub struct StructuralTemplate {
     pub code: String,
     pub revision: i32,
-    pub source_work_id: Uuid,
-    pub source_revision_id: Uuid,
+    pub source_work_id: Option<Uuid>,
+    pub source_revision_id: Option<Uuid>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence_source: Option<EvidenceTemplateSource>,
     pub source_available: bool,
     pub status: String,
     pub steps: Vec<StructuralStep>,
@@ -166,11 +171,26 @@ async fn get_revision_in(
     code: &str,
     selected: Option<i32>,
 ) -> Result<StructuralTemplate, AssetsError> {
-    let row = sqlx::query("SELECT t.code,t.work_ref,t.revision_ref,r.created_at::text,r.revision,r.steps,r.labels,COALESCE((SELECT s.status FROM linggan_creation_template_status s WHERE s.template_ref=t.template_ref AND s.revision=r.revision ORDER BY s.sequence DESC LIMIT 1),'review') AS status FROM linggan_creation_template t JOIN linggan_creation_template_revision r USING(template_ref) WHERE t.code=$1 AND ($2::integer IS NULL OR r.revision=$2) ORDER BY r.revision DESC LIMIT 1")
+    let row = sqlx::query("SELECT t.code,t.work_ref,t.revision_ref,t.evidence_work_ref,t.evidence_domain_ref,t.evidence_material_revision,r.created_at::text,r.revision,r.steps,r.labels,COALESCE((SELECT s.status FROM linggan_creation_template_status s WHERE s.template_ref=t.template_ref AND s.revision=r.revision ORDER BY s.sequence DESC LIMIT 1),'review') AS status FROM linggan_creation_template t JOIN linggan_creation_template_revision r USING(template_ref) WHERE t.code=$1 AND ($2::integer IS NULL OR r.revision=$2) ORDER BY r.revision DESC LIMIT 1")
         .bind(code).bind(selected).fetch_optional(&mut **tx).await?.ok_or(AssetsError::NotFound)?;
     let work = row.try_get("work_ref")?;
     let revision = row.try_get("revision_ref")?;
-    let source_available = qualified(tx, work, revision).await?;
+    let (source_available, evidence_source) = if let (Some(work), Some(revision)) = (work, revision)
+    {
+        (qualified(tx, work, revision).await?, None)
+    } else {
+        let work_ref = row.try_get("evidence_work_ref")?;
+        let domain = row.try_get("evidence_domain_ref")?;
+        let material_revision: String = row.try_get("evidence_material_revision")?;
+        let available = evidence::available(tx, work_ref, domain, &material_revision).await?;
+        (
+            available,
+            Some(EvidenceTemplateSource {
+                work_ref,
+                material_revision,
+            }),
+        )
+    };
     let labels = if source_available {
         row.try_get::<Option<sqlx::types::Json<TemplateLabels>>, _>("labels")?
             .map(|labels| labels.0)
@@ -182,6 +202,7 @@ async fn get_revision_in(
         revision: row.try_get("revision")?,
         source_work_id: work,
         source_revision_id: revision,
+        evidence_source,
         source_available,
         status: row.try_get("status")?,
         steps: serde_json::from_value(row.try_get("steps")?)?,
@@ -208,8 +229,8 @@ pub(crate) async fn approved_writing_steps_in(
 ) -> Result<Option<Vec<StructuralStep>>, workbench::WorkbenchError> {
     let same_domain: bool = sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM linggan_creation_template t
-         JOIN linggan_creation_work source ON source.work_ref=t.work_ref
-         JOIN linggan_creation_work target ON target.domain_ref=source.domain_ref
+         LEFT JOIN linggan_creation_work source ON source.work_ref=t.work_ref
+         JOIN linggan_creation_work target ON target.domain_ref=COALESCE(source.domain_ref,t.evidence_domain_ref)
          WHERE t.code=$1 AND target.work_ref=$2)",
     )
     .bind(&selection.code)
@@ -305,6 +326,9 @@ pub async fn revise_structural_template(
     if !current.source_available {
         return Err(AssetsError::SourceUnavailable);
     }
+    if current.evidence_source.is_some() && labels.is_some() {
+        return Err(AssetsError::Invalid("evidence_template_labels"));
+    }
     if current.status == "off" {
         return Err(AssetsError::Invalid("template_transition"));
     }
@@ -341,12 +365,12 @@ pub async fn search_structural_templates(
     lock(&mut tx, "creation_assets:experience-gate").await?;
     let candidates: Vec<(String, bool)> = sqlx::query_as(
         "SELECT t.code, $2='' OR strpos(lower(t.code), lower($2))>0 FROM linggan_creation_template t
-         JOIN linggan_creation_work w ON w.work_ref=t.work_ref
+         LEFT JOIN linggan_creation_work w ON w.work_ref=t.work_ref
          CROSS JOIN LATERAL (
              SELECT labels FROM linggan_creation_template_revision
              WHERE template_ref=t.template_ref ORDER BY revision DESC LIMIT 1
          ) current_revision
-         WHERE w.domain_ref=$1 AND (
+         WHERE COALESCE(w.domain_ref,t.evidence_domain_ref)=$1 AND (
              $2='' OR strpos(lower(t.code), lower($2))>0
              OR strpos(lower(current_revision.labels->>'name'), lower($2))>0
              OR EXISTS (
@@ -370,6 +394,15 @@ pub async fn search_structural_templates(
     tx.commit().await?;
     Ok(items)
 }
+async fn next_code(tx: &mut Transaction<'_, Postgres>) -> Result<String, AssetsError> {
+    let code: String = sqlx::query_scalar(
+        "SELECT 'YB-' || CASE WHEN length(n)<4 THEN lpad(n,4,'0') ELSE n END FROM (SELECT nextval('linggan_creation_template_code_seq')::text n) seq",
+    )
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(code)
+}
+
 pub async fn create_structural_template(
     db: &Database,
     cmd: &CreateTemplate,
@@ -454,11 +487,7 @@ pub async fn create_structural_template_in(
     if !qualified(tx, cmd.work_id, cmd.expected_revision).await? {
         return Err(AssetsError::SourceUnavailable);
     }
-    let code: String = sqlx::query_scalar(
-        "SELECT 'YB-' || CASE WHEN length(n)<4 THEN lpad(n,4,'0') ELSE n END FROM (SELECT nextval('linggan_creation_template_code_seq')::text n) seq",
-    )
-    .fetch_one(&mut **tx)
-    .await?;
+    let code = next_code(tx).await?;
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_creation_template(template_ref,code,work_ref,revision_ref,request_ref,request_hash,created_by_member_ref) VALUES($1,$2,$3,$4,$5,$6,$7)")
         .bind(id).bind(&code).bind(cmd.work_id).bind(cmd.expected_revision).bind(cmd.request_id).bind(sha).bind(member).execute(&mut **tx).await?;
