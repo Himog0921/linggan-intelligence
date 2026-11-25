@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router';
+import { humanMoment } from '../../shared/formatting';
 import { readCards, type Card, type Comparison, type DemandGroup } from './opportunityApi';
 import { FocusAuthors, Metric, QualityFlags } from './presentation';
 import { comparisonReason, protocolLabel, readableError, supplyLabel, tierLabel } from './labels';
@@ -21,7 +22,12 @@ function taskLinks(domain: string) {
 }
 
 function ObservationTable({ rows, domain, label }: { rows: Row[]; domain: string; label: string }) {
-  return <div className={styles.tableScroll}><table className={styles.table} aria-label={label}>
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollTable = (direction: number) => {
+    const table = scrollRef.current;
+    if (table) table.scrollBy({ left: direction * table.clientWidth * 0.75 });
+  };
+  return <div className={styles.tableContainer}><nav className={styles.tableNavigation} aria-label={`${label}横向浏览`}><span>表格可横向查看</span><button type="button" onClick={() => scrollTable(-1)}>向左查看</button><button type="button" onClick={() => scrollTable(1)}>向右查看</button></nav><div ref={scrollRef} className={styles.tableScroll} role="region" aria-label={`${label}，可横向滚动`} tabIndex={0}><table className={styles.table} aria-label={label}>
     <thead><tr><th scope="col">用户问题</th><th scope="col">提及人数</th><th scope="col">提及率（每千条评论，按作品发布周）及上期对比</th><th scope="col">供给情况</th><th scope="col">受众集中的作者</th><th scope="col">证据等级</th></tr></thead>
     <tbody>{rows.map(({ card, group, comparison }) => {
       const flags = [...new Set([...card.flags, ...group.flags])];
@@ -33,7 +39,7 @@ function ObservationTable({ rows, domain, label }: { rows: Row[]; domain: string
         <td>{supplyLabel(card.supply.state)}</td><td><FocusAuthors groups={card.channel.groups} protocol={group.protocolVersion} /></td><td>{tierLabel(group.evidenceTier)}</td>
       </tr>;
     })}</tbody>
-  </table></div>;
+  </table></div></div>;
 }
 
 export function OpportunityHome({ domain }: { domain: string }) {
@@ -50,7 +56,7 @@ export function OpportunityHome({ domain }: { domain: string }) {
   return <>
     <header className={styles.header}><div><h1>机会首页</h1><p>围绕用户问题，查看讨论、作品和作者依据。</p></div></header>
     <nav className={styles.tasks} aria-label="从任务开始">{taskLinks(domain).map(item => <Link key={item.to} to={item.to}><strong>{item.label}</strong><span>{item.description}</span></Link>)}</nav>
-    <section className={styles.section} aria-labelledby="rising-title"><div className={styles.sectionHeading}><div><h2 id="rising-title">本周观察到上升</h2><p>同一已知采集协议的本周与上周提及率对比；这不是显著性或市场趋势判断。</p></div>{query.data && !query.isError ? <small>读取于 {query.data.page.asOf}（UTC）</small> : null}</div>
+    <section className={styles.section} aria-labelledby="rising-title"><div className={styles.sectionHeading}><div><h2 id="rising-title">本周观察到上升</h2><p>同一已知采集协议的本周与上周提及率对比；这不是显著性或市场趋势判断。</p></div>{query.data && !query.isError ? <small title={query.data.page.asOf}>读取于 {humanMoment(query.data.page.asOf)}（北京时间）</small> : null}</div>
       {query.isPending ? <p role="status">正在读取机会列表…</p> : query.isError ? <div role="alert"><p>{readableError(query.error)}</p><button type="button" onClick={restart}>从第一页重新读取</button></div> : !query.data.items.length ? <p>当前领域尚无可读取的机会卡。</p> : <>
         <p>本页 {query.data.items.length} 个问题；同一问题按采集协议分别展示。</p>
         <Pagination label="机会列表顶部翻页" canGoBack={cursors.length > 1} canGoNext={query.data.page.hasMore} onPrevious={() => setCursors(old => old.slice(0, -1))} onNext={() => { const next = query.data.page.nextCursor; if (next) setCursors(old => [...old, next]); }} />
