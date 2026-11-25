@@ -22,6 +22,41 @@ pub enum StructuralStep {
     Ending,
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TemplateLabels {
+    pub name: String,
+    pub tags: Vec<String>,
+}
+
+impl TemplateLabels {
+    fn normalized(&self) -> Result<Self, AssetsError> {
+        let name = self.name.trim();
+        if name.chars().count() > 60 || name.chars().any(char::is_control) || self.tags.len() > 8 {
+            return Err(AssetsError::Invalid("template_labels"));
+        }
+        let mut tags = Vec::with_capacity(self.tags.len());
+        let mut seen = std::collections::HashSet::new();
+        for tag in &self.tags {
+            let tag = tag.trim();
+            if tag.is_empty()
+                || tag.chars().count() > 24
+                || tag.contains([',', '，'])
+                || tag.chars().any(char::is_control)
+            {
+                return Err(AssetsError::Invalid("template_labels"));
+            }
+            if seen.insert(tag.to_lowercase()) {
+                tags.push(tag.to_owned());
+            }
+        }
+        Ok(Self {
+            name: name.to_owned(),
+            tags,
+        })
+    }
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct CreateTemplate {
@@ -29,6 +64,8 @@ pub struct CreateTemplate {
     pub work_id: Uuid,
     pub expected_revision: Uuid,
     pub steps: Vec<StructuralStep>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<TemplateLabels>,
 }
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -50,6 +87,8 @@ pub struct ReviseTemplate {
     pub request_id: Uuid,
     pub expected_revision: i32,
     pub steps: Vec<StructuralStep>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<TemplateLabels>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -61,6 +100,8 @@ pub struct StructuralTemplate {
     pub source_available: bool,
     pub status: String,
     pub steps: Vec<StructuralStep>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub labels: Option<TemplateLabels>,
     pub created_at: String,
 }
 #[derive(Serialize)]
@@ -125,18 +166,26 @@ async fn get_revision_in(
     code: &str,
     selected: Option<i32>,
 ) -> Result<StructuralTemplate, AssetsError> {
-    let row = sqlx::query("SELECT t.code,t.work_ref,t.revision_ref,r.created_at::text,r.revision,r.steps,COALESCE((SELECT s.status FROM linggan_creation_template_status s WHERE s.template_ref=t.template_ref AND s.revision=r.revision ORDER BY s.sequence DESC LIMIT 1),'review') AS status FROM linggan_creation_template t JOIN linggan_creation_template_revision r USING(template_ref) WHERE t.code=$1 AND ($2::integer IS NULL OR r.revision=$2) ORDER BY r.revision DESC LIMIT 1")
+    let row = sqlx::query("SELECT t.code,t.work_ref,t.revision_ref,r.created_at::text,r.revision,r.steps,r.labels,COALESCE((SELECT s.status FROM linggan_creation_template_status s WHERE s.template_ref=t.template_ref AND s.revision=r.revision ORDER BY s.sequence DESC LIMIT 1),'review') AS status FROM linggan_creation_template t JOIN linggan_creation_template_revision r USING(template_ref) WHERE t.code=$1 AND ($2::integer IS NULL OR r.revision=$2) ORDER BY r.revision DESC LIMIT 1")
         .bind(code).bind(selected).fetch_optional(&mut **tx).await?.ok_or(AssetsError::NotFound)?;
     let work = row.try_get("work_ref")?;
     let revision = row.try_get("revision_ref")?;
+    let source_available = qualified(tx, work, revision).await?;
+    let labels = if source_available {
+        row.try_get::<Option<sqlx::types::Json<TemplateLabels>>, _>("labels")?
+            .map(|labels| labels.0)
+    } else {
+        None
+    };
     Ok(StructuralTemplate {
         code: row.try_get("code")?,
         revision: row.try_get("revision")?,
         source_work_id: work,
         source_revision_id: revision,
-        source_available: qualified(tx, work, revision).await?,
+        source_available,
         status: row.try_get("status")?,
         steps: serde_json::from_value(row.try_get("steps")?)?,
+        labels,
         created_at: row.try_get("created_at")?,
     })
 }
@@ -215,10 +264,22 @@ pub async fn revise_structural_template(
     if cmd.steps.is_empty() || cmd.steps.len() > 12 {
         return Err(AssetsError::Invalid("template_steps"));
     }
-    let sha = command_hash(
-        "structural_template_revise",
-        &(code, cmd.expected_revision, &cmd.steps),
-    )?;
+    let labels = cmd
+        .labels
+        .as_ref()
+        .map(TemplateLabels::normalized)
+        .transpose()?;
+    // Preserve the fingerprint of requests issued before labels were available.
+    let sha = match &labels {
+        Some(labels) => command_hash(
+            "structural_template_revise",
+            &(code, cmd.expected_revision, &cmd.steps, labels),
+        )?,
+        None => command_hash(
+            "structural_template_revise",
+            &(code, cmd.expected_revision, &cmd.steps),
+        )?,
+    };
     let mut tx = db.pool().begin().await?;
     workbench::ensure_request_owner_in(&mut tx, cmd.request_id, workbench::RequestOwner::Template)
         .await
@@ -251,8 +312,8 @@ pub async fn revise_structural_template(
         .revision
         .checked_add(1)
         .ok_or(AssetsError::Invalid("template_revision"))?;
-    sqlx::query("INSERT INTO linggan_creation_template_revision(template_ref,revision,steps,request_ref,request_hash) SELECT template_ref,$2,$3,$4,$5 FROM linggan_creation_template WHERE code=$1")
-        .bind(code).bind(next).bind(serde_json::to_value(&cmd.steps)?).bind(cmd.request_id).bind(sha).execute(&mut *tx).await?;
+    sqlx::query("INSERT INTO linggan_creation_template_revision(template_ref,revision,steps,request_ref,request_hash,labels) SELECT template_ref,$2,$3,$4,$5,$6 FROM linggan_creation_template WHERE code=$1")
+        .bind(code).bind(next).bind(serde_json::to_value(&cmd.steps)?).bind(cmd.request_id).bind(sha).bind(labels.or(current.labels).map(sqlx::types::Json)).execute(&mut *tx).await?;
     let template = get_revision_in(&mut tx, code, Some(next)).await?;
     tx.commit().await?;
     Ok(TemplateReceipt {
@@ -264,12 +325,47 @@ pub async fn list_structural_templates(
     db: &Database,
     domain: Uuid,
 ) -> Result<Vec<StructuralTemplate>, AssetsError> {
+    search_structural_templates(db, domain, "").await
+}
+
+pub async fn search_structural_templates(
+    db: &Database,
+    domain: Uuid,
+    search: &str,
+) -> Result<Vec<StructuralTemplate>, AssetsError> {
+    let search = search.trim();
+    if search.chars().count() > 60 {
+        return Err(AssetsError::Invalid("template_search"));
+    }
     let mut tx = db.pool().begin().await?;
-    let codes: Vec<String> = sqlx::query_scalar("SELECT t.code FROM linggan_creation_template t JOIN linggan_creation_work w ON w.work_ref=t.work_ref WHERE w.domain_ref=$1 ORDER BY t.created_at DESC,t.code DESC LIMIT 200")
-        .bind(domain).fetch_all(&mut *tx).await?;
-    let mut items = Vec::with_capacity(codes.len());
-    for code in codes {
-        items.push(get_in(&mut tx, &code).await?);
+    lock(&mut tx, "creation_assets:experience-gate").await?;
+    let candidates: Vec<(String, bool)> = sqlx::query_as(
+        "SELECT t.code, $2='' OR strpos(lower(t.code), lower($2))>0 FROM linggan_creation_template t
+         JOIN linggan_creation_work w ON w.work_ref=t.work_ref
+         CROSS JOIN LATERAL (
+             SELECT labels FROM linggan_creation_template_revision
+             WHERE template_ref=t.template_ref ORDER BY revision DESC LIMIT 1
+         ) current_revision
+         WHERE w.domain_ref=$1 AND (
+             $2='' OR strpos(lower(t.code), lower($2))>0
+             OR strpos(lower(current_revision.labels->>'name'), lower($2))>0
+             OR EXISTS (
+                 SELECT FROM jsonb_array_elements_text(current_revision.labels->'tags') AS tag(value)
+                 WHERE strpos(lower(tag.value), lower($2))>0
+             )
+         )
+         ORDER BY t.created_at DESC, t.code DESC LIMIT CASE WHEN $2='' THEN 200 END",
+    )
+    .bind(domain).bind(search).fetch_all(&mut *tx).await?;
+    let mut items = Vec::with_capacity(candidates.len().min(200));
+    for (code, matches_code) in candidates {
+        let template = get_in(&mut tx, &code).await?;
+        if matches_code || template.source_available {
+            items.push(template);
+            if items.len() == 200 {
+                break;
+            }
+        }
     }
     tx.commit().await?;
     Ok(items)
@@ -292,10 +388,22 @@ pub async fn create_structural_template_in(
     if cmd.steps.is_empty() || cmd.steps.len() > 12 {
         return Err(AssetsError::Invalid("template_steps"));
     }
-    let sha = command_hash(
-        "structural_template_create",
-        &(cmd.work_id, cmd.expected_revision, &cmd.steps),
-    )?;
+    let labels = cmd
+        .labels
+        .as_ref()
+        .map(TemplateLabels::normalized)
+        .transpose()?;
+    // Preserve the fingerprint of requests issued before labels were available.
+    let sha = match &labels {
+        Some(labels) => command_hash(
+            "structural_template_create",
+            &(cmd.work_id, cmd.expected_revision, &cmd.steps, labels),
+        )?,
+        None => command_hash(
+            "structural_template_create",
+            &(cmd.work_id, cmd.expected_revision, &cmd.steps),
+        )?,
+    };
     workbench::ensure_request_owner_in(tx, cmd.request_id, workbench::RequestOwner::Template)
         .await
         .map_err(|error| match error {
@@ -354,8 +462,8 @@ pub async fn create_structural_template_in(
     let id = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_creation_template(template_ref,code,work_ref,revision_ref,request_ref,request_hash,created_by_member_ref) VALUES($1,$2,$3,$4,$5,$6,$7)")
         .bind(id).bind(&code).bind(cmd.work_id).bind(cmd.expected_revision).bind(cmd.request_id).bind(sha).bind(member).execute(&mut **tx).await?;
-    sqlx::query("INSERT INTO linggan_creation_template_revision(template_ref,revision,steps) VALUES($1,1,$2)")
-        .bind(id).bind(serde_json::to_value(&cmd.steps)?).execute(&mut **tx).await?;
+    sqlx::query("INSERT INTO linggan_creation_template_revision(template_ref,revision,steps,labels) VALUES($1,1,$2,$3)")
+        .bind(id).bind(serde_json::to_value(&cmd.steps)?).bind(labels.map(sqlx::types::Json)).execute(&mut **tx).await?;
     let template = get_in(tx, &code).await?;
     Ok(TemplateReceipt {
         template,

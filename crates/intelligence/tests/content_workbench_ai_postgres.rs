@@ -265,6 +265,7 @@ async fn selected_draft_context_matches_dispatch_and_rechecks_template_approval(
     let template = create_structural_template(
         &db,
         &CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: source.work_id,
             expected_revision: source.revision.id,
@@ -1233,6 +1234,7 @@ async fn adopted_paraphrase_keeps_source_through_edits_and_later_generation() {
     let template = linggan_intelligence::creation_assets::create_structural_template(
         &db,
         &linggan_intelligence::creation_assets::CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: first.work_id,
             expected_revision: saved.revision.id,

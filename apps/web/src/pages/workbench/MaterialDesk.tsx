@@ -763,7 +763,7 @@ export function MaterialDesk({
               options={[
                 { value: '', label: '不使用样板' },
                 ...(templateStale ? [{ value: templateKey(selectedTemplate), label: `${selectedTemplate.code} · 第 ${selectedTemplate.revision} 版` }] : []),
-                ...approvedTemplates.map(template => ({ value: templateKey(template), label: `${template.code} · 第 ${template.revision} 版` })),
+                ...approvedTemplates.map(template => ({ value: templateKey(template), label: `${template.labels?.name ? `${template.labels.name} · ` : ''}${template.code} · 第 ${template.revision} 版` })),
               ]}
               onChange={value => {
                 if (!value) onPickTemplate(null);

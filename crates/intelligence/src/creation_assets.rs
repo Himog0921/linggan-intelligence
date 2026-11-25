@@ -56,9 +56,9 @@ pub use styles::{CreationStyle, StyleCommand, StyleReceipt, list_styles, put_sty
 pub use subject::{CardTerms, Context, Subject};
 pub use templates::{
     CreateTemplate, ReviewTemplate, ReviseTemplate, StructuralStep, StructuralTemplate,
-    TemplateAction, TemplateReceipt, create_structural_template, create_structural_template_in,
-    list_structural_templates, review_structural_template, revise_structural_template,
-    structural_template_history,
+    TemplateAction, TemplateLabels, TemplateReceipt, create_structural_template,
+    create_structural_template_in, list_structural_templates, review_structural_template,
+    revise_structural_template, search_structural_templates, structural_template_history,
 };
 pub use types::*;
 pub use words::*;

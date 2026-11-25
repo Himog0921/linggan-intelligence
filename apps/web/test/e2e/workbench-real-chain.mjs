@@ -690,15 +690,31 @@ try {
     await page.setViewportSize({width:1600,height:1000});
     await screenshot('workbench-title-synthetic-model');
   });
-  if (process.env.CW_BROWSER_TITLE_PROOF === '1') await step('结构样板：保存、审核、新版本与历史',async()=>{
+  if (process.env.CW_BROWSER_TITLE_PROOF === '1') await step('结构样板：命名、标签检索、审核、新版本与历史',async()=>{
     await page.getByRole('button',{name:'存为样板',exact:true}).click();
-    const dialog=page.getByRole('dialog',{name:'存为样板'});await dialog.getByRole('button',{name:'＋ 开头'}).click();await dialog.getByRole('button',{name:'＋ 观点'}).click();
+    const dialog=page.getByRole('dialog',{name:'存为样板'});
+    await dialog.getByLabel('样板名称').fill('先讲场景');
+    await dialog.getByLabel('样板标签').fill('家庭观察，起步');
+    await dialog.getByRole('button',{name:'＋ 开头'}).click();await dialog.getByRole('button',{name:'＋ 观点'}).click();
     await dialog.getByRole('button',{name:'保存待审核'}).click();await dialog.getByText(/已保存 YB-\d+，等待审核/).waitFor();await dialog.getByRole('button',{name:'关闭',exact:true}).click();
     await page.goto(`${origin}/ops/creation?domain=${domainRef}&section=assets`);await page.getByRole('navigation',{name:'资产类型'}).getByRole('button',{name:'样板库'}).click();
-    const library=page.getByRole('region',{name:'样板库'});await library.getByRole('button',{name:/YB-\d+/}).first().click();
+    const library=page.getByRole('region',{name:'样板库'});
+    await library.getByRole('textbox',{name:'搜索样板'}).fill('起步');
+    await library.getByRole('button',{name:'搜索',exact:true}).click();
+    const result=library.getByRole('button',{name:/YB-\d+ · 先讲场景/});
+    await result.click();
+    await library.getByText('标签：家庭观察、起步',{exact:true}).waitFor();
     await library.getByRole('button',{name:'审核通过'}).click();await library.locator('p').filter({hasText:/^已通过$/}).waitFor();
-    await library.getByRole('button',{name:'编辑结构'}).click();await library.getByRole('button',{name:'＋ 行动'}).click();await library.getByRole('button',{name:'保存新版本'}).click();
-    await library.getByText('新版本已保存，等待审核。').waitFor();await library.getByText('版本历史').click();await library.getByText(/第 1 版 · 已通过 · 开头 → 观点/).waitFor();await library.getByText(/第 2 版 · 待审核 · 开头 → 观点 → 行动/).waitFor();
+    await library.getByRole('button',{name:'编辑结构'}).click();
+    await library.getByLabel('样板名称').fill('场景加行动');
+    await library.getByLabel('样板标签').fill('行动');
+    await library.getByRole('button',{name:'＋ 行动'}).click();await library.getByRole('button',{name:'保存新版本'}).click();
+    await library.getByText('新版本已保存，等待审核。').waitFor();await library.getByText('版本历史').click();await library.getByText(/第 1 版 · 已通过 · 开头 → 观点 · 先讲场景 · 家庭观察、起步/).waitFor();
+    await library.getByText(/第 2 版 · 待审核 · 开头 → 观点 → 行动 · 场景加行动 · 行动/).waitFor();
+    await library.getByText('没有符合条件的样板。').waitFor();
+    await library.getByRole('textbox',{name:'搜索样板'}).fill('场景加');
+    await library.getByRole('button',{name:'搜索',exact:true}).click();
+    await library.getByRole('button',{name:/YB-\d+ · 场景加行动/}).waitFor();
     await screenshot('structural-template-version-history');
   });
   await step('一题多号：选题框设置里选另一个账号一次开稿，新稿只带材料，不带正文，也不重复开',async()=>{

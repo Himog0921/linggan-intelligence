@@ -30,6 +30,51 @@ fn without_migration(schema: &str, id: &str, migration: &str) -> String {
 }
 
 #[tokio::test]
+#[ignore = "isolated PostgreSQL template catalog migration"]
+async fn template_labels_migration_keeps_existing_immutable_revision() {
+    let migration = include_str!("../../../database/migrations/0242_creation_template_labels.sql");
+    let before = without_migration(
+        full_schema::FULL_MIGRATIONS,
+        "0242_creation_template_labels",
+        migration,
+    );
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let db = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        "template_labels_upgrade",
+        &before,
+    )
+    .await
+    .unwrap();
+    let work = create(&db, draft(None, &["隔离旧稿"])).await;
+    let template = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_creation_template(template_ref,code,work_ref,revision_ref,request_ref,request_hash)
+         VALUES ($1,'YB-9999',$2,$3,$4,repeat('a',64))",
+    )
+    .bind(template).bind(work.work_id).bind(work.revision.id).bind(Uuid::new_v4())
+    .execute(db.pool()).await.unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_creation_template_revision(template_ref,revision,steps)
+         VALUES ($1,1,'[\"opening\"]')",
+    )
+    .bind(template)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
+
+    let items = search_structural_templates(&db, fixture::dossier::DOMAIN, "yb-9999")
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].source_revision_id, work.revision.id);
+    assert_eq!(items[0].steps, [StructuralStep::Opening]);
+    assert_eq!(items[0].revision, 1);
+    assert!(items[0].labels.is_none());
+}
+
+#[tokio::test]
 #[ignore = "isolated PostgreSQL historical migration guard"]
 async fn erasure_migration_stops_on_historical_immutable_private_source_use() {
     let migration =
@@ -845,6 +890,7 @@ async fn opening_drafts_carries_the_approved_template_revision() {
     let template = create_structural_template(
         &db,
         &CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: anchor,
             expected_revision: before.revision.id,
@@ -897,6 +943,7 @@ async fn opening_drafts_carries_the_approved_template_revision() {
         &db,
         &template.code,
         &ReviseTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             expected_revision: template.revision,
             steps: vec![StructuralStep::Scene, StructuralStep::Ending],
@@ -4690,6 +4737,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
     });
     let work = create(&db, doc).await;
     let command = CreateTemplate {
+        labels: None,
         request_id: Uuid::new_v4(),
         work_id: work.work_id,
         expected_revision: work.revision.id,
@@ -4743,6 +4791,10 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
         "ok"
     );
     let revise = ReviseTemplate {
+        labels: Some(TemplateLabels {
+            name: " 场景后接方法 ".into(),
+            tags: vec!["合成标签".into(), " Method ".into(), "method".into()],
+        }),
         request_id: Uuid::new_v4(),
         expected_revision: 1,
         steps: vec![StructuralStep::Opening, StructuralStep::Action],
@@ -4750,6 +4802,37 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
     let revised = revise_structural_template(&db, &code, &revise)
         .await
         .unwrap();
+    let labels = revised.template.labels.as_ref().unwrap();
+    assert_eq!(labels.name, "场景后接方法");
+    assert_eq!(labels.tags, ["合成标签", "Method"]);
+    for search in ["场景后", "mEtHoD", &code] {
+        let results = search_structural_templates(&db, fixture::dossier::DOMAIN, search)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].code, code);
+    }
+    assert!(
+        search_structural_templates(&db, Uuid::new_v4(), "场景后")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        search_structural_templates(&db, fixture::dossier::DOMAIN, "%")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        structural_template_history(&db, &code)
+            .await
+            .unwrap()
+            .last()
+            .unwrap()
+            .labels
+            .is_none()
+    );
     assert_eq!(
         (revised.template.revision, revised.template.status.as_str()),
         (2, "review")
@@ -4765,6 +4848,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
             &db,
             &code,
             &ReviseTemplate {
+                labels: None,
                 request_id: Uuid::new_v4(),
                 ..revise
             }
@@ -4788,6 +4872,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
             &db,
             &code,
             &ReviseTemplate {
+                labels: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: 2,
                 steps: vec![StructuralStep::Opening]
@@ -4803,6 +4888,12 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
             .iter()
             .all(|v| !v.source_available)
     );
+    assert!(
+        search_structural_templates(&db, fixture::dossier::DOMAIN, "场景后")
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let listed = list_structural_templates(&db, fixture::dossier::DOMAIN)
         .await
         .unwrap();
@@ -4817,6 +4908,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
         create_structural_template(
             &db,
             &CreateTemplate {
+                labels: None,
                 request_id: Uuid::new_v4(),
                 ..command
             }
@@ -4853,6 +4945,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
     let newer = create_structural_template(
         &db,
         &CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: work.work_id,
             expected_revision: saved.revision.id,
@@ -4869,6 +4962,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
     let large_code = create_structural_template(
         &db,
         &CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: work.work_id,
             expected_revision: saved.revision.id,
@@ -4961,6 +5055,7 @@ async fn structural_template_with_detached_history_waits_for_withdrawal() {
     let template = create_structural_template(
         &db,
         &CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: work.work_id,
             expected_revision: saved.revision.id,

@@ -218,12 +218,17 @@ async fn read_creative_budget(State(state): State<LocalWebState>) -> Response {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct TemplateQuery {
     domain_ref: Uuid,
+    #[serde(default)]
+    search: String,
 }
 async fn list_structural_templates(
     State(state): State<LocalWebState>,
     Query(query): Query<TemplateQuery>,
 ) -> Response {
-    reply(assets::list_structural_templates(database!(state), query.domain_ref).await)
+    reply(
+        assets::search_structural_templates(database!(state), query.domain_ref, &query.search)
+            .await,
+    )
 }
 async fn create_structural_template(
     State(state): State<LocalWebState>,
