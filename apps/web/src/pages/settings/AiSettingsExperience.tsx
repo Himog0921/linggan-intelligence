@@ -16,11 +16,12 @@ import { BATCH_STATE, MATERIAL, TASK_STATE, taskPresentationStage, budgetText, c
 import type { AiAction } from './useAiAction';
 import styles from './AiSettingsExperience.module.css';
 
-const ORDER = ['ocr_recognition', 'writing_legacy', 'creation_title', 'work_comparison', 'creator_research', 'creator_account_research', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_understanding', 'comment_problem_consolidation', 'ops_title_label', 'topic_research', 'topic_research_extract_review', 'topic_research_resolve', 'topic_research_resolve_review', 'legacy_creator_discovery', 'legacy_topic_map'];
+const ORDER = ['ocr_recognition', 'writing_legacy', 'creation_title', 'creation_template_replication', 'work_comparison', 'creator_research', 'creator_account_research', 'author_org_identity', 'direction_list_draft', 'direction_proposal', 'writing_assistant', 'comment_understanding', 'comment_problem_consolidation', 'ops_title_label', 'topic_research', 'topic_research_extract_review', 'topic_research_resolve', 'topic_research_resolve_review', 'legacy_creator_discovery', 'legacy_topic_map'];
 const COPY: Record<string, { group: string; description: string }> = {
   ocr_recognition: { group: '图片文字', description: '手动识别当前作品的已有本地原图；保存模型配置不会发图，默认关闭。' },
   writing_legacy: { group: '内容工作台', description: '基于选中的作品材料，提供可审阅的写作建议与修改方案。' },
   creation_title: { group: '内容工作台', description: '为稿件准备标题候选，可编辑提示词和标题 skill。' },
+  creation_template_replication: { group: '内容工作台', description: '从研究底稿的作者正文提炼固定结构，当前可配置提示词和 Skill。' },
   work_comparison: { group: '作品研究', description: '显式比较同一作者所选作品的已取得材料，保留双侧来源与覆盖限制。' },
   creator_account_research: { group: '创作者研究', description: '综合明确选定的作品底稿与公开简介，研究账号内容倾向并保留样本限制。' },
   creator_research: { group: '创作者研究', description: '研究选定作品的研究底稿，并保留引用与覆盖限制。' },

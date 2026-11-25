@@ -16,6 +16,7 @@ import { publishedCopy } from './evidencePresent';
 import { SourceNote } from './Primitives';
 import { ReadingPanel, type PanelContext } from './ReadingPanel';
 import { InspectorResearchAction } from './InspectorResearchAction';
+import { EvidenceTemplateAction } from './EvidenceTemplateAction';
 import { errorCode } from './evidenceFeedback';
 import { useToast } from './toastContext';
 import { apiPath } from './evidencePaths';
@@ -271,6 +272,9 @@ export function Inspector(props: InspectorProps) {
                 asOf={dossier?.asOf}
                 onSubmitted={() => onTab('dossier')}
               />
+              {tab === 'dossier' && dossier?.materials.some(material => ['body', 'image', 'audio'].includes(material.kind)
+                && material.sourceState === 'present' && material.blocks.length > 0)
+                ? <EvidenceTemplateAction key={`${domain}:${work.ref}`} domainRef={domain} workRef={work.ref} materialRevision={dossier.materialRevision} hasAuthorBody={dossier.materials.some(material => material.kind === 'body' && material.sourceState === 'present' && material.blocks.length > 0)} /> : null}
             </div>
           </div>
         </div> : null}
