@@ -42,7 +42,13 @@ pub async fn image(db: &Database, id: &str) {
     .await
     .unwrap();
 }
-pub async fn prepare(db: &Database, work: Uuid, executor: &ExecutorSession) {
+#[derive(Clone, Copy)]
+pub enum CoreStorage {
+    Direct,
+    Recovered,
+}
+
+pub async fn prepare(db: &Database, work: Uuid, executor: &ExecutorSession, storage: CoreStorage) {
     let preview = owner::preview(db, dossier::DOMAIN, work).await.unwrap();
     assert_eq!(preview["canStart"], true, "{preview}");
     let receipt = owner::start(
@@ -88,7 +94,19 @@ pub async fn prepare(db: &Database, work: Uuid, executor: &ExecutorSession) {
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at) SELECT $1,m.connection_version_ref,m.model_ref,$2,'analyze',$3,'succeeded',0,0,'{\"synthetic\":true}',scope_001_now() FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref) WHERE c.config_ref=$2").bind(inv).bind(config).bind("c".repeat(64)).execute(&mut *tx).await.unwrap();
     sqlx::query("UPDATE linggan_ai_batch_item_control SET state='running',lease_generation=1,lease_token=$2,lease_instance_ref=$3,lease_instance_generation=$4,lease_expires_at=clock_timestamp()+interval '1 minute' WHERE item_ref=$1").bind(receipt.item_ref).bind(Uuid::new_v4()).bind(executor.fence().instance_ref()).bind(executor.fence().generation()).execute(&mut *tx).await.unwrap();
     sqlx::query("UPDATE linggan_ai_batch_item_control ctl SET invocation_ref=$2,attempt_count=1,executed_config_ref=cfg.task_config_ref,executed_skill_version_ref=cfg.skill_version_ref,execution_contract=cfg.execution_contract FROM linggan_ai_task_config cfg WHERE ctl.item_ref=$1 AND cfg.task_config_ref=$3").bind(receipt.item_ref).bind(inv).bind(row.get::<Uuid,_>("task_config_ref")).execute(&mut *tx).await.unwrap();
-    sqlx::query("INSERT INTO linggan_content_understanding_result(request_ref,work_ref,material_snapshot_identity,method_version,invocation_ref,result) VALUES($1,$2,$3,$4,$5,$6)").bind(receipt.request_ref).bind(work).bind(snapshot.material_snapshot_identity).bind(contract::METHOD).bind(inv).bind(accepted).execute(&mut *tx).await.unwrap();
-    sqlx::query("UPDATE linggan_ai_batch_item_control SET state='succeeded',usable=true,output='{\"synthetic\":true}',finished_at=scope_001_now(),lease_token=NULL,lease_expires_at=NULL,lease_instance_ref=NULL,lease_instance_generation=NULL WHERE item_ref=$1").bind(receipt.item_ref).execute(&mut *tx).await.unwrap();
+    let (direct, failure) = match storage {
+        CoreStorage::Direct => (Some(&accepted), None),
+        CoreStorage::Recovered => (None, Some("ai_output_invalid")),
+    };
+    sqlx::query("INSERT INTO linggan_content_understanding_result(request_ref,work_ref,material_snapshot_identity,method_version,invocation_ref,result,failure_code) VALUES($1,$2,$3,$4,$5,$6,$7)")
+        .bind(receipt.request_ref).bind(work).bind(&snapshot.material_snapshot_identity)
+        .bind(contract::METHOD).bind(inv).bind(direct).bind(failure).execute(&mut *tx).await.unwrap();
+    if let CoreStorage::Recovered = storage {
+        sqlx::query("INSERT INTO linggan_content_understanding_offline_recovery(request_ref,work_ref,material_snapshot_identity,method_version,result,validator_revision) VALUES($1,$2,$3,$4,$5,$6)")
+            .bind(receipt.request_ref).bind(work).bind(&snapshot.material_snapshot_identity)
+            .bind(contract::METHOD).bind(&accepted).bind("a".repeat(40)).execute(&mut *tx).await.unwrap();
+    }
+    sqlx::query("UPDATE linggan_ai_batch_item_control SET state=CASE WHEN $2::text IS NULL THEN 'succeeded' ELSE 'failed' END,usable=($2::text IS NULL),output=CASE WHEN $2::text IS NULL THEN jsonb_build_object('synthetic',true) END,failure_code=$2,finished_at=scope_001_now(),lease_token=NULL,lease_expires_at=NULL,lease_instance_ref=NULL,lease_instance_generation=NULL WHERE item_ref=$1")
+        .bind(receipt.item_ref).bind(failure).execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
 }

@@ -1082,6 +1082,17 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
     assert!(updated.works.iter().any(|w| w.work_ref == added));
     sqlx::query("INSERT INTO linggan_creator_discovery_threshold(domain_ref,platform,like_threshold) VALUES($1,'xhs',10)")
         .bind(domain()).execute(db.pool()).await.unwrap();
+    let station = Uuid::new_v4();
+    let install = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO execution_station(station_ref,display_name) VALUES($1,'read-model heartbeat')",
+    )
+    .bind(station)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO plugin_installation(installation_ref,install_key,plugin_version) VALUES($1,'read-model-heartbeat','1')")
+        .bind(install).execute(db.pool()).await.unwrap();
     let settings = model.read(&db, &query).await.unwrap();
     let before_tick = source_revision(&db).await.unwrap();
     let mut executor = linggan_intelligence::ai_foundation::executor::ExecutorSession::acquire(
@@ -1091,6 +1102,10 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
     )
     .await
     .unwrap();
+    sqlx::query("UPDATE execution_station SET last_dispatch_answer_at=now(),last_dispatch_answer_code='nothing_waiting' WHERE station_ref=$1")
+        .bind(station).execute(db.pool()).await.unwrap();
+    sqlx::query("UPDATE plugin_installation SET last_seen_at=now(),selector_health='{}' WHERE installation_ref=$1")
+        .bind(install).execute(db.pool()).await.unwrap();
     executor.heartbeat().await.unwrap();
     executor.request_drain().await.unwrap();
     executor.complete_drain().await.unwrap();
@@ -1118,13 +1133,20 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
         &settings,
         &model.read(&db, &query).await.unwrap()
     ));
+    sqlx::query("UPDATE plugin_installation SET plugin_version='2' WHERE installation_ref=$1")
+        .bind(install)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let changed_plugin = source_revision(&db).await.unwrap();
+    assert_ne!(changed_policy, changed_plugin);
     sqlx::query("UPDATE linggan_model_workspace SET workspace_ref=$1")
         .bind(Uuid::new_v4())
         .execute(db.pool())
         .await
         .unwrap();
     assert_ne!(
-        changed_policy,
+        changed_plugin,
         source_revision(&db).await.unwrap(),
         "workspace identity is never discarded with its heartbeat"
     );

@@ -2,6 +2,7 @@
 use super::*;
 use std::collections::BTreeMap;
 
+#[cfg(test)]
 pub(crate) async fn scope_coverage(
     db: &Database,
     works: &[Uuid],
@@ -11,8 +12,33 @@ pub(crate) async fn scope_coverage(
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
+    let dossiers = linggan_evidence::research_dossier::read_in(&mut tx, works, cutoff).await?;
+    let states = coverage_from_dossiers(&mut tx, works, cutoff, dossiers).await?;
+    tx.commit().await?;
+    Ok(count_coverage(works.iter(), &states))
+}
+
+pub(crate) fn count_coverage<'a>(
+    works: impl Iterator<Item = &'a Uuid>,
+    states: &BTreeMap<Uuid, &'static str>,
+) -> Value {
+    let mut counts = json!({"available":0,"missing":0,"stale":0,"unknown":0});
+    for work in works {
+        let state = states.get(work).copied().unwrap_or("missing");
+        counts[state] = json!(counts[state].as_u64().unwrap_or(0) + 1);
+    }
+    counts
+}
+
+/// Qualify saved results against the exact page snapshot that supplied material readiness.
+pub(crate) async fn coverage_from_dossiers(
+    tx: &mut Transaction<'_, Postgres>,
+    works: &[Uuid],
+    cutoff: &str,
+    mut dossiers: BTreeMap<Uuid, linggan_evidence::research_dossier::ResearchDossier>,
+) -> Result<BTreeMap<Uuid, &'static str>, FoundationError> {
     let rows = sqlx::query("SELECT core.work_ref,core.material_snapshot_identity,request.input_manifest FROM linggan_content_understanding_saved_core core JOIN linggan_content_understanding_request request USING(request_ref) WHERE core.work_ref=ANY($1) AND core.method_version=$2 AND core.result IS NOT NULL AND core.created_at<=$3::timestamptz")
-        .bind(works).bind(METHOD).bind(cutoff).fetch_all(&mut *tx).await?;
+        .bind(works).bind(METHOD).bind(cutoff).fetch_all(&mut **tx).await?;
     let mut identities = BTreeMap::<Uuid, Vec<(String, Option<source::Packet>)>>::new();
     for row in rows {
         identities.entry(row.get("work_ref")).or_default().push((
@@ -20,11 +46,7 @@ pub(crate) async fn scope_coverage(
             serde_json::from_value(row.get("input_manifest")).ok(),
         ));
     }
-    let existing: Vec<_> = identities.keys().copied().collect();
-    let mut dossiers =
-        linggan_evidence::research_dossier::read_in(&mut tx, &existing, cutoff).await?;
-    let mut counts =
-        json!({"available":0,"missing":works.len()-existing.len(),"stale":0,"unknown":0});
+    let mut states = BTreeMap::new();
     for (work, saved) in identities {
         let state = match dossiers.remove(&work) {
             None => "unknown",
@@ -41,9 +63,7 @@ pub(crate) async fn scope_coverage(
                         break;
                     }
                     if let Some(prior) = previous {
-                        if source::saved_result_available(&mut tx, work, cutoff, prior, &packet)
-                            .await?
-                        {
+                        if source::saved_result_available(tx, work, cutoff, prior, &packet).await? {
                             available = true;
                             break;
                         }
@@ -52,10 +72,9 @@ pub(crate) async fn scope_coverage(
                 if available { "available" } else { "stale" }
             }
         };
-        counts[state] = json!(counts[state].as_u64().unwrap_or(0) + 1);
+        states.insert(work, state);
     }
-    tx.commit().await?;
-    Ok(counts)
+    Ok(states)
 }
 
 #[cfg(test)]

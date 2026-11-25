@@ -65,14 +65,14 @@ async fn exercise(variant: &'static str) {
     for control in [ControlScope::Global, ControlScope::Executor] {
         setup::enable(&db, control).await;
     }
-    core_fixture::prepare(&db, work, &owner).await;
+    core_fixture::prepare(&db, work, &owner, core_fixture::CoreStorage::Direct).await;
     // The second work proves that an accepted topic is matched, not duplicated.
     let second = if variant == "normal" {
         let package = dossier::fixture::submit_package(&db,"content_detail",serde_json::json!({"contentExternalId":"second-topic-note"}),serde_json::json!({"kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":"second-topic-note"},"payload":{"title":"另一合格作品","bodyText":"另一作者的正文。结尾不能丢失🙂","authorId":"another-author"}})).await;
         let second:Uuid=sqlx::query_scalar("SELECT public_ref FROM linggan_material_content WHERE content_external_id='second-topic-note'").fetch_one(db.pool()).await.unwrap();
         sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref) VALUES($1,$2,$3,'primary','legacy_domain_migration',$4)").bind(Uuid::new_v4()).bind(second).bind(dossier::DOMAIN).bind(package).execute(db.pool()).await.unwrap();
         core_fixture::image(&db, "second-topic-note").await;
-        core_fixture::prepare(&db, second, &owner).await;
+        core_fixture::prepare(&db, second, &owner, core_fixture::CoreStorage::Recovered).await;
         Some(second)
     } else {
         None
@@ -195,17 +195,27 @@ async fn exercise(variant: &'static str) {
         .unwrap();
     assert_eq!(!graph.topics.is_empty(), variant == "normal");
     if let Some(second) = second {
-        let second_run = research::start(
-            &db,
-            &research::Start {
-                command_ref: Uuid::new_v4(),
-                domain_ref: dossier::DOMAIN,
-                work_refs: vec![second],
-            },
-        )
-        .await
-        .unwrap();
-        let run = wait_for(&db, second_run.run_ref, &running).await;
+        // A recovered-only L1 must pass the automatic scan, source qualification
+        // and frozen-window restore using its original analysis identity.
+        use linggan_intelligence::ai_foundation::topic_research_automation as automation;
+        let settings = automation::read(&db, dossier::DOMAIN).await.unwrap();
+        automation::change(&db, &automation::Change {
+            domain_ref: dossier::DOMAIN,
+            enabled: true,
+            expected_revision: settings.revision,
+            command_ref: Uuid::new_v4(),
+        }).await.unwrap();
+        let mut cursor = None;
+        automation::tick(&db, &mut cursor).await.unwrap();
+        let (second_run, core_ref): (Uuid, String) = sqlx::query_as(
+            "SELECT run_ref,input_refs#>>'{coverage,coreRef}' FROM linggan_topic_research_window WHERE work_ref=$1"
+        ).bind(second).fetch_one(db.pool()).await.unwrap();
+        let recovered: Uuid = sqlx::query_scalar(
+            "SELECT request_ref FROM linggan_content_understanding_offline_recovery WHERE work_ref=$1"
+        ).bind(second).fetch_one(db.pool()).await.unwrap();
+        assert_eq!(core_ref, recovered.to_string());
+        assert_eq!(automation::tick(&db, &mut cursor).await.unwrap(), 0);
+        let run = wait_for(&db, second_run, &running).await;
         assert_eq!(run["succeededStageCount"], 1);
         assert_eq!(run["failedStageCount"], 0);
         let topics: i64 = sqlx::query_scalar(

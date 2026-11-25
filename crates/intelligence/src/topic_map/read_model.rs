@@ -140,6 +140,8 @@ pub async fn source_revision(db: &Database) -> Result<SourceRevision, sqlx::Erro
             "collection_observation_target" => {
                 Some("(to_jsonb(r)-'last_scheduler_considered_at')::text")
             }
+            "execution_station" => Some("(to_jsonb(r)-'last_dispatch_answer_at'-'last_dispatch_answer_code'-'last_dispatch_answer_reason')::text"),
+            "plugin_installation" => Some("(to_jsonb(r)-'last_seen_at'-'selector_health')::text"),
             _ => None,
         };
         parts.push(match content {
