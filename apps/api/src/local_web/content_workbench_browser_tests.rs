@@ -129,6 +129,7 @@ async fn content_workbench_real_chain_browser_proof() {
         json!({"noteRefs":[first,second],"voiceRefs":[voice_one,voice_two],"replyRef":reply,"accountRef":account,"publicationRef":publication})
     };
     let title_proof = std::env::var("CW_BROWSER_TITLE_PROOF").as_deref() == Ok("1");
+    let draft_proof = std::env::var("CW_BROWSER_DRAFT_CONTEXT_PROOF").as_deref() == Ok("1");
     if title_proof {
         writing_setup::configure_fake_title(&db).await;
     }
@@ -176,7 +177,7 @@ async fn content_workbench_real_chain_browser_proof() {
     let directory =
         std::env::var("CW_BROWSER_PROOF_DIR").expect("proof evidence directory supplied");
     fs::create_dir_all(&directory).unwrap();
-    let title_worker = if title_proof {
+    let synthetic_worker = if title_proof || draft_proof {
         let path = ProofPath::new(&directory).join("synthetic-title-adapter.py");
         fs::write(&path, r#"import json,sys,os
 request=json.load(sys.stdin)
@@ -185,6 +186,10 @@ if os.environ.get('LINGGAN_DISPATCH_SIGNAL')=='1':
 payload=json.loads(request['prompt'])
 if payload['action']=='title_ideas':
     out={'coverTitles':['先从一小步开始','根治拖延'],'noteTitles':['孩子启动困难时先做这一件小事']}
+elif payload['action']=='draft':
+    assert payload['draftContext']['writingTemplate']['steps']==['opening','ending']
+    assert payload['draftContext']['materialCards']
+    out={'title':None,'paragraphs':[{'paragraphId':None,'text':'合成正文候选：先写一件具体的小事。'}],'pages':[]}
 else:
     assert payload['action']=='rewrite_selection'
     out={'title':None,'paragraphs':[{'paragraphId':payload['paragraphs'][0]['id'],'text':'合成经历改写：先做一小步。'}],'pages':[]}
@@ -197,7 +202,7 @@ print(json.dumps({'version':'linggan.pi.v1/0.85.1','ok':True,'text':json.dumps(o
         let worker_db = db.clone();
         Some(tokio::spawn(async move {
             loop {
-                let id:Option<Uuid>=sqlx::query_scalar("SELECT r.request_ref FROM linggan_creation_ai_request r JOIN linggan_creation_ai_preview p USING(preview_ref) WHERE p.action IN ('title_ideas','rewrite_selection') AND r.state='queued' ORDER BY r.created_at LIMIT 1").fetch_optional(worker_db.pool()).await.unwrap();
+                let id:Option<Uuid>=sqlx::query_scalar("SELECT r.request_ref FROM linggan_creation_ai_request r JOIN linggan_creation_ai_preview p USING(preview_ref) WHERE (($1 AND p.action='title_ideas') OR (($1 OR $2) AND p.action='rewrite_selection') OR ($2 AND p.action='draft')) AND r.state='queued' ORDER BY r.created_at LIMIT 1").bind(title_proof).bind(draft_proof).fetch_optional(worker_db.pool()).await.unwrap();
                 if let Some(id) = id {
                     writing_setup::run_request(
                         &worker_db,
@@ -252,7 +257,7 @@ print(json.dumps({'version':'linggan.pi.v1/0.85.1','ok':True,'text':json.dumps(o
     };
     server.abort();
     let _ = server.await;
-    if let Some(worker) = title_worker {
+    if let Some(worker) = synthetic_worker {
         worker.abort();
         let _ = worker.await;
     }
@@ -263,8 +268,8 @@ print(json.dumps({'version':'linggan.pi.v1/0.85.1','ok':True,'text':json.dumps(o
     );
     assert_eq!(
         after.0,
-        before.0 + if title_proof { 2 } else { 0 },
-        "only the explicitly enabled synthetic title and experience rewrite calls may run"
+        before.0 + 2 * i64::from(title_proof) + 3 * i64::from(draft_proof),
+        "only the explicitly enabled synthetic title, experience rewrite and draft calls may run"
     );
     if let Some(result) = result {
         assert!(

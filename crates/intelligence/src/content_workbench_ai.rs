@@ -16,6 +16,8 @@ pub enum AiError {
     Invalid,
     #[error("creation_ai_stale")]
     Stale,
+    #[error("creation_ai_target_changed")]
+    TargetChanged,
     #[error("creation_ai_not_found")]
     NotFound,
     #[error("creation_ai_conflict")]
@@ -49,6 +51,7 @@ impl AiError {
         match self {
             Self::Invalid => "creation_ai_invalid",
             Self::Stale => "creation_ai_stale",
+            Self::TargetChanged => "creation_ai_target_changed",
             Self::NotFound => "creation_ai_not_found",
             Self::Conflict => "creation_ai_conflict",
             Self::Source => "creation_ai_source_unavailable",
@@ -113,6 +116,9 @@ fn selected_text<'a>(
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct PreviewRequest {
+    /// New draft previews opt in; stored previews without this field retain their exact payload.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_context_excerpt_ids: Option<Vec<Uuid>>,
     #[serde(default)]
     pub selection: Option<RewriteSelection>,
     pub preview_ref: Uuid,
@@ -157,6 +163,8 @@ pub struct WritingSuggestion {
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdoptRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rewrite_text: Option<String>,
     pub request_id: Uuid,
     pub expected_revision: Uuid,
     pub paragraph_indices: Option<Vec<usize>>,
@@ -179,7 +187,10 @@ pub async fn title_readiness(db: &Database) -> Result<Value, AiError> {
 }
 
 fn instruction_valid(r: &PreviewRequest) -> bool {
-    r.instruction.chars().count() <= 2000
+    r.draft_context_excerpt_ids
+        .as_ref()
+        .is_none_or(|ids| r.action == WritingAction::Draft && ids.len() <= 50)
+        && r.instruction.chars().count() <= 2000
         && r.citations.len() <= 50
         && r.paragraph_ids.len() <= 200
         && r.selection.as_ref().is_none_or(|selection| {
@@ -188,6 +199,53 @@ fn instruction_valid(r: &PreviewRequest) -> bool {
         })
         && (r.action != WritingAction::RewriteSelection || !r.paragraph_ids.is_empty())
 }
+/// Include a card only when its exact source citation was selected for this draft preview.
+fn selected_draft_cards<'a>(
+    doc: &'a WorkDocument,
+    request: &PreviewRequest,
+) -> impl Iterator<Item = (&'a CanvasBlock, &'a Citation)> {
+    doc.canvas.iter().filter_map(|card| {
+        let ids = request.draft_context_excerpt_ids.as_ref()?;
+        let excerpt = doc
+            .excerpts
+            .iter()
+            .find(|excerpt| Some(excerpt.id) == card.excerpt_id && ids.contains(&excerpt.id))?;
+        request
+            .citations
+            .contains(&excerpt.citation)
+            .then_some((card, &excerpt.citation))
+    })
+}
+
+async fn draft_template_steps(
+    tx: &mut Transaction<'_, Postgres>,
+    doc: &WorkDocument,
+    request: &PreviewRequest,
+) -> Result<Option<Vec<crate::creation_assets::StructuralStep>>, AiError> {
+    if request.draft_context_excerpt_ids.is_none() || request.action != WritingAction::Draft {
+        return Ok(None);
+    }
+    let Some(selection) = &doc.writing_template else {
+        return Ok(None);
+    };
+    // Source validation traverses the template's original revision. Keep that large
+    // future out of the shared preview/status futures used by every writing action.
+    Box::pin(
+        crate::creation_assets::templates::approved_writing_steps_in(
+            tx,
+            request.work_ref,
+            selection,
+        ),
+    )
+    .await
+    .map_err(|error| match error {
+        content_workbench::WorkbenchError::Database(error) => AiError::Database(error),
+        _ => AiError::Source,
+    })?
+    .map(Some)
+    .ok_or(AiError::Source)
+}
+
 /// Inspect only text actually sent by this action, against already known exact Citation text.
 fn outbound_known_citations(
     doc: &WorkDocument,
@@ -208,12 +266,28 @@ fn outbound_known_citations(
             paragraph.text.clone()
         });
     }
+    let selected_notes: std::collections::HashSet<_> = selected_draft_cards(doc, request)
+        .map(|(card, _)| {
+            texts.push(card.note.clone());
+            card.id
+        })
+        .collect();
     let mut citations = request.citations.clone();
+    for usage in &doc.uses {
+        if let UseTarget::CanvasNote { canvas_id } = usage.target
+            && selected_notes.contains(&canvas_id)
+            && let Some(excerpt) = doc.excerpts.iter().find(|e| Some(e.id) == usage.excerpt_id)
+            && !citations.contains(&excerpt.citation)
+        {
+            citations.push(excerpt.citation.clone());
+        }
+    }
     // Derived text may contain no verbatim source words; carry the explicitly recorded
     // lineage when that target is part of the next model input.
     for derived in &doc.derived_sources {
         let sent = match &derived.target {
             UseTarget::Title | UseTarget::Angle | UseTarget::Outline { .. } => true,
+            UseTarget::CanvasNote { canvas_id } => selected_notes.contains(canvas_id),
             UseTarget::Paragraph { paragraph_id } => {
                 request.action != WritingAction::RewriteSelection
                     || request.paragraph_ids.contains(paragraph_id)
@@ -293,6 +367,17 @@ async fn inputs_in(
     {
         return Err(AiError::Invalid);
     }
+    if r.draft_context_excerpt_ids.as_ref().is_some_and(|ids| {
+        ids.iter().any(|id| {
+            !revision
+                .document
+                .excerpts
+                .iter()
+                .any(|excerpt| excerpt.id == *id && r.citations.contains(&excerpt.citation))
+        })
+    }) {
+        return Err(AiError::Invalid);
+    }
     for citation in outbound_known_citations(&revision.document, r)? {
         sources::validate_citation_in_domain(tx, &citation, domain)
             .await
@@ -329,7 +414,20 @@ async fn inputs_in(
             Ok(json!({"id":p.id,"text":text}))
         })
         .collect::<Result<Vec<_>, AiError>>()?;
-    let payload = json!({"action":r.action,"title":revision.document.title,"angle":revision.document.angle,"outline":revision.document.outline,"paragraphs":paragraphs,"selection":r.selection,"pages":revision.document.pages.iter().map(|p|json!({"pageId":p.id,"kind":p.kind})).collect::<Vec<_>>(),"materials":materials,"authorInstruction":r.instruction});
+    let mut payload = json!({"action":r.action,"title":revision.document.title,"angle":revision.document.angle,"outline":revision.document.outline,"paragraphs":paragraphs,"selection":r.selection,"pages":revision.document.pages.iter().map(|p|json!({"pageId":p.id,"kind":p.kind})).collect::<Vec<_>>(),"materials":materials,"authorInstruction":r.instruction});
+    if r.draft_context_excerpt_ids.is_some() {
+        let doc = &revision.document;
+        let steps = draft_template_steps(tx, doc, r).await?;
+        let cards: Vec<_> = selected_draft_cards(doc, r)
+            .map(|(card, citation)| json!({"citation":citation,"purpose":card.group,"note":card.note}))
+            .collect();
+        payload["draftContext"] = json!({
+            "writingTemplate": doc.writing_template.as_ref().zip(steps).map(|(selection, steps)|
+                json!({"code":selection.code,"revision":selection.revision,"steps":steps})),
+            "materialCards": cards,
+            "materialGuidance": "按材料卡的用途和思路使用对应材料。reference_only 仅供理解，counterexample 仅用于识别应避免的写法。不要把两类材料的原话写进正文。不得把参考经历当作该账号的亲身经历。"
+        });
+    }
     let hash = sources::text_hash(
         &json!([
             r.action.method(),
@@ -425,6 +523,11 @@ async fn qualify_frozen_inputs(
         .map_err(|_| AiError::Source)?
     {
         return Ok(false);
+    }
+    match draft_template_steps(tx, &revision.document, input).await {
+        Ok(_) => {}
+        Err(AiError::Source) => return Ok(false),
+        Err(error) => return Err(error),
     }
     let citations = outbound_known_citations(&revision.document, input)?;
     Ok(sources::qualify_citations_in_domain(tx, &citations, domain)
@@ -612,6 +715,7 @@ pub(crate) async fn assert_handoff_outbound_unavailable(
     frozen: Uuid,
 ) {
     let mut request = PreviewRequest {
+        draft_context_excerpt_ids: None,
         selection: None,
         preview_ref: Uuid::new_v4(),
         work_ref: work,
@@ -638,6 +742,7 @@ pub(crate) async fn assert_handoff_instruction_recheck(
     quote: &str,
 ) {
     let mut request = PreviewRequest {
+        draft_context_excerpt_ids: None,
         selection: None,
         preview_ref: Uuid::new_v4(),
         work_ref: work,

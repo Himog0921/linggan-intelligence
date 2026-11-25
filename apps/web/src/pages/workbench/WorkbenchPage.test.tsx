@@ -667,6 +667,7 @@ it('retains the original AI input and action while an execution result is unknow
   expect(screen.getByRole('button', {
     name: '准备并核对输入'
   })).toBeDisabled();
+  expect(api.preview).toHaveBeenCalledWith(expect.objectContaining({ action: 'draft', draftContextExcerptIds: [] }));
   expect(api.preview).toHaveBeenCalledTimes(1);
   expect(api.execute).toHaveBeenCalledTimes(1);
 });

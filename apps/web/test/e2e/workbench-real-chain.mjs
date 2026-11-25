@@ -643,7 +643,9 @@ try {
     assert.ok((await review.innerText()).includes('撤回后重新编辑的合成文字。'));
     await review.getByLabel('我已核对，发送内容不含真实姓名、学校、密码和点赞数').check();await review.getByRole('button',{name:'确认并生成'}).click();
     const candidate=page.getByRole('button',{name:'先从一小步开始',exact:true});await candidate.waitFor({timeout:45_000});
-    await page.getByRole('button',{name:'根治拖延 · 疗效承诺提醒',exact:true}).waitFor();
+    const warnedCover=page.getByRole('button',{name:'根治拖延',exact:true});
+    await warnedCover.waitFor();
+    assert.match(await warnedCover.getAttribute('class')??'',/titleRisk/);
     await candidate.click();await until(async()=>await page.getByLabel('封面大字',{exact:true}).inputValue()==='先从一小步开始','cover title adopted');
     const note=page.getByRole('button',{name:'孩子启动困难时先做这一件小事',exact:true});await until(async()=>await note.isEnabled(),'same batch remains selectable');await note.click();
     await until(async()=>await page.getByLabel('正文标题').inputValue()==='孩子启动困难时先做这一件小事','note title adopted');
@@ -672,10 +674,20 @@ try {
     await page.getByRole('button',{name:'建立并关联',exact:true}).click();await save();
     const anchor=(await envelope()).revision.document;
     assert.equal(anchor.ideaName,ideaName);assert.ok(anchor.ideaRef);assert.ok(anchor.excerpts.length>0&&anchor.canvas.length>0,'the idea draft holds material to share');
+    const templateCommand=async (path,data)=>{
+      const response=await context.request.post(`${origin}/ops/api/creation/structural-templates${path}`,{headers:{Origin:origin},data:{requestId:randomUUID(),...data}});
+      assert.equal(response.status(),200,await response.text());
+      return (await response.json()).template;
+    };
+    const template=await templateCommand('',{workId,expectedRevision:(await envelope()).revision.id,steps:['opening','ending']});
+    const approved=await templateCommand(`/${template.code}/review`,{expectedRevision:template.revision,action:'approve'});
+    const selection={code:approved.code,revision:approved.revision};
     const before=(await creationJson(`/works?domainRef=${domainRef}`)).items.length;
+    await page.reload();
     await stage('材料');
-    await page.getByLabel('选题框：作业启动').getByRole('button',{name:'设置',exact:true}).click();
+    await page.getByLabel(`选题框：${anchor.title}`, {exact:true}).getByRole('button',{name:'设置',exact:true}).click();
     const settings=page.getByRole('region',{name:'选题框设置'});await settings.waitFor();
+    await choose(settings.getByRole('combobox',{name:'写作样板',exact:true}),`${selection.code} · 第 ${selection.revision} 版`);
     const mine=settings.getByRole('button',{name:`${await fixtureAccountName()} · 已开稿`,exact:true});
     assert.equal(await mine.isDisabled(),true,'the idea draft’s own account already has its draft');
     const open=settings.getByRole('button',{name:/^用这组材料开稿/});
@@ -688,6 +700,8 @@ try {
     await settings.getByText(`已开稿 1 篇：${other.accountName}`).waitFor();
     // The server holds one new draft for that account: the idea's material, none of what the idea's draft wrote.
     const made=(await creationJson(`/works/${opened.drafts[0].workId}`)).revision.document;
+    assert.deepEqual((await envelope()).revision.document.writingTemplate,selection);
+    assert.deepEqual(made.writingTemplate,selection);
     assert.equal(made.ideaRef,anchor.ideaRef);assert.ok(made.ideaName==null,'only the idea’s own draft holds its name');assert.equal(made.accountRef,other.accountRef);assert.equal(made.title,ideaName);
     assert.equal(made.paragraphs.length,0);assert.equal(made.pages.length,0);assert.ok(!made.experienceSlots?.length&&!made.experienceGaps?.length&&!made.bridge,'nothing of the account’s own experience or bridge is carried over');
     assert.equal(made.excerpts.length,anchor.excerpts.length);assert.equal(made.canvas.length,anchor.canvas.length);
@@ -701,11 +715,97 @@ try {
     assert.equal(await open.isDisabled(),true,'nothing is left to open');
     report.ideaDrafts={ideaRef:anchor.ideaRef,opened:opened.drafts.length,skippedExcerpts:opened.skippedExcerpts};
     await screenshot('workbench-idea-drafts');
+    if (process.env.CW_BROWSER_DRAFT_CONTEXT_PROOF === '1') {
+      const draftId=opened.drafts[0].workId;
+      await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${draftId}&view=body`);
+      await page.locator('summary[aria-label^="写稿工具"]:visible').first().waitFor();
+      await openWritingTools(page);
+      await page.getByRole('button',{name:'按材料起草',exact:true}).click();
+      const draft=page.getByRole('dialog',{name:'按所选材料起草'});
+      await draft.getByRole('button',{name:'准备并核对输入',exact:true}).click();
+      const input=draft.locator('pre').filter({hasText:'"draftContext"'});
+      await input.waitFor();
+      const confirmedInput=JSON.parse(await input.innerText());
+      assert.equal(confirmedInput.angle,made.angle);
+      assert.deepEqual(confirmedInput.draftContext.writingTemplate,{...selection,steps:['opening','ending']});
+      assert.equal(confirmedInput.draftContext.materialCards.length,made.canvas.length);
+      await draft.getByLabel('已核对不含真实姓名、学校、密码和点赞数，确认输入及额度').check();
+      const sent=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/ai/requests'&&response.request().method()==='POST');
+      await draft.getByRole('button',{name:'执行一次',exact:true}).click();
+      const response=await sent; assert.equal(response.status(),200,await response.text());
+      const request=await response.json();
+      await until(async()=>{
+        const state=await creationJson(`/ai/requests/${request.requestId}`);
+        if(['failed','cancelled'].includes(state.state)) throw new Error(`synthetic draft ${state.state}: ${state.failureCode}`);
+        return state.suggestion?.paragraphs?.[0]?.text==='合成正文候选：先写一件具体的小事。';
+      },'synthetic draft suggestion received',45_000);
+      await draft.getByRole('button',{name:'刷新结果'}).click();
+      await draft.getByRole('button',{name:'打开改稿对照'}).click();
+      await page.getByText('合成正文候选：先写一件具体的小事。',{exact:true}).first().waitFor();
+      assert.equal((await creationJson(`/works/${draftId}`)).revision.document.paragraphs.length,0);
+      await screenshot('workbench-draft-context-suggestion');
+      await page.getByRole('button',{name:'返回正文',exact:true}).click();
+      const writeParagraph=async (index,text)=>{
+        await page.getByRole('button',{name:'＋ 继续写一段',exact:true}).click();
+        await page.getByLabel(`正文第 ${index} 段`,{exact:true}).fill(text);
+      };
+      await writeParagraph(1,'目标段原文');
+      await writeParagraph(2,'其他段原文');
+      await save(page);
+      const rewrite=async ()=>{
+        await openWritingTools(page);
+        await page.getByLabel('正文第 1 段',{exact:true}).focus();
+        await page.keyboard.press('ControlOrMeta+A');
+        await page.getByRole('button',{name:'改写选段',exact:true}).click();
+        const panel=page.getByRole('dialog',{name:'改写选段',exact:true});
+        await panel.getByRole('button',{name:'准备并核对输入'}).click();
+        await panel.locator('pre').filter({hasText:'目标段原文'}).first().waitFor();
+        await panel.getByLabel('已核对不含真实姓名、学校、密码和点赞数，确认输入及额度').check();
+        const waiting=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/ai/requests'&&response.request().method()==='POST');
+        await panel.getByRole('button',{name:'执行一次',exact:true}).click();
+        const response=await waiting;
+        assert.equal(response.status(),200,await response.text());
+        const command=await response.json();
+        await until(async()=>{
+          const state=await creationJson(`/ai/requests/${command.requestId}`);
+          if(['failed','cancelled'].includes(state.state)) throw new Error(`synthetic targeted rewrite ${state.state}: ${state.failureCode}`);
+          return !!state.rewriteTarget && state.state==='succeeded';
+        },'target rewrite candidate received');
+        await panel.getByRole('button',{name:'刷新结果'}).click();
+        await panel.getByRole('button',{name:'打开改稿对照'}).click();
+      };
+      const editFromOtherPage=async (index,text)=>{
+        const {revision}=await creationJson(`/works/${draftId}`);
+        const document=revision.document;
+        document.paragraphs[index].text=text;
+        const response=await context.request.post(`${origin}/ops/api/creation/works/${draftId}/save`,{
+          headers:{Origin:origin},data:{requestId:randomUUID(),expectedRevision:revision.id,document}
+        });
+        assert.equal(response.status(),200,await response.text());
+      };
+      await rewrite();
+      await editFromOtherPage(1,'另一编辑保留');
+      await page.getByLabel('编辑改稿 第 1 段',{exact:true}).fill('采用前手改');
+      await page.getByRole('button',{name:'采用这一段',exact:true}).click();
+      await until(async()=>(await creationJson(`/works/${draftId}`)).revision.document.paragraphs[0].text==='采用前手改','edited target adopted');
+      await page.getByLabel('正文第 2 段',{exact:true}).waitFor();
+      assert.equal(await page.getByLabel('正文第 2 段',{exact:true}).inputValue(),'另一编辑保留');
+      await page.getByRole('button',{name:'撤销这次采用',exact:true}).click();
+      await until(async()=>(await creationJson(`/works/${draftId}`)).revision.document.paragraphs[0].text==='目标段原文','one undo saved on server');
+      assert.equal((await creationJson(`/works/${draftId}`)).revision.document.paragraphs[1].text,'另一编辑保留');
+      await rewrite();
+      await editFromOtherPage(0,'目标段原文加了新尾句');
+      await page.getByRole('button',{name:'采用这一段',exact:true}).click();
+      await page.getByText(/目标段已经变化.*重新选择/).first().waitFor();
+      assert.equal((await creationJson(`/works/${draftId}`)).revision.document.paragraphs[0].text,'目标段原文加了新尾句');
+      await screenshot('workbench-rewrite-target-changed');
+    }
   });
   await step('没有外部请求、未授权模型执行或页面脚本错误',async()=>{
     assert.deepEqual(report.externalRequests,[]);assert.deepEqual(report.pageErrors,[]);
-    if (process.env.CW_BROWSER_TITLE_PROOF !== '1') assert.ok(report.requests.every(request=>!request.path.includes('/ai/requests')&&!request.path.includes('/probes')),'no model/provider command');
-    else assert.equal(report.requests.filter(request=>request.method==='POST'&&request.path==='/ops/api/creation/ai/requests').length,2,'exactly one synthetic title and one synthetic experience request');
+    const expectedCalls = (process.env.CW_BROWSER_TITLE_PROOF === '1' ? 2 : 0) + (process.env.CW_BROWSER_DRAFT_CONTEXT_PROOF === '1' ? 3 : 0);
+    assert.equal(report.requests.filter(request=>request.method==='POST'&&request.path==='/ops/api/creation/ai/requests').length,expectedCalls,'only explicit synthetic requests');
+    assert.ok(report.requests.every(request=>!request.path.includes('/probes')),'no model/provider probe');
     const unexpected=report.failedRequests.filter(request=>!(request.method==='POST'&&request.path.endsWith('/save'))&&!request.error?.includes('ERR_ABORTED'));
     assert.deepEqual(unexpected,[]);report.finalRevision=(await envelope()).revision.id;
   });

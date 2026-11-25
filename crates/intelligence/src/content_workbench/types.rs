@@ -298,9 +298,19 @@ pub struct BridgeChoice {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub after_paragraph: Option<Uuid>,
 }
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WritingTemplateRef {
+    pub code: String,
+    pub revision: i32,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct WorkDocument {
+    /// The selected writing structure, pinned to an immutable template revision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writing_template: Option<WritingTemplateRef>,
     /// Original saved topic angles; preserved by the server through editor round trips.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub topic_angle_refs: Vec<Uuid>,
@@ -375,6 +385,7 @@ impl Default for WorkDocument {
             topic_ref: None,
             idea_ref: None,
             idea_name: None,
+            writing_template: None,
             angle: String::new(),
             outline: vec![],
             paragraphs: vec![],

@@ -1,20 +1,62 @@
 //! Adopt a confirmed suggestion through the existing revision/source provenance transaction.
 use super::{
-    AdoptRequest, AiError, PreviewRequest, WritingSuggestion, outbound_known_citations,
-    qualify_frozen_inputs, selected_text, sources,
+    AdoptRequest, AiError, PreviewRequest, WritingAction, WritingSuggestion,
+    outbound_known_citations, qualify_frozen_inputs, selected_text, sources,
 };
 use crate::content_workbench::{
     self,
-    types::{AdoptionLink, Paragraph, SaveReceipt, UseTarget},
+    types::{AdoptionLink, Paragraph, SaveReceipt, UseTarget, WorkDocument},
 };
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 use sqlx::Row;
 use uuid::Uuid;
 
+fn same_rewrite_target(before: &WorkDocument, current: &WorkDocument, id: Uuid) -> bool {
+    let target = UseTarget::Paragraph { paragraph_id: id };
+    let paragraph = before.paragraphs.iter().find(|p| p.id == id);
+    paragraph.is_some()
+        && paragraph == current.paragraphs.iter().find(|p| p.id == id)
+        && before.account_ref == current.account_ref
+        && before.experience_epoch == current.experience_epoch
+        && before.experience_gaps.contains(&id) == current.experience_gaps.contains(&id)
+        && before
+            .experience_slots
+            .iter()
+            .filter(|s| s.paragraph_id == id)
+            .eq(current
+                .experience_slots
+                .iter()
+                .filter(|s| s.paragraph_id == id))
+        && before
+            .derived_sources
+            .iter()
+            .filter(|s| s.target == target)
+            .eq(current
+                .derived_sources
+                .iter()
+                .filter(|s| s.target == target))
+        && before
+            .uses
+            .iter()
+            .filter(|u| u.target == target)
+            .map(|u| {
+                (
+                    u,
+                    before.excerpts.iter().find(|e| Some(e.id) == u.excerpt_id),
+                )
+            })
+            .eq(current.uses.iter().filter(|u| u.target == target).map(|u| {
+                (
+                    u,
+                    current.excerpts.iter().find(|e| Some(e.id) == u.excerpt_id),
+                )
+            }))
+}
+
 pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<Value, AiError> {
     let mut tx = db.pool().begin().await?;
-    let command_hash = sources::text_hash(&json!([id, r]).to_string());
+
     content_workbench::ensure_request_owner_in(
         &mut tx,
         r.request_id,
@@ -25,6 +67,25 @@ pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<V
         content_workbench::WorkbenchError::Database(e) => AiError::Database(e),
         _ => AiError::Conflict,
     })?;
+    // Author edits to a protected suggestion need the same erasable salt as its preview.
+    let protected_salt = if r.rewrite_text.is_some() {
+        let salt: Option<Option<Uuid>> = sqlx::query_scalar(
+            "SELECT private.hash_salt FROM linggan_creation_ai_request request
+             JOIN linggan_creation_ai_preview p USING (preview_ref)
+             LEFT JOIN linggan_creation_ai_experience_material private USING (preview_ref)
+             WHERE request.request_ref=$1 AND p.input_manifest->>'experienceProtected'='true'",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        salt.map(|value| value.ok_or(AiError::Source)).transpose()?
+    } else {
+        None
+    };
+    let command_hash = sources::text_hash(&match protected_salt {
+        Some(salt) => json!([id, r, salt]).to_string(),
+        None => json!([id, r]).to_string(),
+    });
     let prior = sqlx::query(
         "SELECT command_hash,receipt FROM linggan_creation_ai_adoption_request WHERE request_ref=$1",
     )
@@ -64,9 +125,6 @@ pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<V
         .execute(&mut *tx)
         .await?;
     let input_revision: Uuid = row.get("input_revision");
-    if input_revision != r.expected_revision {
-        return Err(AiError::Stale);
-    }
     let manifest: Value = row.get("input_manifest");
     let protected = manifest.get("experienceProtected").and_then(Value::as_bool) == Some(true);
     let manifest = if protected {
@@ -84,15 +142,51 @@ pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<V
         return Err(AiError::Invalid);
     }
     let input: PreviewRequest = serde_json::from_value(manifest).map_err(|_| AiError::Invalid)?;
-    if !qualify_frozen_inputs(&mut tx, &input).await? {
+    if !Box::pin(qualify_frozen_inputs(&mut tx, &input)).await? {
         return Err(AiError::Source);
     }
     let (domain, revision) = content_workbench::read_revision_in(&mut tx, work, None)
         .await
         .map_err(|_| AiError::NotFound)?;
-    if revision.id != input_revision {
+    if revision.id != r.expected_revision {
         return Err(AiError::Stale);
     }
+    let focused = input.action == WritingAction::RewriteSelection
+        && input.selection.is_some()
+        && !r.adopt_title
+        && r.page_indices.as_deref() == Some(&[])
+        && r.paragraph_indices.as_deref() == Some(&[0]);
+    if r.rewrite_text
+        .as_ref()
+        .is_some_and(|text| !focused || text.trim().is_empty() || text.chars().count() > 16000)
+    {
+        return Err(AiError::Invalid);
+    }
+    let original = if focused && revision.id != input_revision {
+        // Keep historical reconstruction off the common legacy adoption future.
+        let (_, original) = Box::pin(content_workbench::read_revision_in(
+            &mut tx,
+            work,
+            Some(input_revision),
+        ))
+        .await
+        .map_err(|_| AiError::NotFound)?;
+        let target = input
+            .selection
+            .as_ref()
+            .ok_or(AiError::Invalid)?
+            .paragraph_id;
+        if !same_rewrite_target(&original.document, &revision.document, target) {
+            return Err(AiError::TargetChanged);
+        }
+        super::protected_experience(&revision.document, &input)?;
+        Some(Box::new(original))
+    } else {
+        if revision.id != input_revision {
+            return Err(AiError::Stale);
+        }
+        None
+    };
     let suggestion: Value = if protected {
         row.get::<Option<Value>, _>("protected_suggestion")
             .ok_or(AiError::Source)?
@@ -102,7 +196,8 @@ pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<V
     let output: WritingSuggestion =
         serde_json::from_value(suggestion).map_err(|_| AiError::Invalid)?;
     let action: String = row.get("action");
-    let citations = outbound_known_citations(&revision.document, &input)?;
+    let frozen = original.as_deref().unwrap_or(&revision);
+    let citations = outbound_known_citations(&frozen.document, &input)?;
     let mut document = revision.document;
     let mut adopted_targets = Vec::new();
     let indices = r
@@ -140,7 +235,8 @@ pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<V
                 selected_text(target, selection)?;
                 let prefix: String = target.text.chars().take(selection.start).collect();
                 let suffix: String = target.text.chars().skip(selection.end).collect();
-                target.text = format!("{prefix}{}{suffix}", p.text);
+                let replacement = r.rewrite_text.as_deref().unwrap_or(&p.text);
+                target.text = format!("{prefix}{replacement}{suffix}");
             } else {
                 target.text = p.text.clone();
             }

@@ -14,7 +14,7 @@ mod publications;
 mod requests;
 mod styles;
 mod subject;
-mod templates;
+pub(crate) mod templates;
 mod text;
 pub mod types;
 mod words;

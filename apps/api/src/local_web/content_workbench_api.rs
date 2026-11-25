@@ -337,6 +337,10 @@ pub(super) fn error(e: WorkbenchError) -> Response {
         WorkbenchError::Invalid("idea_account_limit") => {
             (StatusCode::CONFLICT, "creation_idea_account_limit")
         }
+        WorkbenchError::Invalid("writing_template_unavailable") => (
+            StatusCode::CONFLICT,
+            "creation_writing_template_unavailable",
+        ),
         WorkbenchError::Invalid("idea_anchor") => (StatusCode::CONFLICT, "creation_idea_anchor"),
         WorkbenchError::Invalid("idea_not_found") => {
             (StatusCode::CONFLICT, "creation_idea_not_found")

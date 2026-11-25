@@ -432,6 +432,11 @@ function WorkEditor({
   const deferredRecheck = useRef(false);
   const composition = useRef(false);
   const undo = useRef<WorkDocument[]>([]);
+  const rewriteUndo = useRef<{ before: WorkDocument; parentId: string; adoptedId: string } | null>(null);
+  const [adoptedUndoRevision, setAdoptedUndoRevision] = useState<string | null>(null);
+  const preparingAdoption = useRef(false);
+  const [adoptionPreparing, setAdoptionPreparing] = useState(false);
+  const [invalidRewrite, setInvalidRewrite] = useState<string | null>(null);
   const redo = useRef<WorkDocument[]>([]);
   const aiPending = useRef<{
     requestId: string;
@@ -463,6 +468,7 @@ function WorkEditor({
   function edit(next: WorkDocument, record = true) {
     if (pending.current && pending.current.action !== 'save') return;
     if (record) {
+      setAdoptedUndoRevision(null);
       undo.current.push(live.current);
       redo.current = [];
     }
@@ -483,6 +489,7 @@ function WorkEditor({
     }
   }
   function changeTags(value: string) {
+    setAdoptedUndoRevision(null);
     tagsLive.current = value;
     setTagsDraft(value);
     setSaveState(previous => previous === 'unknown' || previous === 'conflict' || previous === 'failed' ? previous : 'dirty');
@@ -562,6 +569,7 @@ function WorkEditor({
         identities.settle(p.action);
       } else if (e instanceof ApiError && e.answered) {
         if (e.failure.kind === 'http' && e.failure.code === 'creation_experience_reset_required') setResetRequired(true);
+        if (e.failure.kind === 'http' && e.failure.code === 'creation_writing_template_unavailable') void templates.refetch();
         pending.current = null;
         setHasPending(false);
         identities.settle(p.action);
@@ -628,7 +636,7 @@ function WorkEditor({
     writingGeneration.current++;
     identities.settle('preview');
     setTitleResult(null); setTitlePrepared(null); setTitleInputChecked(false); setTitleAcceptedRevision(null); setTitleCheckedSequence(-1); setTitleAdoptIndex(null);
-    undo.current = []; redo.current = []; setUndoState({ canUndo: false, canRedo: false });
+    undo.current = []; redo.current = []; rewriteUndo.current = null; setAdoptedUndoRevision(null); setUndoState({ canUndo: false, canRedo: false });
     comparisonDirty.current = false;
     setSelection(null); setPlacement(null);
     setCompareBase(null); setComparisonDrafts(null); setAiDrafts(null); setAi(null); setPreview(null); setInstruction(''); setAiMaterials([]);
@@ -867,7 +875,10 @@ function WorkEditor({
       identities.settle('open-idea-drafts');
       return opened;
     } catch (cause) {
-      if (cause instanceof ApiError && cause.failure.kind === 'http') identities.settle('open-idea-drafts');
+      if (cause instanceof ApiError && cause.failure.kind === 'http') {
+        identities.settle('open-idea-drafts');
+        if (cause.failure.code === 'creation_writing_template_unavailable') void templates.refetch();
+      }
       throw cause;
     } finally {
       // Whatever the answer was, the drafts may exist by now: read the list again.
@@ -998,7 +1009,9 @@ function WorkEditor({
       if (!readiness?.configRef) throw new api.WorkbenchActionError('请先配置可用的创作模型');
       if (aiAction === 'rewrite_selection' && !selection) throw new api.WorkbenchActionError('请先选择要改写的原文');
       if (saved.document.experienceSlots.length && (aiAction !== 'rewrite_selection' || saved.document.experienceSlots.length !== 1 || selection?.paragraphId !== saved.document.experienceSlots[0]?.paragraphId)) throw new api.WorkbenchActionError('当前可改写一段已确认经历；开稿和其他经历组合仍在接入。');
-      const citations = saved.document.excerpts.filter(e => e.selectedText !== null && aiMaterials.includes(e.id)).map(e => e.citation);
+      const selectedExcerpts = saved.document.excerpts.filter(e => e.selectedText !== null && aiMaterials.includes(e.id));
+      const citations = selectedExcerpts.map(e => e.citation);
+      const draftContextExcerptIds = aiAction === 'draft' ? selectedExcerpts.map(e => e.id) : undefined;
       let exact: WritingSelection | null = null;
       if (aiAction === 'rewrite_selection' && selection) {
         const p = saved.document.paragraphs.find(p => p.id === selection.paragraphId);
@@ -1017,11 +1030,13 @@ function WorkEditor({
           instruction,
           aiAction,
           exact,
+          draftContextExcerptIds,
           citations
         })),
         workRef: initial.workId,
         expectedRevision: saved.id,
         action: aiAction,
+        draftContextExcerptIds,
         configRef: readiness.configRef,
         citations,
         paragraphIds: exact ? [exact.paragraphId] : [],
@@ -1067,8 +1082,15 @@ function WorkEditor({
         }
       } else status = await api.execute(frozen);
       if (generation !== recheckGeneration.current || batch !== writingGeneration.current) { setAiUnknown(true); return; }
+      if (aiLive.current?.requestId !== status.requestId) {
+        setAiAdoptedIndices([]);
+        setInvalidRewrite(null);
+        setAiDrafts(null);
+        setAiCopyFallback(false);
+        comparisonDirty.current = hasManualComparisonEdits();
+      }
       setAi(status);
-      if(status.suggestion){setAiOpen(false);setAiComparison(true);setAiAdoptedIndices([]);setAiDrafts(null);setAiCopyFallback(false);if(view !== 'body') onView('body');}
+      if(status.suggestion){setAiOpen(false);setAiComparison(true);if(view !== 'body') onView('body');}
       identities.settle('execute');
       aiPending.current = null;
       setAiUnknown(false);
@@ -1095,17 +1117,46 @@ function WorkEditor({
       if (generation === recheckGeneration.current && batch === writingGeneration.current && aiLive.current?.requestId === current.requestId) setAi(next);
     } catch (error) { if (generation === recheckGeneration.current && batch === writingGeneration.current) setFeedback(api.errorText(error)); }
   }
+  const focusedRewrite = ai?.action === 'rewrite_selection' && ai.rewriteTarget !== undefined && ai.suggestion?.paragraphs.length === 1;
+  const rewriteUnavailable = focusedRewrite && (aiAdoptedIndices.includes(0) || invalidRewrite === ai.requestId);
+  const comparisonStale = focusedRewrite ? rewriteUnavailable : !!ai && (dirty || ai.staleBase || ai.inputRevision !== revision.id);
+  const canUndoTarget = adoptedUndoRevision === revision.id && !dirty;
   async function adopt(indices: number[] | null, pages: number[] | null, adoptTitle: boolean, editedTexts?: string[]) {
-    if (!ai || dirty || ai.staleBase || ai.inputRevision !== server.current.id) {
-      setFeedback('底稿已改变，旧建议不能覆盖当前文字');
+    if (!ai || !ai.suggestion || preparingAdoption.current || pending.current || sourceInvalidated || resetRequired || recheckStatus !== 'ready') return;
+    const targeted = focusedRewrite && !adoptTitle && pages?.length === 0 && (indices === null || (indices.length === 1 && indices[0] === 0));
+    if (targeted ? rewriteUnavailable : dirty || ai.staleBase || ai.inputRevision !== server.current.id) {
+      setFeedback(targeted ? '目标段已经变化。请返回正文，重新选择文字并生成。' : '底稿已改变，旧建议不能覆盖当前文字');
       return;
     }
+    preparingAdoption.current = true;
+    setAdoptionPreparing(true);
+    const generation = recheckGeneration.current;
     try {
+      let parent = targeted ? await saveBeforeCopy() : server.current;
+      if (targeted && !dirty) {
+        const latest = await api.readWork(initial.workId);
+        if (latest.experienceResetRequired || latest.revision.document.experienceEpoch !== parent.document.experienceEpoch) {
+          throw new api.WorkbenchActionError('请先核验并处理已撤回的经历。');
+        }
+        if (generation === recheckGeneration.current && parent.id === server.current.id && JSON.stringify(live.current) === JSON.stringify(parent.document)
+          && tagsLive.current === parent.document.tags.join(' ') && latest.revision.id !== parent.id) {
+          parent = latest.revision;
+          undo.current = []; redo.current = []; rewriteUndo.current = null;
+          setAdoptedUndoRevision(null);
+          setUndoState({ canUndo: false, canRedo: false });
+          applyReceipt({requestId: ai.requestId, workId: initial.workId, outcome:'unchanged', replayed:false, revision:parent}, null);
+        }
+      }
+      if (targeted && (generation !== recheckGeneration.current || composition.current || aiLive.current?.requestId !== ai.requestId || parent.id !== server.current.id || JSON.stringify(live.current) !== JSON.stringify(parent.document) || tagsLive.current !== parent.document.tags.join(' '))) {
+        throw new api.WorkbenchActionError('稿件正在编辑，请保存当前文字后再采用。');
+      }
+      const rewritten = targeted ? editedTexts?.[0] : undefined;
       const body = {
-        expectedRevision: server.current.id,
-        paragraphIndices: indices,
+        expectedRevision: parent.id,
+        paragraphIndices: targeted ? [0] : indices,
         pageIndices: pages,
-        adoptTitle
+        adoptTitle,
+        ...(rewritten !== undefined && rewritten !== ai.suggestion.paragraphs[0]?.text ? { rewriteText: rewritten } : {})
       };
       const fingerprint = JSON.stringify({
         id: ai.requestId,
@@ -1116,6 +1167,21 @@ function WorkEditor({
         requestId, action:'adopt', fingerprint, snapshot:null,
         run:()=>api.adopt(ai.requestId,{...body,requestId}),
         afterReceipt:receipt=>{
+      if (targeted) {
+        const before = undo.current.at(-1);
+        if (before) {
+          rewriteUndo.current = { before, parentId: parent.id, adoptedId: receipt.revision.id };
+          setAdoptedUndoRevision(receipt.revision.id);
+        }
+        setAiAdoptedIndices([0]);
+        setAiComparison(false);
+        setAiOpen(false);
+        setAiDrafts(null);
+        comparisonDirty.current = hasManualComparisonEdits();
+        setAi({...ai, staleBase:true});
+        setFeedback('已采用这一段。');
+        return;
+      }
       let unresolved=false;
       if (editedTexts && ai.suggestion) {
         let next=receipt.revision.document;
@@ -1127,7 +1193,7 @@ function WorkEditor({
           const text=ai.action==='rewrite_selection' && selection && original.paragraphId===selection.paragraphId ? Array.from(target.text).slice(0,selection.start).join('')+changed+Array.from(target.text).slice(selection.start+Array.from(original.text).length).join('') : changed;
           next={...next,paragraphs:next.paragraphs.map(paragraph=>paragraph.id===target.id?{...paragraph,text}:paragraph)};
         }
-        if(JSON.stringify(next)!==JSON.stringify(receipt.revision.document))edit(next);
+        if(JSON.stringify(next)!==JSON.stringify(receipt.revision.document))edit(next, false);
       }
       const hasRemaining=indices!==null&&!!ai.suggestion?.paragraphs.some((_,index)=>!indices.includes(index));
       if(hasRemaining){setAiDrafts(editedTexts??aiDrafts??ai.suggestion!.paragraphs.map(paragraph=>paragraph.text));setAiAdoptedIndices(indices??[]);setAiComparison(true);setAiOpen(false);comparisonDirty.current=true;onView('body');}
@@ -1139,7 +1205,13 @@ function WorkEditor({
         }
       });
     } catch (e) {
-      setFeedback(api.errorText(e));
+      if (e instanceof ApiError && e.failure.kind === 'http' && e.failure.code === 'creation_ai_target_changed') {
+        setInvalidRewrite(ai.requestId);
+        setFeedback('');
+      } else setFeedback(api.errorText(e));
+    } finally {
+      preparingAdoption.current = false;
+      setAdoptionPreparing(false);
     }
   }
   function unadoptedAiText() {return ai?.suggestion?.paragraphs.flatMap((paragraph,index)=>aiAdoptedIndices.includes(index)?[]:[aiDrafts?.[index]??paragraph.text]).join('\n\n')??'';}
@@ -1157,12 +1229,43 @@ function WorkEditor({
       catch { if (generation === recheckGeneration.current) setAiCopyFallback(true); }
     } catch { if (generation === recheckGeneration.current) setFeedback('无法核验参考来源，请重试。'); }
   }
+  function hasManualComparisonEdits() {
+    return !!compareBase && !!comparisonDrafts
+      && compareBase.paragraphs.some((paragraph, index) => paragraph.text !== comparisonDrafts[index]);
+  }
   function refreshComparisonBase() {
     const next=live.current;
     setComparisonDrafts(next.paragraphs.map(paragraph=>{const index=compareBase?.paragraphs.findIndex(old=>old.id===paragraph.id)??-1;return index>=0?comparisonDrafts?.[index]??paragraph.text:paragraph.text;}));
     setCompareBase(next);
   }
-  function undoHistory() {
+  function undoHistory(onlyAdoption = false) {
+    if (lock.current || pending.current || composition.current || sourceInvalidated || resetRequired || recheckStatus !== 'ready') return;
+    const entry = rewriteUndo.current;
+    if (entry && undo.current.at(-1) === entry.before) {
+      if (server.current.id !== entry.adoptedId || JSON.stringify(live.current) !== JSON.stringify(server.current.document)
+        || tagsLive.current !== server.current.document.tags.join(' ')) {
+        setFeedback('采用后稿件已有其他编辑。请用历史版本核对后恢复。');
+        return;
+      }
+      const beforeUndo = live.current;
+      const body = { expectedRevision: entry.adoptedId, restoreRevision: entry.parentId };
+      const fingerprint = JSON.stringify(body);
+      const requestId = identities.keyFor('undo-adopt', fingerprint);
+      void run({
+        requestId, action: 'undo-adopt', fingerprint, snapshot: null,
+        run: () => api.restore(initial.workId, { ...body, requestId }),
+        afterReceipt: () => {
+          undo.current.pop();
+          redo.current.push(beforeUndo);
+          rewriteUndo.current = null;
+          setAdoptedUndoRevision(null);
+          setUndoState({ canUndo: undo.current.length > 0, canRedo: true });
+          setFeedback('已撤销上次采用。');
+        },
+      }).catch(() => undefined);
+      return;
+    }
+    if (onlyAdoption) return;
     const previous = undo.current.pop();
     if (previous) {
       redo.current.push(live.current);
@@ -1216,7 +1319,9 @@ function WorkEditor({
   </>;
   const savedTemplate = templates.data?.filter(item => item.sourceWorkId === initial.workId).sort((a, b) => b.revision - a.revision)[0];
   const accountStyle = accountRecord ? styleList.data?.find(item => item.accountRef === accountRecord.ref) : undefined;
-  const edMeta = savedTemplate || accountStyle ? <div className="ed-meta" aria-label="稿件信息">
+  const writingTemplate = document.writingTemplate;
+  const edMeta = savedTemplate || accountStyle || writingTemplate ? <div className="ed-meta" aria-label="稿件信息">
+    {writingTemplate ? <span className="meta-sample">采用样板 {writingTemplate.code} · 第 {writingTemplate.revision} 版</span> : null}
     {savedTemplate ? <span className="meta-sample" title={`本篇已存为样板 ${savedTemplate.code}`}>样板 <span className="data">{savedTemplate.code}</span> · {savedTemplate.status === 'review' ? '待审核' : savedTemplate.status === 'ok' ? '已通过' : '已停用'}</span> : null}
     {accountStyle ? <span className="meta-style" title={`风格 · ${accountStyle.name}`}>风格 · {accountStyle.name.split(' · ')[0]}</span> : null}
   </div> : null;
@@ -1234,7 +1339,7 @@ function WorkEditor({
 </div>
 <div className="tm-sec"><span className="tm-label">编辑</span>
 <div className="tm-row">
-<ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={undoHistory}>撤销</ActionButton>
+<ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={() => undoHistory()}>撤销</ActionButton>
 <ActionButton variant="quiet" disabled={!undoState.canRedo || busy} onClick={redoHistory}>重做</ActionButton>
 <span className="aux tm-count">{Array.from(document.paragraphs.map(p => p.text).join('\n\n')).length} 字</span>
 </div>
@@ -1282,6 +1387,10 @@ function WorkEditor({
   return <div className={styles.editorWorkspace} data-view={view}>
     {aiUnknown && !preview ? <div className={styles.warning} role="alert">上次生成请求尚未确认。 <ActionButton variant="outline" disabled={aiBusy} onClick={() => void executeAi()}>核实上次生成</ActionButton></div> : null}
     {view === 'body' || view === 'desk' ? null : <div className={styles.commandRow}>{commandContents}</div>}
+    {canUndoTarget && view === 'body' ? <div className={styles.commandRow}>
+      <span>已采用这一段。</span>
+      <ActionButton variant="outline" disabled={busy || hasPending || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} onClick={() => undoHistory(true)}>撤销这次采用</ActionButton>
+    </div> : null}
     {(feedback && ['failed', 'unknown', 'conflict'].includes(saveState)) || conflict ? <div className={styles.error} role="alert">
 <p>{feedback}</p>{conflict ? <ActionButton variant="outline" onClick={() => setConflictVisible(true)}>比较版本并解决</ActionButton> : null}{resetRequired ? <ActionButton variant="outline" disabled={busy || recheckStatus !== 'ready'} onClick={() => setResetPrompt(true)}>撤回后重新开始编辑</ActionButton> : null}{hasPending ? <ActionButton variant="outline" disabled={busy} onClick={() => void run(pending.current!).catch(() => undefined)}>沿用原请求重试</ActionButton> : null}</div> : null}<span role="status" className={styles.srOnly}>{feedback}</span>
     {(hasWithdrawnParagraph || resetRequired) && saveState !== 'failed' ? <div className={styles.warning}><p>稿件历史中有已撤回的经历，请先重新开始编辑。</p><ActionButton variant="outline" disabled={busy || recheckStatus !== 'ready'} onClick={() => setResetPrompt(true)}>撤回后重新开始编辑</ActionButton></div> : null}
@@ -1294,12 +1403,12 @@ function WorkEditor({
     }}>丢弃本页编辑并重新读取</ActionButton></div> : null}
     {recheckStatus === 'checking' ? <p role="status">正在核验稿件来源…</p> : recheckStatus === 'failed' ? <p role="alert">暂时无法核验稿件来源。未保存的编辑仍在本页。<ActionButton variant="quiet" onClick={() => setRecheckAttempt(value => value + 1)}>重新核验</ActionButton></p> : null}
     <fieldset hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} disabled={editingLocked || !!sourceInvalidated || resetRequired || recheckStatus !== 'ready'} className={styles.editingSurface}>
-    {view === 'desk' ? <div className="gm-studio"><MaterialDesk domain={initial.domainRef} works={drafts} currentWorkId={initial.workId} currentDocument={document} accounts={accounts.data ?? []} sourceFocus={sourceFocus} onClearSourceFocus={() => setSourceFocus(null)} onOpenWork={onOpenDraftWriting} onSwitchWork={onSwitchWork} onCreateFrame={createFrame} onCreateFramePending={creatingFrame} onAddNote={addDeskNote} onPlaceMaterial={placeMaterial} onUpdateCard={updateCanvas} onRemoveCard={id => edit({ ...live.current, canvas: live.current.canvas.filter(block => block.id !== id) })} onRenameTitle={next => edit({ ...live.current, title: next })} onPickAccount={ref => edit({ ...live.current, accountRef: ref })} idea={ideas.find(item => item.ideaRef === document.ideaRef) ?? null} ideaState={ideaState} onOpenIdeaDrafts={openIdeaDrafts} /></div> : null}
+    {view === 'desk' ? <div className="gm-studio"><MaterialDesk domain={initial.domainRef} works={drafts} currentWorkId={initial.workId} currentDocument={document} accounts={accounts.data ?? []} sourceFocus={sourceFocus} onClearSourceFocus={() => setSourceFocus(null)} onOpenWork={onOpenDraftWriting} onSwitchWork={onSwitchWork} onCreateFrame={createFrame} onCreateFramePending={creatingFrame} onAddNote={addDeskNote} onPlaceMaterial={placeMaterial} onUpdateCard={updateCanvas} onRemoveCard={id => edit({ ...live.current, canvas: live.current.canvas.filter(block => block.id !== id) })} onRenameTitle={next => edit({ ...live.current, title: next })} onPickAccount={ref => edit({ ...live.current, accountRef: ref })} templates={templates.data ?? []} templateState={templates.status} onPickTemplate={ref => edit({ ...live.current, writingTemplate: ref })} idea={ideas.find(item => item.ideaRef === document.ideaRef) ?? null} ideaState={ideaState} onOpenIdeaDrafts={openIdeaDrafts} /></div> : null}
     {view === 'canvas' ? <CanvasBoard onCompose={compose} document={document} busy={busy} onChange={edit} onUpdate={updateCanvas} onLocate={citation=>{setSourceFocus(citation);onView('desk');}} onMaterials={()=>onView('desk')} onUse={target=>{const location=targetLocation(target,document);return {label:location.label,open:()=>onView(location.view)};}} onPlace={openPlacement} /> : null}
     {view === 'body' ? <div className={styles.bodyWorkspace}>
 {compareVisible&&compareBase&&JSON.stringify(compareBase.paragraphs)!==JSON.stringify(document.paragraphs)?<div className={styles.warning}><ActionButton variant="outline" onClick={refreshComparisonBase}>更新对照底稿，保留改稿</ActionButton></div>:null}
 {aiComparison&&ai?.suggestion&&ai.staleBase?<div className={styles.warning}><p>本次采用已改变原底稿，其余改稿仍保留在右侧，不能继续直接采用。</p><ActionButton variant="outline" onClick={()=>void copyUnadoptedAi()}>复制未采用改稿</ActionButton>{aiCopyFallback?<label>未采用改稿，可手动复制<textarea readOnly value={unadoptedAiText()}/></label>:null}</div>:null}
-{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId?selection.text:document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={dirty || ai.staleBase || ai.inputRevision!==revision.id} disabled={busy || composing} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={()=>setAiComparison(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : compareVisible && compareBase && document.experienceGaps.length === 0 ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={undoHistory} canUndo={undoState.canUndo} /> : <div className="gm-studio"><div className="workbench"><div className="write"><DraftRail drafts={drafts} ideas={ideas} status={draftsStatus} currentId={initial.workId} onOpen={onOpenDraft} onNewDraft={onNewDraft} onOpenDesk={() => onView('desk')} /><ManuscriptEditor footer={footerInColumns} noteTitleActions={<div ref={setTitleContainer} className={styles.titleCopyMount} hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || editingLocked} />} coverActions={<>
+{aiComparison && ai?.suggestion ? <RevisionCompare draftTexts={aiDrafts} onDraftTexts={texts=>{setAiDrafts(texts);comparisonDirty.current=true;}} key={ai.requestId} pairs={ai.suggestion.paragraphs.map((paragraph,index)=>({id:paragraph.paragraphId??String(index),before:ai.rewriteTarget?.paragraphId===paragraph.paragraphId ? Array.from(document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'').slice(ai.rewriteTarget.start,ai.rewriteTarget.end).join('') : ai.action==='rewrite_selection'&&selection?.paragraphId===paragraph.paragraphId ? selection.text : document.paragraphs.find(item=>item.id===paragraph.paragraphId)?.text??'',after:paragraph.text,label:`第 ${index+1} 段`}))} stale={comparisonStale} staleMessage={focusedRewrite ? (aiAdoptedIndices.includes(0) ? '这一段已采用。' : '目标段已经变化，请返回正文重新选择并生成。') : undefined} hideAdoptAll={focusedRewrite} disabled={busy || editingLocked || adoptionPreparing || composing || recheckStatus !== 'ready'} onAdopt={(indices,texts)=>void adopt(indices,[],false,texts)} onClose={focusedRewrite && (adoptionPreparing || editingLocked) ? undefined : ()=>setAiComparison(false)} onUndo={focusedRewrite ? undefined : () => undoHistory()} canUndo={undoState.canUndo} /> : compareVisible && compareBase && document.experienceGaps.length === 0 ? <RevisionCompare draftTexts={comparisonDrafts} onDraftTexts={texts=>{setComparisonDrafts(texts);comparisonDirty.current=true;}} key={initial.workId+'-manual-comparison'} pairs={compareBase.paragraphs.map((p, index) => ({id:p.id,before:p.text,after:p.text,label:`第 ${index+1} 段`}))} stale={JSON.stringify(compareBase.paragraphs) !== JSON.stringify(document.paragraphs)} disabled={busy || composing} onAdopt={(indices, texts) => { if (JSON.stringify(live.current.paragraphs) !== JSON.stringify(compareBase.paragraphs)) return; const next={...document,paragraphs:document.paragraphs.map((p,index) => indices === null || indices.includes(index) ? {...p,text:texts[index] ?? p.text} : p)};edit(next);if(indices===null){setCompareBase(null);setCompareVisible(false);setComparisonDrafts(null);comparisonDirty.current=false;}else{setCompareBase(next);setComparisonDrafts(texts);comparisonDirty.current=next.paragraphs.some((paragraph,index)=>paragraph.text!==texts[index]);} }} onClose={() => setCompareVisible(false)} onUndo={() => undoHistory()} canUndo={undoState.canUndo} /> : <div className="gm-studio"><div className="workbench"><div className="write"><DraftRail drafts={drafts} ideas={ideas} status={draftsStatus} currentId={initial.workId} onOpen={onOpenDraft} onNewDraft={onNewDraft} onOpenDesk={() => onView('desk')} /><ManuscriptEditor footer={footerInColumns} noteTitleActions={<div ref={setTitleContainer} className={styles.titleCopyMount} hidden={!!sourceInvalidated || resetRequired || recheckStatus !== 'ready' || editingLocked} />} coverActions={<>
   <ActionButton variant="quiet" disabled={!canGenerateTitles} onClick={() => void generateTitles()}>换一批</ActionButton>
   <button type="button" className="btn quiet sub" onClick={() => setRightTab('titles')}>找标题</button></>}
   coverCandidates={titleSuggestion ? titleSuggestion.coverTitles.map((value,index)=><button type="button" key={`${index}:${value}`} className={`cand${titleResult?.titleWarnings?.cover[index] ? ` ${styles.titleRisk}` : ''}`} aria-pressed={value === (document.pages.find(page => page.kind === 'cover')?.title ?? '')} disabled={titleChoiceLocked} onClick={() => void chooseTitle('cover',index)}>{value} <span className="count" aria-hidden="true">{Array.from(value).length}</span></button>) : null}
@@ -1330,7 +1439,7 @@ function WorkEditor({
             if (e instanceof ApiError && e.answered) identities.settle('asset');
             throw e;
           }
-        }} disabled={busy} onUndo={undoHistory} onRedo={redoHistory} canUndo={undoState.canUndo} canRedo={undoState.canRedo} onSave={saveCurrent} exports={exports} onExportComplete={record => setExports(old => [record, ...old.filter(x => x.id !== record.id)])} exportTransport={{
+        }} disabled={busy} onUndo={() => undoHistory()} onRedo={redoHistory} canUndo={undoState.canUndo} canRedo={undoState.canRedo} onSave={saveCurrent} exports={exports} onExportComplete={record => setExports(old => [record, ...old.filter(x => x.id !== record.id)])} exportTransport={{
           freeze: api.freeze,
           upload: api.upload,
           finalize: api.finalize,
@@ -1441,14 +1550,14 @@ function WorkEditor({
 <div className={styles.row}>
 <strong>{api.aiStateText(ai.state)}</strong>
 <ActionButton variant="outline" onClick={() => void refreshAi()}>刷新结果</ActionButton>{['running', 'queued'].includes(ai.state) ? <ActionButton variant="quiet" onClick={() => void refreshAi(true)}>取消这次生成</ActionButton> : null}</div>{ai.failureCode ? <p role="alert" className={styles.error}>{api.aiFailureText(ai.failureCode)}</p> : null}{ai.suggestion ? <>
-<p>{dirty || ai.staleBase || ai.inputRevision !== revision.id ? '底稿已有新编辑，建议已过期，不能直接采用' : '对照后选择采用'}</p>{ai.suggestion.title !== null ? <section className={styles.diff}>
+<p>{comparisonStale ? (focusedRewrite ? '目标段已经变化或已采用，请返回正文核对。' : '底稿已有新编辑，建议已过期，不能直接采用') : '对照后选择采用'}</p>{ai.suggestion.title !== null ? <section className={styles.diff}>
 <del>{document.title}</del>
 <ins>{ai.suggestion.title}</ins>
 <ActionButton variant="outline" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt([], [], true)}>采用这个标题</ActionButton>
 </section> : null}<ActionButton variant="outline" onClick={()=>{setAiComparison(true);setAiOpen(false);onView('body');}}>打开改稿对照</ActionButton>{ai.suggestion.pages.map((p, i) => <section className={styles.diff} key={`p${i}`}>
 <ins>{p.heading}\n{p.body}</ins>
 <ActionButton variant="outline" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt([], [i], false)}>采用这页文案</ActionButton>
-</section>)}<ActionButton variant="primary" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt(null, null, true)}>采用全部建议</ActionButton>
+</section>)}{!focusedRewrite ? <ActionButton variant="primary" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt(null, null, true)}>采用全部建议</ActionButton> : null}
 </> : null}<details>
 <summary>调用记录</summary>
 <p>{ai.methodVersion} · {ai.invocationRef ?? '尚未派发'}</p><pre>{JSON.stringify({

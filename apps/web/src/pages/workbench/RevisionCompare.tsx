@@ -11,6 +11,8 @@ export interface RevisionPair {
 export function RevisionCompare({
   pairs,
   stale,
+  staleMessage,
+  hideAdoptAll = false,
   disabled,
   onAdopt,
   onClose,
@@ -21,6 +23,8 @@ export function RevisionCompare({
 }: {
   pairs: RevisionPair[];
   stale: boolean;
+  staleMessage?: string;
+  hideAdoptAll?: boolean;
   disabled: boolean;
   onAdopt: (indices: number[] | null, values: string[]) => void;
   onClose?: () => void;
@@ -100,8 +104,8 @@ export function RevisionCompare({
         </ActionButton>
       </div>
       {stale ? (
-        <p className={styles.warning}>
-          底稿已有新编辑，当前对照已过期；请返回正文重新建立对照。
+        <p className={styles.warning} role={staleMessage ? "alert" : undefined}>
+          {staleMessage ?? "底稿已有新编辑，当前对照已过期。请返回正文重新建立对照。"}
         </p>
       ) : null}
       {coarse ? <p role="status" className={styles.muted}>部分段落改动较大，按整段标记；两侧文字均完整保留。</p> : null}
@@ -144,6 +148,7 @@ export function RevisionCompare({
                   <textarea
                     aria-label={`编辑改稿 ${pair.label}`}
                     value={drafts[index] ?? ""}
+                    readOnly={disabled}
                     onCompositionStart={() => setComposing(true)}
                     onCompositionEnd={() => setComposing(false)}
                     onChange={(event) =>
@@ -194,13 +199,13 @@ export function RevisionCompare({
             </ActionButton>
           ) : null}
         </div>
-        <ActionButton
+        {!hideAdoptAll ? <ActionButton
           variant="primary"
           disabled={disabled || stale || composing}
           onClick={() => onAdopt(null, drafts)}
         >
           采用整篇改稿
-        </ActionButton>
+        </ActionButton> : null}
       </div>
     </div>
   );

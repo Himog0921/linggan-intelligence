@@ -109,6 +109,7 @@ async fn ai_settings_skill_trial_real_chain_browser_proof() {
     document.canvas.extend(comment.canvas);
     let work = fixture::create(&db, document).await;
     let preview = writing::PreviewRequest {
+        draft_context_excerpt_ids: None,
         selection: None,
         preview_ref: Uuid::new_v4(),
         work_ref: work.work_id,

@@ -59,7 +59,7 @@ Citation 为 sourceKind(note/comment/ocr/ops_publication)、sourceRef、workRef�
 
 - GET/POST `/works`；GET `/works/{id}`；POST `/works/{id}/save` `{requestId,expectedRevision,document}`。
 - GET `/works/{id}/revisions`；POST `/works/{id}/restore` `{requestId,expectedRevision,restoreRevision}`；POST `/works/{id}/place` `{requestId,expectedRevision,canvasId,targets}`。
-- POST `/idea-boxes/{ideaRef}/drafts` `{requestId,accountRefs}`（一题多号）：在一个事务里为选题框下还没有稿件的每个账号各开一篇，要么全开、要么一篇都不开。`accountRefs` 为 1 到 3 个账号，重复的只算一次；选题框已有稿件的账号不再新开，原样返回并标 `created:false`，所以换一个请求再发也不会多开稿；用同一个 `requestId` 重发（例如响应丢了）时，认出这条命令自己开过的稿，仍标 `created:true` 并在回执里加 `replayed:true`，客户端可以分清自己开的和原来就有的；该选题框不同账号合计仍不得超过三个（`creation_idea_account_limit`，409），账号不在本领域账本里为 400，选题框不存在为 409 `creation_idea_not_found`。新稿的内容由服务端从锚点稿的当前修订生成，客户端不能指定：只带走“这篇想说”、主题图谱关联、选题名（作新稿的暂定标题）和**此刻来源仍可读**的摘录及其材料卡；选题名和“这篇想说”取自按当前来源资格遮盖之后的副本，选题名里若整段引用了现在受限的原话，新稿标题里不会出现；摘录与卡片都换成新稿自己的身份；来源已变化、受限或不可用的摘录连同它的卡片不带，数量放在回执的 `skippedExcerpts`，受限原文不会进入新稿。锚点稿写的正文、图页、已用材料、标签、衔接句、经历引用都不带，经历属于账号本人，更不会跨账号复制。每篇新稿走与 `POST /works` 完全相同的建稿路径，因此账号、来源、选题框三条既有检查在这里同样生效；每篇的请求标识由命令的 `requestId` 与账号确定性得出。回执 `{requestId,ideaRef,drafts:[{workId,accountRef,created,revisionId}],skippedExcerpts,replayed}`；锚点稿不产生新修订。**只给管理员**（与其余 `/ops/api/creation` 写命令同一道 admin 校验）：锚点稿按管理员的方式读取，含评论原文；若以后要开放给成员，须先有成员投影（剥掉评论引文）和按负责人的账号校验。无新表、无迁移。
+- POST `/idea-boxes/{ideaRef}/drafts` `{requestId,accountRefs}`（一题多号）：在一个事务里为选题框下还没有稿件的每个账号各开一篇，要么全开、要么一篇都不开。`accountRefs` 为 1 到 3 个账号，重复的只算一次；选题框已有稿件的账号不再新开，原样返回并标 `created:false`，所以换一个请求再发也不会多开稿；用同一个 `requestId` 重发（例如响应丢了）时，认出这条命令自己开过的稿，仍标 `created:true` 并在回执里加 `replayed:true`，客户端可以分清自己开的和原来就有的；该选题框不同账号合计仍不得超过三个（`creation_idea_account_limit`，409），账号不在本领域账本里为 400，选题框不存在为 409 `creation_idea_not_found`。新稿的内容由服务端从锚点稿的当前修订生成，客户端不能指定：只带走“这篇想说”、主题图谱关联、选题名（作新稿的暂定标题）和**此刻来源仍可读**的摘录及其材料卡；选题名和“这篇想说”取自按当前来源资格遮盖之后的副本，选题名里若整段引用了现在受限的原话，新稿标题里不会出现；摘录与卡片都换成新稿自己的身份；来源已变化、受限或不可用的摘录连同它的卡片不带，数量放在回执的 `skippedExcerpts`，受限原文不会进入新稿。锚点稿写的正文、图页、已用材料、标签、衔接句、经历引用都不带，经历属于账号本人，更不会跨账号复制。每篇新稿走与 `POST /works` 完全相同的建稿路径，因此账号、来源、选题框三条既有检查在这里同样生效；每篇的请求标识由命令的 `requestId` 与账号确定性得出。回执 `{requestId,ideaRef,drafts:[{workId,accountRef,created,revisionId}],skippedExcerpts,replayed}`；锚点稿不产生新修订。 若锚点稿已选写作样板，新稿带同一 `writingTemplate: {code, revision}` 引用。只有关联选题框的稿件可新增绑定，且只接受同领域、当前已审核且来源仍可读的版本；资格失效返回 409 `creation_writing_template_unavailable`，本次不开任何新稿。已保存稿件保留原引用，可清除或重选；重放已成功的开稿请求不会重新绑定。未选择样板的历史修订兼容读取。恢复历史正文时保留稿件当前的样板选择。**只给管理员**（与其余 `/ops/api/creation` 写命令同一道 admin 校验）：锚点稿按管理员的方式读取，含评论原文；若以后要开放给成员，须先有成员投影（剥掉评论引文）和按负责人的账号校验。无新表、无迁移。
 - work envelope：workId/domainRef/savedBy/revision{id,number,savedAt,document}/exports；receipt 含 requestId/outcome/replayed/revision。stale/conflict 使用409，无假成功。
 - POST `/works/{id}/assets` raw 图片和 request ID；GET 注册资产路径。资产只允许作品owner生成storage key，不接受路径。
 - GET `/sources`；GET `/sources/{kind}/{ref}`；POST `/sources/validate`。GET `/sources/documents`、GET `/sources/document`、POST `/sources/prepare` 和 POST `/sources/resolve` 为只读材料集合接口；query/返回 DTO 由 sources 模块统一，前端不得猜字段。
@@ -132,3 +132,16 @@ AI 采用从冻结 Citation 建立摘录、画布和实际目标的使用关系�
 独立工具 `linggan-creation-recovery --work-id UUID` 默认只读预览，唯一连接变量为 `LINGGAN_CREATION_RECOVERY_DATABASE_URL`，不自动加载运行服务配置。预览包含数据库/集群/ schema 身份、当前修订及旧摘要、重新核验时刻、每条旧新引用、材料版本、图片字节/hash和作者内容摘要。原生笔记/评论旧 DTO 使用历史序列化顺序核对 document_sha256；原文身份/哈希/精确范围、唯一当前块、当前领域资格、选材与图片均须通过。新 asOf 只表示本次重新核验，不能冒充历史资格。
 
 `--apply preview.json --preview-hash SHA256 --request-id UUID` 仅在明确授权的目标库使用。工具重建提案核对摘要及当前头，再复用作品锁、请求归属、追加修订和不可变保存回执。同请求同提案幂等；错误目标库、预览被改、旧头变化、当前来源受限或材料/图片不一致均拒绝。可变范围仅限引用 blockRef/asOf/sourceVersion 和选材 sourceVersion，其他作者 JSON 必须一致。全部旧修订原样保留，无迁移、不修写历史、不支持任意 JSON/OCR 兼容层。本轮只授权隔离 apply，正式库只读预览；此候选未合并部署。工作包见[资产实施计划](../plans/active/creation-assets-001.md)。
+
+
+### 起草输入上下文
+
+正文起草预览的可选字段 `draftContextExcerptIds` 只适用于 `draft`。服务端从确认的稿件修订读取选题意图，从当前批准的样板版本读取封闭的步骤枚举，并按同时指定的摘录 ID 和精确引用附上相应材料卡的用途与思路。未选择的引用、独立便签和样板来源稿正文不进入该上下文。材料卡思路中带有明确来源的文字继续按现有来源资格校验。未带该字段的已存预览保持原输入格式与哈希。
+
+预览和适配器使用同一输入对象。提交、生成准备、候选读取和采用重新检查样板与引用资格。资格失效时，停止新执行或隐藏现有候选。候选仍须人工采用。经历材料限制继续生效。
+
+### 改写选段的采用与撤销
+
+有明确选区的改写候选可按单段采用。命令的 `expectedRevision` 是当前稿件版本，采用回执另保留生成所用的修订。服务端在作品锁内用稳定段落 ID 核对生成时的完整目标段、账号、来源和经历绑定。其他段的修改留在当前稿件中。目标段已删除或改变时返回 409 `creation_ai_target_changed`。整个稿件在提交前又被修改时返回 409 `creation_ai_stale`，防止覆盖较新修订。整篇草稿和图页建议维持原有校验。
+
+编辑后的候选可随单段采用一起保存，形成一条修订。采用后立即撤销会以采用修订为预期版本，用已保存的直接父修订恢复正文和来源记录，再追加一条修订。发生后续编辑时不会覆盖新内容。撤销使用原有的恢复命令与请求重放规则。

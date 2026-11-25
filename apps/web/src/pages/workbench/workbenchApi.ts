@@ -258,6 +258,7 @@ export async function adoptTitle(id: string, body: {requestId:string; expectedRe
   return receipt(await post(`${base}/ai/requests/${uuid(id)}/adopt-title`, body), body.requestId);
 }
 export async function preview(body: {
+  draftContextExcerptIds?: string[];
   previewRef: string;
   workRef: string;
   expectedRevision: string;
@@ -296,6 +297,7 @@ export async function adopt(id: string, body: {
   requestId: string;
   expectedRevision: string;
   paragraphIndices: number[] | null;
+  rewriteText?: string;
   pageIndices: number[] | null;
   adoptTitle: boolean;
 }) {
@@ -361,7 +363,7 @@ export function aiFailureText(code: string | null): string {
     ai_input_limit_before_dispatch: '选定输入超过模型上限，请减少材料或调整配置后重新准备。',
 
     source_or_base_changed_before_dispatch: '选定材料或底稿已经变化，这次生成没有继续。请核对后重新准备。',
-    creation_ai_source_unavailable: '所选材料已经变化或暂不可用。请回到材料重新选取，再准备建议。',
+    creation_ai_source_unavailable: '所选材料或样板已经变化或暂不可用。请重新选择，再准备建议。',
     creation_ai_model_unavailable: '创作模型暂不可用，请到设置核对连接。当前输入仍保留，也可以继续手写。',
     model_secret_unavailable: '模型连接信息暂不可用，请到设置核对连接。当前输入仍保留。',
     provider_timeout: '生成等待超时，当前输入仍保留。请先刷新结果，核实后再决定是否重新准备。',
@@ -393,6 +395,7 @@ export function errorText(error: unknown): string {
       creation_source_unavailable: '来源可用情况已变化，请回到材料核对。',
       creation_experience_reset_required: '经历已撤回。请先重新载入服务器版本，再继续编辑。',
       creation_experience_editor_reset_required: '本页编辑来自撤回前的版本，请丢弃旧编辑并使用服务器版本。',
+      creation_writing_template_unavailable: '所选样板已更新、停用或来源不可用。请重新选择样板后再保存或开稿。',
       creation_idea_account_limit: '这个选题已关联三个账号，请先调整关联账号，当前编辑仍保留。',
       creation_idea_anchor: '此稿是选题框的来源稿，不能解除或换成其他选题；当前编辑仍保留。',
       creation_idea_not_found: '选题框已不可用，请重新读取并选择，当前编辑仍保留。',
@@ -404,7 +407,8 @@ export function errorText(error: unknown): string {
       creation_legacy_reference_unavailable: '这份历史作品缺少当前所需的来源定位，原稿已保留，但暂不能安全打开。',
       creation_ai_model_unavailable: '创作模型尚不可用，仍可手写。',
       creation_ai_admission_denied: '当前运行条件尚未满足，请到AI设置核对开关、模型、额度和外发许可。当前输入仍保留。',
-      creation_ai_stale: '底稿已改变，请重新预览。',
+      creation_ai_stale: '当前稿件版本已更新，请重新读取后再试。',
+      creation_ai_target_changed: '目标段已经变化。请返回正文，重新选择文字并生成。',
       creation_request_conflict: '这次操作与先前的内容不一致，请先刷新核对。当前输入仍保留。'
     };
     return code && messages[code] ? messages[code] : '操作未完成，当前输入仍保留。请稍后重试。';

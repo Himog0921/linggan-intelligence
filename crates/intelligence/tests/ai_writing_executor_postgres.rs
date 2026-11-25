@@ -200,6 +200,7 @@ async fn writing_upgrade_rejects_old_inflight_without_rewriting_history_then_acc
         .await
         .unwrap();
     let request = ai::PreviewRequest {
+        draft_context_excerpt_ids: None,
         preview_ref: Uuid::new_v4(),
         work_ref: work,
         expected_revision: revision,
@@ -326,6 +327,7 @@ async fn ready(
 
 fn preview(work: &SaveReceipt, config: Uuid, instruction: &str) -> ai::PreviewRequest {
     ai::PreviewRequest {
+        draft_context_excerpt_ids: None,
         selection: None,
         preview_ref: Uuid::new_v4(),
         work_ref: work.work_id,
@@ -424,6 +426,7 @@ async fn actual_writing_is_queued_once_then_uses_one_typed_invocation_and_the_ex
         &db,
         confirmed.request_id,
         &ai::AdoptRequest {
+            rewrite_text: None,
             request_id: Uuid::new_v4(),
             expected_revision: work.revision.id,
             paragraph_indices: None,
