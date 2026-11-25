@@ -298,6 +298,7 @@ export async function adopt(id: string, body: {
   expectedRevision: string;
   paragraphIndices: number[] | null;
   rewriteText?: string;
+  draftEdits?: { index: number; text: string }[];
   pageIndices: number[] | null;
   adoptTitle: boolean;
 }) {
@@ -354,6 +355,7 @@ export function aiFailureText(code: string | null): string {
     ai_creative_price_unavailable: '模型价格不完整，这次没有发送。请在 AI 设置补全价格后重新准备。',
     ai_creative_historic_spend_unknown: '本月有历史调用费用未知，这次没有发送。请先核对调用记录。',
     writing_output_invalid: '这次返回的建议暂时无法使用，正文没有改变。可调整要求后重新准备，也可以继续手写。',
+    creation_ai_material_quote_forbidden: '候选直接引用了「只做参考」或「反例」的原句，已拦截。请调整材料后重新生成。',
     ai_output_invalid: '这次返回的建议暂时无法使用，正文没有改变。请核对调用用量后重新准备，也可以继续手写。',
     ai_source_unavailable: '选定材料的版本或可用性已变化，正文没有改变。请重新核对材料，再准备建议。',
     ai_dispatch_unknown: '尚不能确认这次调用的结果，用量仍占预留。请先核对调用记录，避免重复生成。',
@@ -408,6 +410,7 @@ export function errorText(error: unknown): string {
       creation_ai_model_unavailable: '创作模型尚不可用，仍可手写。',
       creation_ai_admission_denied: '当前运行条件尚未满足，请到AI设置核对开关、模型、额度和外发许可。当前输入仍保留。',
       creation_ai_stale: '当前稿件版本已更新，请重新读取后再试。',
+      creation_ai_material_quote_forbidden: '这段含有「只做参考」或「反例」的原句，无法采用。请重新生成。',
       creation_ai_target_changed: '目标段已经变化。请返回正文，重新选择文字并生成。',
       creation_request_conflict: '这次操作与先前的内容不一致，请先刷新核对。当前输入仍保留。'
     };

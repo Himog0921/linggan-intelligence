@@ -292,6 +292,44 @@ try {
     const saved=await envelope();assert.equal(saved.revision.document.title,'作业启动');assert.equal(saved.revision.document.accountRef,accountRef);assert.equal(saved.revision.document.paragraphs.length,1);
     await screenshot('workbench-1440-topic');
   });
+  await step('正文中文组字提交一次撤销和重做，取消组字不改变历史', async () => {
+    const body = page.getByLabel('正文第 1 段', { exact: true });
+    const original = await body.inputValue();
+    await openWritingTools(page);
+    const undo = page.getByRole('button', { name: '撤销', exact: true });
+    const redo = page.getByRole('button', { name: '重做', exact: true });
+    const input = await context.newCDPSession(page);
+    const compose = text => input.send('Input.imeSetComposition', {
+      text, selectionStart: text.length, selectionEnd: text.length,
+    });
+    const selectAll = async () => {
+      await body.focus();
+      await body.press('ControlOrMeta+A');
+    };
+    try {
+      await selectAll();
+      await compose('zhong');
+      await compose('zhongwen');
+      assert.equal(await body.inputValue(), 'zhongwen');
+      assert.equal(await undo.isDisabled(), true);
+      await input.send('Input.insertText', { text: '中文' });
+      assert.equal(await body.inputValue(), '中文');
+      await undo.click();
+      assert.equal(await body.inputValue(), original);
+      await selectAll();
+      await compose('quxiao');
+      assert.equal(await redo.isDisabled(), true);
+      await compose('');
+      assert.equal(await body.inputValue(), original);
+      await redo.click();
+      assert.equal(await body.inputValue(), '中文');
+      await undo.click();
+      assert.equal(await body.inputValue(), original);
+      await save();
+    } finally {
+      await input.detach();
+    }
+  });
   await step('创作归属运营，三个工作分区共用同一导航，稿件步骤按需展开', async()=>{
     const primary=page.getByRole('navigation',{name:'一级导航'});
     assert.deepEqual(await primary.locator('.v7-nav-zh').allTextContents(),['雷达','主题图谱','语料','洞察','采集','运营']);
@@ -717,15 +755,35 @@ try {
     await screenshot('workbench-idea-drafts');
     if (process.env.CW_BROWSER_DRAFT_CONTEXT_PROOF === '1') {
       const draftId=opened.drafts[0].workId;
+      const beforePurpose=(await creationJson(`/works/${draftId}`)).revision;
+      const restrictedCard=beforePurpose.document.canvas[0];
+      const restrictedText=beforePurpose.document.excerpts.find(excerpt=>excerpt.id===restrictedCard.excerptId).selectedText;
+      assert.ok(restrictedText);
+      const purposeUpdate=await context.request.post(`${origin}/ops/api/creation/works/${draftId}/save`,{
+        headers:{Origin:origin},
+        data:{requestId:randomUUID(),expectedRevision:beforePurpose.id,document:{...beforePurpose.document,
+          canvas:beforePurpose.document.canvas.map(card=>card.id===restrictedCard.id?{...card,group:'reference_only'}:card)}}
+      });
+      assert.equal(purposeUpdate.status(),200,await purposeUpdate.text());
       await page.goto(`${origin}/ops/creation?domain=${domainRef}&work=${draftId}&view=body`);
       await page.locator('summary[aria-label^="写稿工具"]:visible').first().waitFor();
       await openWritingTools(page);
       await page.getByRole('button',{name:'按材料起草',exact:true}).click();
       const draft=page.getByRole('dialog',{name:'按所选材料起草'});
+      const previewResponse=page.waitForResponse(response=>new URL(response.url()).pathname==='/ops/api/creation/ai/preview'&&response.request().method()==='POST');
       await draft.getByRole('button',{name:'准备并核对输入',exact:true}).click();
+      const responsePreview=await previewResponse;
+      assert.equal(responsePreview.status(),200);
+      const exactPreview=await responsePreview.json();
+      await draft.getByText('AI 会看到的内容',{exact:true}).waitFor();
+      await draft.getByText('只做参考',{exact:true}).waitFor();
+      await draft.getByText('反例',{exact:true}).waitFor();
+      assert.ok(exactPreview.draftMaterialCards.some(card=>card.purpose==='reference_only'&&restrictedText.startsWith(card.excerpt)));
       const input=draft.locator('pre').filter({hasText:'"draftContext"'});
       await input.waitFor();
-      const confirmedInput=JSON.parse(await input.innerText());
+      const displayedInput=await input.textContent();
+      assert.equal(displayedInput,exactPreview.outboundPrompt);
+      const confirmedInput=JSON.parse(displayedInput);
       assert.equal(confirmedInput.angle,made.angle);
       assert.deepEqual(confirmedInput.draftContext.writingTemplate,{...selection,steps:['opening','ending']});
       assert.equal(confirmedInput.draftContext.materialCards.length,made.canvas.length);
@@ -744,6 +802,15 @@ try {
       await page.getByText('合成正文候选：先写一件具体的小事。',{exact:true}).first().waitFor();
       assert.equal((await creationJson(`/works/${draftId}`)).revision.document.paragraphs.length,0);
       await screenshot('workbench-draft-context-suggestion');
+      await page.getByLabel('编辑改稿 第 1 段',{exact:true}).fill(restrictedText);
+      const blockedAdoption=page.waitForResponse(response=>new URL(response.url()).pathname===`/ops/api/creation/ai/requests/${request.requestId}/adopt`&&response.request().method()==='POST');
+      await page.getByRole('button',{name:'采用这一段',exact:true}).click();
+      const rejected=await blockedAdoption;
+      assert.equal(rejected.status(),400);
+      assert.match(await rejected.text(),/creation_ai_material_quote_forbidden/);
+      await page.getByText(/无法采用。请重新生成/).first().waitFor();
+      assert.equal((await creationJson(`/works/${draftId}`)).revision.document.paragraphs.length,0);
+      report.restrictedDraftAdoptionBlocked=true;
       await page.getByRole('button',{name:'返回正文',exact:true}).click();
       const writeParagraph=async (index,text)=>{
         await page.getByRole('button',{name:'＋ 继续写一段',exact:true}).click();

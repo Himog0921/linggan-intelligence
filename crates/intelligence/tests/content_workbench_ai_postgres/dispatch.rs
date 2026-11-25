@@ -165,6 +165,7 @@ async fn assert_stale_adoption_and_rewrite(
             db,
             request_id,
             &ai::AdoptRequest {
+                draft_edits: None,
                 rewrite_text: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: work.revision.id,
@@ -183,6 +184,7 @@ async fn assert_stale_adoption_and_rewrite(
         .await
         .unwrap();
     let adoption = ai::AdoptRequest {
+        draft_edits: None,
         rewrite_text: None,
         request_id: Uuid::new_v4(),
         expected_revision: newer.revision.id,

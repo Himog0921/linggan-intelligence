@@ -1090,7 +1090,7 @@ function WorkEditor({
         comparisonDirty.current = hasManualComparisonEdits();
       }
       setAi(status);
-      if(status.suggestion){setAiOpen(false);setAiComparison(true);if(view !== 'body') onView('body');}
+      if (status.suggestion && !composition.current) { setAiOpen(false); setAiComparison(true); if (view !== 'body') onView('body'); }
       identities.settle('execute');
       aiPending.current = null;
       setAiUnknown(false);
@@ -1151,11 +1151,18 @@ function WorkEditor({
         throw new api.WorkbenchActionError('稿件正在编辑，请保存当前文字后再采用。');
       }
       const rewritten = targeted ? editedTexts?.[0] : undefined;
+      const draftEdits = ai.action === 'draft' && editedTexts
+        ? (indices ?? ai.suggestion.paragraphs.map((_, index) => index)).flatMap(index => {
+            const text = editedTexts[index];
+            return text !== undefined && text !== ai.suggestion?.paragraphs[index]?.text ? [{ index, text }] : [];
+          })
+        : [];
       const body = {
         expectedRevision: parent.id,
         paragraphIndices: targeted ? [0] : indices,
         pageIndices: pages,
         adoptTitle,
+        ...(draftEdits.length ? { draftEdits } : {}),
         ...(rewritten !== undefined && rewritten !== ai.suggestion.paragraphs[0]?.text ? { rewriteText: rewritten } : {})
       };
       const fingerprint = JSON.stringify({
@@ -1183,7 +1190,7 @@ function WorkEditor({
         return;
       }
       let unresolved=false;
-      if (editedTexts && ai.suggestion) {
+      if (ai.action !== 'draft' && editedTexts && ai.suggestion) {
         let next=receipt.revision.document;
         const chosen=indices ?? ai.suggestion.paragraphs.map((_,index)=>index);
         for(const index of chosen){const original=ai.suggestion.paragraphs[index];const changed=editedTexts[index];if(!original || changed===undefined || changed===original.text)continue;
@@ -1275,6 +1282,7 @@ function WorkEditor({
     }
   }
   function redoHistory() {
+    if (lock.current || pending.current || composition.current || sourceInvalidated || resetRequired || recheckStatus !== 'ready') return;
     const next = redo.current.pop();
     if (next) {
       undo.current.push(live.current);
@@ -1339,8 +1347,8 @@ function WorkEditor({
 </div>
 <div className="tm-sec"><span className="tm-label">编辑</span>
 <div className="tm-row">
-<ActionButton variant="quiet" disabled={!undoState.canUndo || busy} onClick={() => undoHistory()}>撤销</ActionButton>
-<ActionButton variant="quiet" disabled={!undoState.canRedo || busy} onClick={redoHistory}>重做</ActionButton>
+<ActionButton variant="quiet" disabled={!undoState.canUndo || busy || composing} onClick={() => undoHistory()}>撤销</ActionButton>
+<ActionButton variant="quiet" disabled={!undoState.canRedo || busy || composing} onClick={redoHistory}>重做</ActionButton>
 <span className="aux tm-count">{Array.from(document.paragraphs.map(p => p.text).join('\n\n')).length} 字</span>
 </div>
 </div>
@@ -1536,9 +1544,18 @@ function WorkEditor({
 <ActionButton variant="outline" busy={aiBusy} disabled={aiUnknown || aiBusy || !readiness?.configured || !readiness.configRef} onClick={() => void previewAi()}>准备并核对输入</ActionButton>{preview ? <section>
 <p>{preview.sourceCount} 段材料 · {preview.inputCharacterCount} 字符 · 最多 {preview.maxCalls} 次调用</p>
 <details open>
-<summary>实际发出内容 / 模型 / 方法</summary>
+<summary>AI 会看到的内容</summary>
+{aiAction === 'draft' && preview.draftMaterialCards ? <dl>
+  {(['正文及其他用途', '只做参考', '反例'] as const).map((label, index) => {
+    const cards = preview.draftMaterialCards?.filter(({ purpose }) =>
+      (purpose === 'reference_only' ? 1 : purpose === 'counterexample' ? 2 : 0) === index);
+    return <div key={label}><dt>{label}</dt>
+      <dd>{cards?.length ? <ul>{cards.map((card, item) => <li key={item}>{card.excerpt}</li>)}</ul> : '无'}</dd>
+    </div>;
+  })}
+</dl> : null}
 {preview.outboundSystem ? <pre>{preview.outboundSystem}</pre> : null}
-<pre>{JSON.stringify(preview.outboundInput, null, 2)}</pre>
+<pre>{preview.outboundPrompt ?? JSON.stringify(preview.outboundInput, null, 2)}</pre>
 <p>{preview.methodVersion} · {preview.modelRef} · {preview.connectionVersionRef}</p>
 </details>
 <label>本次额度（token）<input type="number" min={preview.reservedTokens} aria-label="本次调用额度" disabled={aiUnknown || aiBusy} value={budget} onChange={e => setBudget(e.target.value)} />
@@ -1554,7 +1571,7 @@ function WorkEditor({
 <del>{document.title}</del>
 <ins>{ai.suggestion.title}</ins>
 <ActionButton variant="outline" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt([], [], true)}>采用这个标题</ActionButton>
-</section> : null}<ActionButton variant="outline" onClick={()=>{setAiComparison(true);setAiOpen(false);onView('body');}}>打开改稿对照</ActionButton>{ai.suggestion.pages.map((p, i) => <section className={styles.diff} key={`p${i}`}>
+</section> : null}<ActionButton variant="outline" disabled={composing} onClick={()=>{if(composition.current) return;setAiComparison(true);setAiOpen(false);onView('body');}}>打开改稿对照</ActionButton>{ai.suggestion.pages.map((p, i) => <section className={styles.diff} key={`p${i}`}>
 <ins>{p.heading}\n{p.body}</ins>
 <ActionButton variant="outline" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt([], [i], false)}>采用这页文案</ActionButton>
 </section>)}{!focusedRewrite ? <ActionButton variant="primary" disabled={busy || dirty || ai.staleBase || ai.inputRevision !== revision.id} onClick={() => void adopt(null, null, true)}>采用全部建议</ActionButton> : null}

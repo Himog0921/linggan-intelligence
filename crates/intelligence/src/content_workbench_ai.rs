@@ -24,6 +24,8 @@ pub enum AiError {
     Conflict,
     #[error("creation_ai_source_unavailable")]
     Source,
+    #[error("creation_ai_material_quote_forbidden")]
+    MaterialQuoteForbidden,
     #[error("creation_ai_model_unavailable")]
     Model,
     #[error("creation_ai_input_limit")]
@@ -55,6 +57,7 @@ impl AiError {
             Self::NotFound => "creation_ai_not_found",
             Self::Conflict => "creation_ai_conflict",
             Self::Source => "creation_ai_source_unavailable",
+            Self::MaterialQuoteForbidden => "creation_ai_material_quote_forbidden",
             Self::Model => "creation_ai_model_unavailable",
             Self::InputLimit => "creation_ai_input_limit",
             Self::AdmissionDenied(_) => "creation_ai_admission_denied",
@@ -164,6 +167,8 @@ pub struct WritingSuggestion {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AdoptRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub draft_edits: Option<Vec<DraftParagraphEdit>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rewrite_text: Option<String>,
     pub request_id: Uuid,
     pub expected_revision: Uuid,
@@ -171,8 +176,17 @@ pub struct AdoptRequest {
     pub page_indices: Option<Vec<usize>>,
     pub adopt_title: bool,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DraftParagraphEdit {
+    pub index: usize,
+    pub text: String,
+}
+
 mod adoption;
+mod material_quotes;
 pub use adoption::{AdoptTitleRequest, TitleKind};
+use material_quotes::validate_material_quotes;
 pub(crate) mod execution;
 mod queue;
 mod read;
@@ -215,6 +229,47 @@ fn selected_draft_cards<'a>(
             .contains(&excerpt.citation)
             .then_some((card, &excerpt.citation))
     })
+}
+
+/// Corresponds to the canonical source blocks sent in materials, which include
+/// the original block even when a request supplies only an excerpt of it.
+fn restricted_draft_materials(
+    doc: &WorkDocument,
+    request: &PreviewRequest,
+) -> std::collections::HashSet<String> {
+    if request.action != WritingAction::Draft {
+        return Default::default();
+    }
+    let sent: std::collections::HashSet<_> =
+        request.citations.iter().map(quote_source_key).collect();
+    doc.canvas
+        .iter()
+        .filter(|card| {
+            matches!(
+                card.group,
+                CanvasGroup::ReferenceOnly | CanvasGroup::Counterexample
+            )
+        })
+        .filter_map(|card| {
+            doc.excerpts
+                .iter()
+                .find(|excerpt| Some(excerpt.id) == card.excerpt_id)
+        })
+        .map(|excerpt| quote_source_key(&excerpt.citation))
+        .filter(|key| sent.contains(key))
+        .collect()
+}
+
+// Version and block identity are stable across equivalent timestamps and optional work refs.
+fn quote_source_key(citation: &Citation) -> String {
+    json!([
+        citation.source_kind,
+        citation.source_ref,
+        citation.field,
+        citation.source_version,
+        citation.block_ref,
+    ])
+    .to_string()
 }
 
 async fn draft_template_steps(
@@ -333,7 +388,7 @@ fn protected_experience(
 async fn inputs_in(
     tx: &mut Transaction<'_, Postgres>,
     r: &PreviewRequest,
-) -> Result<(Revision, Value, String), AiError> {
+) -> Result<(Revision, Value, String, Vec<String>), AiError> {
     let (domain, revision) = content_workbench::read_revision_in(tx, r.work_ref, None)
         .await
         .map_err(|_| AiError::NotFound)?;
@@ -385,10 +440,15 @@ async fn inputs_in(
     }
     let mut materials = Vec::new();
     let mut material_indexes = std::collections::BTreeMap::new();
+    let restricted_materials = restricted_draft_materials(&revision.document, r);
+    let mut restricted = Vec::new();
     for c in &r.citations {
         let v = sources::validate_citation_in_domain(tx, c, domain)
             .await
             .map_err(|_| AiError::Source)?;
+        if restricted_materials.contains(&quote_source_key(c)) {
+            material_quotes::collect(&mut restricted, &v);
+        }
         append_canonical_material(&mut materials, &mut material_indexes, c, v)?;
     }
     if let Some(selection) = &r.selection {
@@ -437,16 +497,11 @@ async fn inputs_in(
         ])
         .to_string(),
     );
-    Ok((revision, payload, hash))
+    Ok((revision, payload, hash, restricted))
 }
 
-fn append_canonical_material(
-    materials: &mut Vec<Value>,
-    indexes: &mut std::collections::BTreeMap<String, usize>,
-    citation: &Citation,
-    source: sources::ValidatedCitation,
-) -> Result<(), AiError> {
-    let identity = json!([
+fn canonical_material_key(citation: &Citation) -> String {
+    json!([
         citation.source_kind,
         citation.source_ref,
         citation.work_ref,
@@ -455,7 +510,16 @@ fn append_canonical_material(
         citation.block_ref,
         citation.as_of
     ])
-    .to_string();
+    .to_string()
+}
+
+fn append_canonical_material(
+    materials: &mut Vec<Value>,
+    indexes: &mut std::collections::BTreeMap<String, usize>,
+    citation: &Citation,
+    source: sources::ValidatedCitation,
+) -> Result<(), AiError> {
+    let identity = canonical_material_key(citation);
     if let Some(index) = indexes.get(&identity) {
         let material = &mut materials[*index];
         if material["content"] != source.content
