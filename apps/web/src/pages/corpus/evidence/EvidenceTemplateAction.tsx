@@ -1,16 +1,17 @@
 import { useId, useState } from 'react';
 import { Link } from 'react-router';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ModalDialog } from '../../../corpus/ModalDialog';
 import { ActionButton } from '../../../shared/ActionButton';
 import { stepNames, type Step } from '../../workbench/workbenchModel';
-import { createEvidenceTemplate, rejectedTemplateCommand, type EvidenceTemplateCommand } from '../../workbench/assets/structuralTemplatesApi';
+import { createEvidenceTemplate, previewTemplateReplication, rejectedTemplateCommand, type EvidenceTemplateCommand } from '../../workbench/assets/structuralTemplatesApi';
 import styles from '../../workbench/assets/Assets.module.css';
 
-export function EvidenceTemplateAction({ workRef, domainRef, materialRevision }: {
+export function EvidenceTemplateAction({ workRef, domainRef, materialRevision, hasAuthorBody }: {
   workRef: string;
   domainRef: string;
   materialRevision: string;
+  hasAuthorBody: boolean;
 }) {
   const title = useId();
   const client = useQueryClient();
@@ -75,6 +76,7 @@ export function EvidenceTemplateAction({ workRef, domainRef, materialRevision }:
           <Link to={library}>打开样板库</Link>
         </> : <>
         <p>根据这份研究底稿，按原作顺序选择写法步骤。候选只保存结构和来源版本。</p>
+        {hasAuthorBody && !sourceChanged ? <ReplicationInput key={materialRevision} source={{ workRef, domainRef, materialRevision }} /> : null}
         <p>已选：{(pending?.steps ?? steps).map(step => stepNames[step]).join(' → ') || '尚未选择'}</p>
         <div className={styles.actions}>{Object.entries(stepNames).map(([key, label]) =>
           <ActionButton key={key} variant="quiet" disabled={busy || !!pending || sourceChanged || steps.length >= 12}
@@ -90,4 +92,35 @@ export function EvidenceTemplateAction({ workRef, domainRef, materialRevision }:
       <div className={styles.actions}><ActionButton variant="quiet" disabled={busy} onClick={() => setOpen(false)}>关闭</ActionButton></div>
     </ModalDialog> : null}
   </>;
+}
+
+type ReplicationSource = Pick<EvidenceTemplateCommand, 'domainRef' | 'workRef' | 'materialRevision'>;
+
+function ReplicationInput({ source }: { source: ReplicationSource }) {
+  const [visible, setVisible] = useState(false);
+  return <>
+    <ActionButton variant="quiet" aria-expanded={visible} onClick={() => setVisible(!visible)}>
+      {visible ? '收起自动复刻输入' : '查看自动复刻输入'}
+    </ActionButton>
+    {visible ? <ReplicationInputDetails source={source} /> : null}
+  </>;
+}
+
+function ReplicationInputDetails({ source }: { source: ReplicationSource }) {
+  const preview = useQuery({
+    queryKey: ['template-replication-preview', source.domainRef, source.workRef, source.materialRevision],
+    queryFn: ({ signal }) => previewTemplateReplication(source, signal),
+    gcTime: 0,
+    refetchOnWindowFocus: 'always',
+    retry: false,
+  });
+  return <section aria-label="自动复刻输入" className={styles.replicationInput}>
+    <p>预览范围为作者正文。本次查看不会派发模型任务。</p>
+    {preview.isPending || preview.isFetching ? <p role="status">正在核对底稿…</p> : null}
+    {preview.isError && !preview.isFetching ? <p role="alert">无法预览。请核对底稿版本、正文长度或样板复刻配置。</p> : null}
+    {preview.isSuccess && !preview.isFetching ? <>
+      <h3>系统指令</h3><pre>{preview.data.system}</pre>
+      <h3>作者正文</h3><pre>{preview.data.prompt}</pre>
+    </> : null}
+  </section>;
 }

@@ -274,7 +274,7 @@ export function Inspector(props: InspectorProps) {
               />
               {tab === 'dossier' && dossier?.materials.some(material => ['body', 'image', 'audio'].includes(material.kind)
                 && material.sourceState === 'present' && material.blocks.length > 0)
-                ? <EvidenceTemplateAction key={`${domain}:${work.ref}`} domainRef={domain} workRef={work.ref} materialRevision={dossier.materialRevision} /> : null}
+                ? <EvidenceTemplateAction key={`${domain}:${work.ref}`} domainRef={domain} workRef={work.ref} materialRevision={dossier.materialRevision} hasAuthorBody={dossier.materials.some(material => material.kind === 'body' && material.sourceState === 'present' && material.blocks.length > 0)} /> : null}
             </div>
           </div>
         </div> : null}

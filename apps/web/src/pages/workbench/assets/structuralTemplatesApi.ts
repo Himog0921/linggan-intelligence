@@ -66,3 +66,10 @@ export async function reviseTemplate(code: string, command: { requestId: string;
 export async function createEvidenceTemplate(command: EvidenceTemplateCommand) {
   return receipt(await requestJson(`${base}/from-evidence`, { method: 'POST', body: command }));
 }
+
+export async function previewTemplateReplication(source: Pick<EvidenceTemplateCommand, 'domainRef' | 'workRef' | 'materialRevision'>, signal?: AbortSignal) {
+  const query = new URLSearchParams(source);
+  return decode(await requestJson(`${base}/replication-preview?${query}`, { signal }), root => ({
+    system: str(root, 'system'), prompt: str(root, 'prompt'),
+  }));
+}

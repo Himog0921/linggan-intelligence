@@ -55,11 +55,12 @@ pub use publications::{
 pub use styles::{CreationStyle, StyleCommand, StyleReceipt, list_styles, put_style, put_style_in};
 pub use subject::{CardTerms, Context, Subject};
 pub use templates::{
-    CreateEvidenceTemplate, CreateTemplate, EvidenceTemplateSource, ReviewTemplate, ReviseTemplate,
-    StructuralStep, StructuralTemplate, TemplateAction, TemplateLabels, TemplateReceipt,
-    create_evidence_template_in, create_structural_template, create_structural_template_in,
-    list_structural_templates, review_structural_template, revise_structural_template,
-    search_structural_templates, structural_template_history,
+    CreateEvidenceTemplate, CreateTemplate, EvidenceTemplateSource, ReplicationPreview,
+    ReplicationSource, ReviewTemplate, ReviseTemplate, StructuralStep, StructuralTemplate,
+    TemplateAction, TemplateLabels, TemplateReceipt, create_evidence_template_in,
+    create_structural_template, create_structural_template_in, decode_replication_candidate,
+    list_structural_templates, preview_replication, review_structural_template,
+    revise_structural_template, search_structural_templates, structural_template_history,
 };
 pub use types::*;
 pub use words::*;

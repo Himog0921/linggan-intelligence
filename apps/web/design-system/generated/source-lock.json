@@ -1,5 +1,5 @@
 {
-  "fingerprint": "20c14bf9f9d77e41a51054edacaa769940aa6cef52ca898149648dbd2316badd",
+  "fingerprint": "3807fe5faf54eeab662747f31fb11751a5e80fdbcafa851cc8558b31e7a3b892",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -439,7 +439,7 @@
     },
     {
       "path": "apps/web/src/pages/settings/AiSettingsExperience.tsx",
-      "sha256": "6ce5aa173634671997460e91df36254e30b097731768d66e21272ea97180bf8a"
+      "sha256": "b92abfc400cdedbdea261d135ebaa490383a60b8a457dfc3fb842f6cdd2678c1"
     },
     {
       "path": "apps/web/src/pages/settings/AiSettingsFields.tsx",

@@ -16,6 +16,10 @@ pub(super) fn routes() -> Router<LocalWebState> {
             post(create_evidence_template),
         )
         .route(
+            "/ops/api/creation/structural-templates/replication-preview",
+            get(preview_replication),
+        )
+        .route(
             "/ops/api/creation/structural-templates",
             get(list_structural_templates).post(create_structural_template),
         )
@@ -252,6 +256,18 @@ async fn create_structural_template(
         assets::create_structural_template_in(&mut tx, &command, Some(member.member_ref)).await;
     finish_write(tx, result).await
 }
+async fn preview_replication(
+    State(state): State<LocalWebState>,
+    Query(source): Query<assets::ReplicationSource>,
+) -> Response {
+    let mut response = reply(assets::preview_replication(database!(state), source).await);
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store"),
+    );
+    response
+}
+
 async fn create_evidence_template(
     State(state): State<LocalWebState>,
     axum::Extension(member): axum::Extension<super::ops_auth::AuthenticatedMember>,

@@ -30,6 +30,172 @@ fn without_migration(schema: &str, id: &str, migration: &str) -> String {
 }
 
 #[tokio::test]
+#[ignore = "isolated PostgreSQL replication Skill and model substitute"]
+async fn replication_skill_freezes_author_body_and_validates_substitute_before_review() {
+    use linggan_intelligence::ai_foundation::{TaskKey, prompt};
+    let db = db("replication_skill").await;
+    let work_ref = dossier::work(&db).await;
+    let canonical = linggan_evidence::research_dossier::read(&db, work_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    let source = || ReplicationSource {
+        domain_ref: dossier::DOMAIN,
+        work_ref,
+        material_revision: canonical.material_revision.clone(),
+    };
+    let before = preview_replication(&db, source()).await.unwrap();
+    let task = TaskKey::CreationTemplateReplication;
+    let status: (String, bool, Option<Uuid>) = sqlx::query_as(
+        "SELECT t.lifecycle,control.enabled,cfg.model_config_ref
+         FROM linggan_ai_task t JOIN linggan_ai_control control USING(task_key)
+         JOIN linggan_ai_task_setting s USING(task_key)
+         JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=s.current_config_ref
+         WHERE t.task_key=$1",
+    )
+    .bind(task.as_str())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(status, ("pending".into(), false, None));
+    assert_eq!(
+        preview_replication(&db, source()).await.unwrap().input_hash,
+        before.input_hash
+    );
+    let prompt_receipt = prompt::save(
+        &db,
+        &prompt::SavePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: task,
+            expected_task_revision: 0,
+            system_text: "隔离版本二".into(),
+            instruction_text: "按输入正文分段。".into(),
+        },
+    )
+    .await
+    .unwrap();
+    prompt::activate(
+        &db,
+        &prompt::ActivatePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: task,
+            expected_task_revision: 0,
+            version_ref: prompt_receipt.version_ref,
+        },
+    )
+    .await
+    .unwrap();
+    let preview = preview_replication(&db, source()).await.unwrap();
+    assert_ne!(before.task_config_ref, preview.task_config_ref);
+    assert_ne!(before.input_hash, preview.input_hash);
+    assert_eq!(before.prompt, preview.prompt);
+    let model_substitute = |system: &str, user: &str, schema: &serde_json::Value| {
+        assert!(system.starts_with("隔离版本二"));
+        assert!(system.contains("# 样板复刻"));
+        assert!(!system.contains("完整正文。"));
+        assert!(user.contains("结尾不能丢失🙂"));
+        assert!(!user.contains("合成底稿验收"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(user)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(schema["additionalProperties"], false);
+        r#"{"steps":["opening","action"]}"#
+    };
+    let reply = model_substitute(
+        &preview.system,
+        &preview.prompt,
+        &preview.response_schema.schema,
+    );
+    let steps = decode_replication_candidate(reply).unwrap();
+    for invalid in [
+        r#"{"steps":["opening"],"original":"完整正文。"}"#,
+        r#"{"steps":["完整正文。"]}"#,
+        r#"{"steps":[]}"#,
+        r#"{"steps":["opening"],"steps":["action"]}"#,
+    ] {
+        assert!(decode_replication_candidate(invalid).is_err());
+    }
+    let oversize = serde_json::json!({"steps": vec!["opening";13]}).to_string();
+    assert!(decode_replication_candidate(&oversize).is_err());
+    assert!(matches!(
+        preview_replication(
+            &db,
+            ReplicationSource {
+                material_revision: "0".repeat(64),
+                ..source()
+            }
+        )
+        .await,
+        Err(AssetsError::Stale)
+    ));
+    assert!(matches!(
+        preview_replication(
+            &db,
+            ReplicationSource {
+                domain_ref: Uuid::new_v4(),
+                ..source()
+            }
+        )
+        .await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    let count = |sql| sqlx::query_scalar::<_, i64>(sql).fetch_one(db.pool());
+    assert_eq!(
+        count("SELECT count(*) FROM linggan_creation_template")
+            .await
+            .unwrap(),
+        0
+    );
+    let mut tx = db.pool().begin().await.unwrap();
+    let saved = create_evidence_template_in(
+        &mut tx,
+        &CreateEvidenceTemplate {
+            request_id: Uuid::new_v4(),
+            work_ref,
+            domain_ref: dossier::DOMAIN,
+            material_revision: canonical.material_revision,
+            steps,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(saved.template.status, "review");
+    assert_eq!(
+        saved.template.steps,
+        [StructuralStep::Opening, StructuralStep::Action]
+    );
+    assert_eq!(
+        review_structural_template(
+            &db,
+            &saved.template.code,
+            &ReviewTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                action: TemplateAction::Approve,
+            }
+        )
+        .await
+        .unwrap()
+        .template
+        .status,
+        "ok"
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM linggan_model_invocation")
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
 #[ignore = "isolated PostgreSQL evidence template import"]
 async fn evidence_template_is_deduplicated_and_keeps_only_structural_steps() {
     let db = db("evidence_template_import").await;

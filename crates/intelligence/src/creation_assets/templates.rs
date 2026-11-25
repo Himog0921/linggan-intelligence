@@ -11,7 +11,11 @@ use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 mod evidence;
+mod replication;
 pub use evidence::{CreateEvidenceTemplate, EvidenceTemplateSource, create_evidence_template_in};
+pub use replication::{
+    ReplicationPreview, ReplicationSource, decode_replication_candidate, preview_replication,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -23,6 +27,18 @@ pub enum StructuralStep {
     Reflection,
     Action,
     Ending,
+}
+
+impl StructuralStep {
+    const ALL: [Self; 7] = [
+        Self::Opening,
+        Self::Scene,
+        Self::Experience,
+        Self::Feeling,
+        Self::Reflection,
+        Self::Action,
+        Self::Ending,
+    ];
 }
 
 #[derive(Clone, Serialize, Deserialize)]

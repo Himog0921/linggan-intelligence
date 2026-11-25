@@ -100,3 +100,10 @@
   color: inherit;
   font: inherit;
 }
+
+.replicationInput pre {
+  max-height: calc(var(--lgi-space-8) * 6);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
