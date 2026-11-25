@@ -88,3 +88,22 @@
   .library, .assetBody { grid-template-columns: minmax(0, 1fr); }
   .index { grid-auto-flow: column; overflow-x: auto; }
 }
+
+.templateSearch { display: flex; align-items: center; gap: var(--lgi-space-2); }
+.templateLabels { display: grid; gap: var(--lgi-space-2); }
+.templateLabels label { display: grid; gap: var(--lgi-space-1); }
+.templateLabels input {
+  width: 100%;
+  padding: var(--lgi-space-2);
+  background: var(--lgi-canvas);
+  border: 1px solid var(--lgi-border);
+  color: inherit;
+  font: inherit;
+}
+
+.replicationInput pre {
+  max-height: calc(var(--lgi-space-8) * 6);
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

@@ -21,11 +21,13 @@ it('saves only ordered structural labels for the saved revision and retries the 
   function Harness() { const [pending, setPending] = useState<api.CreateCommand | null>(null); return <SaveStructuralTemplate workId={work} domainRef={work} saveCurrent={saveCurrent} disabled={false} pending={pending} onPending={setPending} blocked={false} onResetBlock={() => {}} />; }
   wrap(<Harness />); fireEvent.click(screen.getByRole('button', { name: '存为样板' }));
   fireEvent.click(screen.getByRole('button', { name: '＋ 开头' })); fireEvent.click(screen.getByRole('button', { name: '＋ 观点' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '样板名称' }), { target: { value: ' 先有场景 ' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '样板标签' }), { target: { value: '观察，示例' } });
   fireEvent.click(screen.getByRole('button', { name: '保存待审核' })); await screen.findByText('保存结果尚未确认，请沿用原请求重试。');
   fireEvent.click(screen.getByRole('button', { name: '重试保存' })); await screen.findByText('已保存 YB-0001，等待审核。');
   expect(saveCurrent).toHaveBeenCalledTimes(1);
   expect(vi.mocked(api.createTemplate).mock.calls[0]).toEqual(vi.mocked(api.createTemplate).mock.calls[1]);
-  expect(vi.mocked(api.createTemplate).mock.calls[0]?.[0]).toEqual(expect.objectContaining({ workId: work, expectedRevision: revision, steps: ['opening', 'reflection'] }));
+  expect(vi.mocked(api.createTemplate).mock.calls[0]?.[0]).toEqual(expect.objectContaining({ workId: work, expectedRevision: revision, steps: ['opening', 'reflection'], labels: { name: '先有场景', tags: ['观察','示例'] } }));
 });
 it('shows a withdrawn source as unavailable and disables approval', async () => {
   vi.mocked(api.listTemplates).mockResolvedValue([{ ...template, sourceAvailable: false }]);
@@ -80,14 +82,18 @@ it('keeps the same version command after a 503 and can retry it', async () => {
 });
 it('retains the edit after a version conflict and reads the new base before saving', async () => {
   vi.mocked(api.listTemplates).mockResolvedValueOnce([template]).mockResolvedValue([{...template,revision:2}]);
-  vi.mocked(api.reviseTemplate).mockRejectedValueOnce(new ApiError({kind:'http',status:409,code:'creation_assets_stale'})).mockResolvedValueOnce({template:{...template,revision:3},replayed:false});
+  vi.mocked(api.templateHistory).mockResolvedValueOnce([template]).mockResolvedValue([
+    { ...template, revision: 3, labels: { name: '最新样板名称', tags: [] } }, template,
+  ]);
+  vi.mocked(api.reviseTemplate).mockRejectedValueOnce(new ApiError({kind:'http',status:409,code:'creation_assets_stale'})).mockResolvedValueOnce({template:{...template,revision:4},replayed:false});
   wrap(<StructuralTemplateLibrary domainRef={work} onPendingChange={() => {}} />);
   fireEvent.click(await screen.findByRole('button',{name:/YB-0001/}));fireEvent.click(screen.getByRole('button',{name:'编辑结构'}));fireEvent.click(screen.getByRole('button',{name:'＋ 行动'}));
   fireEvent.click(screen.getByRole('button',{name:'保存新版本'}));await screen.findByText(/样板已有新版本/);
   expect(screen.getByRole('button',{name:'保存新版本'})).toBeDisabled();fireEvent.click(screen.getByRole('button',{name:'读取最新版本'}));
   await screen.findByText('已读取最新版本，请核对后保存。');expect(screen.getByText('新版本：开头 → 观点 → 行动')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button',{name:'保存新版本'}));await screen.findByText('新版本已保存，等待审核。');
-  expect(vi.mocked(api.reviseTemplate).mock.calls[1]?.[1].expectedRevision).toBe(2);
+  expect(screen.getByRole('heading', { name: '最新样板名称' })).toBeVisible();
+  expect(vi.mocked(api.reviseTemplate).mock.calls[1]?.[1].expectedRevision).toBe(3);
 });
 it('protects the edited structure when selecting another sample or leaving the asset view', async () => {
   vi.mocked(api.listTemplates).mockResolvedValue([template,{...template,code:'YB-0002'}]);
@@ -105,4 +111,37 @@ it('keeps a conflicted edit when the refreshed sample was disabled elsewhere', a
   fireEvent.click(await screen.findByRole('button',{name:/YB-0001/}));fireEvent.click(screen.getByRole('button',{name:'编辑结构'}));fireEvent.click(screen.getByRole('button',{name:'＋ 行动'}));
   fireEvent.click(screen.getByRole('button',{name:'保存新版本'}));fireEvent.click(await screen.findByRole('button',{name:'读取最新版本'}));
   await screen.findByText('已读取最新版本，请核对后保存。');expect(screen.getByRole('button',{name:'恢复待审核'})).toBeDisabled();expect(screen.getByText('新版本：开头 → 观点 → 行动')).toBeVisible();
+});
+
+it('keeps the editing base when a search finds a newer version', async () => {
+  const newer = { ...template, revision: 2, labels: { name: '另一窗口修改', tags: [] } };
+  vi.mocked(api.listTemplates).mockResolvedValueOnce([template]).mockResolvedValue([newer]);
+  vi.mocked(api.reviseTemplate).mockRejectedValueOnce(new ApiError({kind:'http',status:409,code:'creation_assets_stale'}));
+  wrap(<StructuralTemplateLibrary domainRef={work} onPendingChange={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: /YB-0001/ }));
+  fireEvent.click(screen.getByRole('button', { name: '编辑结构' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '样板名称' }), { target: { value: '本地编辑' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索样板' }), { target: { value: 'YB-0001' } });
+  fireEvent.click(screen.getByRole('button', { name: '搜索' }));
+  await screen.findByRole('heading', { name: '另一窗口修改' });
+  fireEvent.click(screen.getByRole('button', { name: '保存新版本' }));
+  await screen.findByText(/样板已有新版本/);
+  expect(vi.mocked(api.reviseTemplate).mock.calls[0]?.[1]).toMatchObject({
+    expectedRevision: 1,
+    labels: { name: '本地编辑', tags: [] },
+  });
+});
+
+it('retains unsaved name and tags when a search excludes the selection and history fails', async () => {
+  vi.mocked(api.listTemplates).mockResolvedValueOnce([template]).mockResolvedValue([]);
+  vi.mocked(api.templateHistory).mockRejectedValue(new Error('network'));
+  wrap(<StructuralTemplateLibrary domainRef={work} onPendingChange={() => {}} />);
+  fireEvent.click(await screen.findByRole('button', { name: /YB-0001/ }));
+  fireEvent.click(screen.getByRole('button', { name: '编辑结构' }));
+  fireEvent.change(screen.getByRole('textbox', { name: '样板标签' }), { target: { value: '未保存标签' } });
+  fireEvent.change(screen.getByRole('textbox', { name: '搜索样板' }), { target: { value: '不存在的样板' } });
+  fireEvent.click(screen.getByRole('button', { name: '搜索' }));
+  await screen.findByRole('button', { name: '重新读取样板' });
+  expect(screen.getByRole('textbox', { name: '样板标签' })).toHaveValue('未保存标签');
+  expect(screen.getByRole('button', { name: '保存新版本' })).toBeDisabled();
 });

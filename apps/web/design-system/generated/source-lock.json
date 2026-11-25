@@ -1,5 +1,5 @@
 {
-  "fingerprint": "c462a0c116d4d73dc7c2174d99c02912f37e4e946899704d9543510da360f9bc",
+  "fingerprint": "3807fe5faf54eeab662747f31fb11751a5e80fdbcafa851cc8558b31e7a3b892",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -439,7 +439,7 @@
     },
     {
       "path": "apps/web/src/pages/settings/AiSettingsExperience.tsx",
-      "sha256": "6ce5aa173634671997460e91df36254e30b097731768d66e21272ea97180bf8a"
+      "sha256": "b92abfc400cdedbdea261d135ebaa490383a60b8a457dfc3fb842f6cdd2678c1"
     },
     {
       "path": "apps/web/src/pages/settings/AiSettingsFields.tsx",
@@ -503,7 +503,7 @@
     },
     {
       "path": "apps/web/src/pages/workbench/MaterialDesk.tsx",
-      "sha256": "e0fc6afc48a4494bf06f89d8c85e63b46a957da745264b6b7f0e0a48768e24ed"
+      "sha256": "278325a24d96938452caaba60d55fbe7acb59653416db1bc3f85538908068cf6"
     },
     {
       "path": "apps/web/src/pages/workbench/TopicLibrary.tsx",
