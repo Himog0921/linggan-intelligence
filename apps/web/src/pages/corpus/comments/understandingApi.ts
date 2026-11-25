@@ -20,7 +20,7 @@ export const detailReasons: Record<string, string> = {
   comment_consolidation_no_pairs: '没有可比较的需求配对', unit_output_invalid: '单元输出无效',
   unit_truncated: '单元输出被截断', target_missing: '缺少这条评论的结果', target_invalid: '评论结果无效',
   global_off: '全局 AI 已暂停', executor_off: 'AI 执行器已暂停',
-  task_comment_understanding_off: '评论理解任务已暂停', billing_paused: '连接因计费问题暂停',
+  task_comment_understanding_off: '评论理解任务已暂停', model_connection_billing_paused: '连接因计费问题暂停',
   daily_budget_unconfigured: '评论理解未配置额度', daily_budget_exhausted: '已用完当日额度',
   egress_not_approved: '作品材料未授权外发', comment_egress_not_approved: '评论材料未授权外发',
   waiting_l1: '等待作品底稿', previous_dispatch: '此前已派发', already_queued: '已有研究任务',
