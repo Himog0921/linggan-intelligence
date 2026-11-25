@@ -43,6 +43,25 @@ try {
       ['查看作品依据', `/corpus/evidence?domain=${domain}`],
       ['查看创作者', `/corpus/creators?domain=${domain}`],
     ]) assert.equal(await page.getByRole('link', { name: new RegExp(name) }).getAttribute('href'), expected);
+    await page.setViewportSize({ width: 1024, height: 700 });
+    const horizontal = page.getByRole('region', { name: '本页其他观察与不可比较项，可横向滚动' });
+    await page.getByRole('navigation', { name: '本页其他观察与不可比较项横向浏览' }).getByRole('button', { name: '向右查看' }).click();
+    assert.ok(await horizontal.evaluate(element => element.scrollLeft > 0), 'table right columns are reachable from the top');
+    await page.getByRole('navigation', { name: '本页其他观察与不可比较项横向浏览' }).getByRole('button', { name: '向左查看' }).click();
+    assert.equal(await horizontal.evaluate(element => element.scrollLeft), 0);
+    // The fixed desktop shell must let a wheel user reach the end of a long list.
+    const main = page.locator('main');
+    await page.setViewportSize({ width: 1280, height: 480 });
+    const box = await main.boundingBox();
+    assert.ok(box, 'opportunity workspace is visible');
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.wheel(0, 100000);
+    await page.waitForFunction(() => {
+      const workspace = document.querySelector('main');
+      const footer = document.querySelector('nav[aria-label="机会列表底部翻页"]');
+      return workspace && footer && workspace.scrollTop > 0 && footer.getBoundingClientRect().bottom <= innerHeight;
+    });
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.screenshot({ path: path.join(dir, 'home.png'), fullPage: true });
     await table.getByRole('link', { name: 'synthetic P1' }).click();
     await page.getByRole('heading', { name: 'synthetic P1', exact: true }).waitFor();

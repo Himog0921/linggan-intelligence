@@ -701,3 +701,10 @@
 - 增量回归：`npm run test -- src/pages/opportunity/OpportunityPage.test.tsx` → exit 0、1 文件 18 项通过；`bash scripts/ci-preflight.sh origin/main` → exit 0、54 项通过。未执行迁移或触发真实采集及模型外发。
 - 完整前端验证：`npm run test -- --maxWorkers=2` → exit 0、173 文件 1812 项通过；`npm run build` → exit 0。默认并行首轮多个其他页面用例出现超时后被中止，原因未确定。
 - 远端 Delivery `45128452889` 的机会卡浏览器证明因仍查找已删除的“查看本页其他观察与不可比较项”按钮而失败；同步更新证明脚本，改为直接等待其他观察表格可见。复验结果以 PR 对应最新提交的 CI 为准。
+
+## 2026-11-24 机会首页滚动与展示优化
+
+- 桌面机会页工作区原先未约束自身高度和滚动，长列表被外层固定壳裁切；为首页和详情共同的工作区启用滚动。任务入口保持首屏紧凑排列，列表表头、行反馈、分页间距与北京时间显示按现有设计令牌调整；数据和指标口径不变。
+- 独立前端预览只读访问本机 3001 的已有数据：工作区内容高度 13954、可见高度 704；滚轮滚至底部时 `scrollTop=13250`，底部翻页可见。底部下一页显示 3 个问题，工作区回到顶部。未改变运行服务、运行库或触发采集及模型外发。
+- 独立审阅发现窄桌面表格横向滚动条位于长表底部；已在表格宽度不足时提供顶部左右查看入口，并补 1024px 方向切换验证。
+- `npm run test -- src/pages/opportunity/OpportunityPage.test.tsx` → 18 passed；`npm run typecheck` 和 `npm run lint` → exit 0；`bash scripts/ci-preflight.sh origin/main` → 54 passed。`WEB_APP_PROOF_SCOPE=opportunity ... bash scripts/test-web-app-postgres.sh` → 1 passed，合成样本涵盖滚轮和依据读取，隔离资源清理通过；最终代码以 PR 对应提交和后续检查为准。
