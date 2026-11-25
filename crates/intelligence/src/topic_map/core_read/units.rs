@@ -3,7 +3,7 @@ use super::*;
 use sqlx::Row;
 
 pub(super) async fn attach_rules(
-    db: &Database,
+    tx: &mut Transaction<'_, Postgres>,
     q: &TopicMapQuery,
     topics: &mut [TopicMapTopic],
     unavailable: &HashSet<Uuid>,
@@ -18,7 +18,7 @@ pub(super) async fn attach_rules(
         LEFT JOIN linggan_content_understanding_request l1
             ON l1.request_ref::text=coalesce(w.input_refs#>>'{source,coverage,coreRef}',w.input_refs#>>'{coverage,coreRef}')
         WHERE ($1::uuid IS NULL OR c.domain_ref=$1)"#)
-        .bind(q.domain_ref).fetch_all(db.pool()).await?;
+        .bind(q.domain_ref).fetch_all(&mut **tx).await?;
     for topic in topics {
         let rule = rows
             .iter()

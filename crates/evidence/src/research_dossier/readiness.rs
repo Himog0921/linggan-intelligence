@@ -116,10 +116,11 @@ fn check(
                 && has_referenceable_text(m)
         });
         if !transcript_available {
+            let (state, message) = video_transcript_gap(video);
             result.gap(
                 "video_transcript_required",
-                MaterialState::Blocked,
-                "视频口播尚未取得有效转录，完成转录后才能进行内容理解。",
+                state,
+                message,
                 video["slotKey"].as_str(),
             );
         }
@@ -133,14 +134,50 @@ fn check(
         );
     }
     if !readable_text && !readable_image {
+        let state = if result.state == MaterialState::Preparing {
+            MaterialState::Preparing
+        } else {
+            MaterialState::Blocked
+        };
         result.gap(
             "no_readable_material",
-            MaterialState::Blocked,
+            state,
             "尚无可供分析的正文、口播或图片。",
             None,
         );
     }
     result
+}
+
+fn video_transcript_gap(video: &Value) -> (MaterialState, &'static str) {
+    use MaterialState::{Blocked, Preparing};
+    if video["sourceState"] == "restricted" {
+        return (Blocked, "视频来源受限，不能用于内容理解。");
+    }
+    let asr = &video["processing"]["asr"];
+    let audio = &video["processing"]["audio_extract"];
+    if matches!(
+        asr["reason"].as_str().or(audio["reason"].as_str()),
+        Some("no_speech_observed" | "no_audio_stream_observed")
+    ) {
+        return (Blocked, "处理已结束，未取得可用口播，不能启动 L1。");
+    }
+    if [asr, audio].iter().any(|job| {
+        matches!(job["queueState"].as_str(), Some("pending" | "leased" | "retry_wait"))
+            || (job["queueState"].is_null()
+                && matches!(job["state"].as_str(), Some("pending" | "running")))
+    }) {
+        return (Preparing, "音频提取或转录任务正在队列中，生成有效转录后会自动重新检查。");
+    }
+    match video["download"]["state"].as_str() {
+        Some("running") => (Preparing, "视频正在下载，取得原件后将进入媒体处理。"),
+        Some("expired_url" | "mime_mismatch" | "size_limit" | "network_error")
+            if video["sourceState"] == "not_acquired" =>
+        {
+            (Blocked, "视频下载未取得合格原件，请查看下载记录中的失败原因。")
+        }
+        _ => (Blocked, "视频口播尚未取得有效转录，完成转录后才能进行内容理解。"),
+    }
 }
 
 fn has_referenceable_text(material: &Value) -> bool {
@@ -182,6 +219,19 @@ mod tests {
     }
     fn image() -> Value {
         json!({"slotKey":"image:1","component":"image","purpose":"body_image","sourceState":"present","originalUrl":"/local/image","localReadable":true})
+    }
+
+    #[test]
+    fn l1_waits_for_scheduled_media_retry_and_leaves_empty_transcripts_terminal() {
+        let mut video = json!({"slotKey":"video:1","component":"motion","purpose":"video","sourceState":"present",
+            "processing":{"asr":{"state":"failed","queueState":"retry_wait","reason":"process_timeout"}}});
+        let readiness = check(&[], &[video.clone()], true, true);
+        assert_eq!(readiness.state, MaterialState::Preparing);
+        assert!(readiness.gaps.iter().all(|gap| gap.state == MaterialState::Preparing));
+        video["processing"]["asr"] = json!({"state":"completed","queueState":"completed","reason":"no_speech_observed"});
+        let readiness = check(&[text()], &[video], true, true);
+        assert_eq!(readiness.state, MaterialState::Blocked);
+        assert!(readiness.gaps[0].message.contains("处理已结束"));
     }
     #[test]
     fn existing_text_or_image_is_usable_without_complete_inventory() {

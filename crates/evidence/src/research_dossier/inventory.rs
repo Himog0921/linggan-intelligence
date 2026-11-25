@@ -56,9 +56,10 @@ SELECT o.content_public_ref,o.slot_key,o.purpose,o.display_ordinal,o.producer_or
  (SELECT jsonb_build_object('state',CASE WHEN a.ended_at IS NULL OR a.ended_at>$2::timestamptz THEN 'running' ELSE a.terminal_reason END)
   FROM linggan_media_download_attempt a WHERE a.media_observation_ref=o.observation_ref AND a.started_at<=$2::timestamptz
   ORDER BY a.started_at DESC,a.download_attempt_ref DESC LIMIT 1) AS download,
- (SELECT jsonb_object_agg(latest.processor_kind,jsonb_build_object('state',latest.state,'reason',latest.reason)) FROM (
-   SELECT DISTINCT ON(j.processor_kind) j.processor_kind,e.state,e.reason
+ (SELECT jsonb_object_agg(latest.processor_kind,jsonb_build_object('state',latest.state,'reason',latest.reason,'queueState',latest.queue_state)) FROM (
+   SELECT DISTINCT ON(j.processor_kind) j.processor_kind,e.state,e.reason,pwork.state AS queue_state
    FROM linggan_media_processing_job j
+   LEFT JOIN linggan_media_processing_work pwork ON pwork.job_ref=j.job_ref AND pwork.updated_at<=$2::timestamptz
    LEFT JOIN LATERAL(SELECT CASE state WHEN 'succeeded' THEN 'completed' ELSE state END AS state,reason FROM linggan_media_processing_job_event e WHERE e.job_ref=j.job_ref AND e.occurred_at<=$2::timestamptz ORDER BY e.occurred_at DESC LIMIT 1) e ON true
    WHERE j.slot_key=o.slot_key AND j.blob_sha256=m.blob_sha256 AND j.created_at<=$2::timestamptz
    ORDER BY j.processor_kind,j.created_at DESC,j.job_ref DESC

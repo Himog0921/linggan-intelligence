@@ -159,21 +159,68 @@ pub(crate) async fn prior_dispatch_unresolved_in(
     Ok(unresolved)
 }
 pub async fn preview(db: &Database, domain: Uuid, work: Uuid) -> Result<Value, FoundationError> {
+    let mut tx = begin_preview(db).await?;
+    let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut tx, None).await?;
+    let p = source::load(&mut tx, domain, work, &cutoff).await?;
+    let result = preview_packet(&mut tx, domain, work, &cutoff, &p).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+async fn begin_preview(db: &Database) -> Result<Transaction<'_, Postgres>, FoundationError> {
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ")
         .execute(&mut *tx)
         .await?;
-    let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut tx, None).await?;
-    let p = source::load(&mut tx, domain, work, &cutoff).await?;
-    let (config, revision) = configuration(&mut tx).await?;
-    let reasons = reasons(&mut tx, config, &p).await?;
-    let result = json!({"contract":"content-understanding.preview.v1","workRef":work,"domainRef":domain,
+    Ok(tx)
+}
+
+async fn preview_packet(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    work: Uuid,
+    cutoff: &str,
+    p: &Packet,
+) -> Result<Value, FoundationError> {
+    let (config, revision) = configuration(tx).await?;
+    let reasons = reasons(tx, config, p).await?;
+    Ok(
+        json!({"contract":"content-understanding.preview.v1","workRef":work,"domainRef":domain,
         "knowledgeCutoff":cutoff,"inputHash":p.hash(),"taskConfigRef":config,"taskRevision":revision,
         "methodVersion":METHOD,"canStart":reasons.is_empty(),"reasons":reasons,
-        "imageCount":p.snapshot.images.len(),"coverage":p.coverage,"materialReadiness":p.coverage["materialReadiness"]});
-    tx.commit().await?;
-    Ok(result)
+        "imageCount":p.snapshot.images.len(),"coverage":p.coverage,"materialReadiness":p.coverage["materialReadiness"]}),
+    )
 }
+
+async fn preview_automatic(
+    db: &Database,
+    domain: Uuid,
+    work: Uuid,
+) -> Result<Option<(Value, String)>, FoundationError> {
+    let mut tx = begin_preview(db).await?;
+    let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut tx, None).await?;
+    let p = source::load(&mut tx, domain, work, &cutoff).await?;
+    if p.coverage["materialReadiness"]["state"] != "ready"
+        || already_attempted_material(&mut tx, &p).await?
+    {
+        tx.commit().await?;
+        return Ok(None);
+    }
+    let view = preview_packet(&mut tx, domain, work, &cutoff, &p).await?;
+    tx.commit().await?;
+    Ok(Some((view, p.snapshot.material_snapshot_identity)))
+}
+
+/// Eligibility to read a historical Core does not satisfy a new material version.
+async fn already_attempted_material(
+    tx: &mut Transaction<'_, Postgres>,
+    packet: &Packet,
+) -> Result<bool, FoundationError> {
+    Ok(sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_content_understanding_request WHERE work_ref=$1 AND material_snapshot_identity=$2 AND method_version=$3)")
+        .bind(packet.snapshot.work_ref).bind(&packet.snapshot.material_snapshot_identity).bind(METHOD)
+        .fetch_one(&mut **tx).await?)
+}
+
 async fn lock_work_snapshot(
     tx: &mut Transaction<'_, Postgres>,
     work: Uuid,
@@ -201,6 +248,13 @@ pub(crate) async fn start_with_kind(
     let mut c = Command::begin(db, r.command_ref, "content_understanding", r).await?;
     if let Some(v) = c.replay()? {
         return Ok(v);
+    }
+    if kind == BatchKind::Automatic {
+        let enabled: Option<bool> = sqlx::query_scalar("SELECT a.enabled AND d.status='active' FROM linggan_content_understanding_automation a JOIN observation_domain d USING(domain_ref) WHERE a.domain_ref=$1 FOR SHARE OF a,d")
+            .bind(r.domain_ref).fetch_optional(&mut *c.tx).await?;
+        if enabled != Some(true) {
+            return Err(FoundationError::AdmissionDenied(vec!["l1_automation_disabled".into()]));
+        }
     }
     let config = lock_setting(&mut c.tx, TASK, r.task_revision).await?;
     if config != r.task_config_ref {
@@ -239,6 +293,19 @@ pub(crate) async fn start_with_kind(
                 reused: true,
             })
             .await;
+    }
+    if kind == BatchKind::Automatic {
+        if already_attempted_material(&mut c.tx, &current).await? {
+            return Err(FoundationError::AdmissionDenied(vec![
+                "automatic_material_already_attempted".into(),
+            ]));
+        }
+        // lock_setting serializes automatic admissions across domains.
+        let waiting: i64 = sqlx::query_scalar(automation::AUTOMATIC_WAITING)
+            .fetch_one(&mut *c.tx).await?;
+        if waiting >= automation::QUEUE_LIMIT {
+            return Err(FoundationError::AdmissionDenied(vec!["automatic_l1_queue_full".into()]));
+        }
     }
     let denied = reasons(&mut c.tx, config, &p).await?;
     if !denied.is_empty() {

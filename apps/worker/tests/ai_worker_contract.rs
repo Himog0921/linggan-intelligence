@@ -280,6 +280,58 @@ async fn ai_binary_sigkill_restart_keeps_attempted_calls_unknown_and_only_dispat
 }
 
 #[tokio::test]
+#[ignore = "owned PostgreSQL/loopback and actual dedicated binary; terminate its session only"]
+async fn ai_binary_reconnects_without_resending_dispatched_calls() {
+    let schema = "ai_binary_session_recovery";
+    let db = fixture::db(schema).await;
+    let endpoint = endpoint::Endpoint::start().await;
+    service_fixture::queued(&db, &endpoint.url, 5).await;
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let scoped = format!("{url}?options=-csearch_path%3D{schema}");
+    let mut process = Process::start(Some(&scoped), "4");
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while endpoint.requests.lock().unwrap().len() < 4 {
+            assert!(process.child.try_wait().unwrap().is_none());
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let (old_generation, backend): (i64, i32) = sqlx::query_as(
+        "SELECT generation,owner_backend_pid FROM linggan_ai_executor_instance WHERE process_id=$1 AND state='running'",
+    ).bind(process.child.id() as i32).fetch_one(db.pool()).await.unwrap();
+    let terminated: bool = sqlx::query_scalar("SELECT pg_terminate_backend($1, 5000)")
+        .bind(backend)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert!(terminated);
+    tokio::time::timeout(Duration::from_secs(20), async {
+        loop {
+            assert!(process.child.try_wait().unwrap().is_none());
+            let recovered: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ai_executor_instance WHERE process_id=$1 AND generation=$2 AND state='running')")
+                .bind(process.child.id() as i32).bind(old_generation + 1).fetch_one(db.pool()).await.unwrap();
+            if recovered { break; }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }).await.unwrap();
+    endpoint.release();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let counts: (i64, i64) = sqlx::query_as("SELECT count(*) FILTER(WHERE failure_code='ai_dispatch_unknown'),count(*) FILTER(WHERE state='succeeded') FROM linggan_ai_batch_item_control")
+                .fetch_one(db.pool()).await.unwrap();
+            if counts == (4, 1) { break; }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }).await.unwrap();
+    assert_eq!(endpoint.requests.lock().unwrap().len(), 5);
+    process.terminate();
+    assert!(process.wait().await.success());
+    assert_eq!(process.ack()["state"], "drained");
+    endpoint.finish().await;
+}
+
+#[tokio::test]
 #[ignore = "owned PostgreSQL/HTTP and actual Node/SDK; deliberate receipt transaction failure"]
 async fn ai_binary_failed_settlement_keeps_unknown_quota_actual_late_usage_and_a_failed_ack() {
     let db = fixture::db("ai_binary_receipt_failure").await;

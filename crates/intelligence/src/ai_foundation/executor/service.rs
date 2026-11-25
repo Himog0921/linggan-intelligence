@@ -102,6 +102,10 @@ async fn work_loop(
     opportunity_sync: Option<Arc<opportunity_sync::OpportunitySync>>,
 ) -> Result<(), ExecutorError> {
     let mut tasks = JoinSet::new();
+    let mut corpus_jobs = JoinSet::new();
+    let corpus_db = db.clone();
+    let corpus_drain = drain.clone();
+    corpus_jobs.spawn(async move { scan_corpus_automation(&corpus_db, &corpus_drain).await });
     let mut opportunity_jobs = JoinSet::new();
     let mut selection_jobs = JoinSet::new();
     let mut lens_jobs = JoinSet::new();
@@ -110,16 +114,22 @@ async fn work_loop(
     poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut recovery = Instant::now();
     let mut automation_scan = Instant::now();
-    let mut automation_cursor = None;
-    let mut understanding_cursor = None;
     let lens_enabled = crate::ops_content_lens::enabled_from_env();
     loop {
         if drain.is_requested() && tasks.is_empty() {
+            corpus_jobs.shutdown().await;
             selection_jobs.shutdown().await;
             lens_jobs.shutdown().await;
             return failure.map_or(Ok(()), Err);
         }
         tokio::select! {
+            result=corpus_jobs.join_next(),if !corpus_jobs.is_empty()=>{
+                if let Some(Err(error)) = result {
+                    eprintln!("corpus automation scan interrupted: {error}");
+                    failure.get_or_insert(ExecutorError::TaskFailed);
+                    drain.request();
+                }
+            },
             result=opportunity_jobs.join_next(),if !opportunity_jobs.is_empty()=>{
                 if let Some(Err(error))=result {
                     if let Some(sync)=&opportunity_sync { sync.defer(&error); }
@@ -158,13 +168,6 @@ async fn work_loop(
                             }
                         });
                     }
-                    // Queue production is isolated from execution: one bad source is not a drain request.
-                    if let Err(error) = crate::ai_foundation::topic_research_automation::tick(db, &mut automation_cursor).await {
-                        eprintln!("topic automation scan deferred: {error}");
-                    }
-                    if let Err(error) = crate::ai_foundation::content_understanding::automation_tick(db, &mut understanding_cursor).await {
-                        eprintln!("content understanding automation scan deferred: {error}");
-                    }
                     if lens_enabled && lens_jobs.is_empty() {
                         let lens_db = db.clone();
                         lens_jobs.spawn(async move {
@@ -193,6 +196,31 @@ async fn work_loop(
                     failure.get_or_insert(error);drain.request();
                 }
             }
+        }
+    }
+}
+
+/// Source reads may take longer than the dispatch poll. Keep the reconciliation
+/// cursors together, without holding up claims, comment schedules or settlements.
+async fn scan_corpus_automation(db: &Database, drain: &ModelWorkerDrain) {
+    let mut stopping = drain.subscribe();
+    let mut tick = tokio::time::interval(Duration::from_secs(5));
+    tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    let mut topic_cursor = None;
+    let mut understanding_cursor = None;
+    while !drain.is_requested() {
+        tokio::select! {
+            biased;
+            _ = stopping.changed() => break,
+            _ = tick.tick() => {}
+        }
+        if let Err(error) = crate::ai_foundation::topic_research_automation::tick(db, &mut topic_cursor).await {
+            eprintln!("topic automation scan deferred: {error}");
+        }
+        if !drain.is_requested()
+            && let Err(error) = crate::ai_foundation::content_understanding::automation_tick(db, &mut understanding_cursor).await
+        {
+            eprintln!("content understanding automation scan deferred: {error}");
         }
     }
 }

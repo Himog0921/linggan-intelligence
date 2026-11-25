@@ -1,6 +1,5 @@
 //! Exact, current Operations publication facts for qualified graph works.
 use super::*;
-use linggan_storage_postgres::Database;
 use serde_json::json;
 use sqlx::Row;
 use std::collections::{BTreeMap, BTreeSet};
@@ -8,17 +7,6 @@ use std::collections::{BTreeMap, BTreeSet};
 #[cfg(test)]
 #[path = "operations_tests.rs"]
 mod tests;
-
-pub(super) async fn read(
-    db: &Database,
-    works: &[Uuid],
-    domain: Option<Uuid>,
-) -> Result<BTreeMap<Uuid, Vec<Value>>, TopicMapError> {
-    let mut tx = db.pool().begin().await?;
-    let result = read_in(&mut tx, works, domain).await?;
-    tx.commit().await?;
-    Ok(result)
-}
 
 pub(super) async fn read_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,

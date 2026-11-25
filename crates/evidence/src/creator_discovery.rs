@@ -326,14 +326,22 @@ pub async fn load_for_works(
     q: &CreatorScope,
     work_refs: &[Uuid],
 ) -> Result<DiscoveryData, DiscoveryError> {
-    q.validate().map_err(DiscoveryError::Invalid)?;
     let mut tx = database.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let data = load_materials_in(&mut tx, q, Some(work_refs), None).await?;
+    let data = load_for_works_in(&mut tx, q, work_refs).await?;
     tx.commit().await?;
     Ok(data)
+}
+
+pub async fn load_for_works_in(
+    tx: &mut Transaction<'_, Postgres>,
+    q: &CreatorScope,
+    work_refs: &[Uuid],
+) -> Result<DiscoveryData, DiscoveryError> {
+    q.validate().map_err(DiscoveryError::Invalid)?;
+    load_materials_in(tx, q, Some(work_refs), None).await
 }
 
 /// Topic research reads the complete qualified material, including comment-only works.
