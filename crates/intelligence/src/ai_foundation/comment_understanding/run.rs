@@ -47,7 +47,7 @@ pub async fn cancel(db: &Database, request: &Cancel) -> Result<Value, Foundation
 /// What a run is doing and what it cost.
 pub async fn read_run(db: &Database, domain: Uuid, batch: Uuid) -> Result<Value, FoundationError> {
     let mut tx = super::start::read_only_tx(db).await?;
-    let units = sqlx::query("SELECT u.unit_ref,u.work_ref,c.state,c.failure_code,(SELECT count(*) FROM linggan_comment_research_unit_target t WHERE t.unit_ref=u.unit_ref) AS targets FROM linggan_comment_research_unit u JOIN linggan_ai_batch_item i ON i.item_ref=u.item_ref JOIN linggan_ai_batch_item_control c ON c.item_ref=u.item_ref WHERE i.batch_ref=$1 AND u.domain_ref=$2 ORDER BY i.position")
+    let units = sqlx::query("SELECT u.unit_ref,u.work_ref,c.state,c.failure_code,(SELECT count(*) FROM linggan_comment_research_unit_target t WHERE t.unit_ref=u.unit_ref) AS targets,CASE WHEN c.state='succeeded' THEN (SELECT jsonb_build_object('signals',count(*) FILTER(WHERE x.result->>'outcome'='signals'),'needsContext',count(*) FILTER(WHERE x.result->>'outcome'='needs_context'),'noSignal',count(*) FILTER(WHERE x.result->>'outcome'='no_signal')) FROM linggan_comment_research_unit_target t JOIN linggan_comment_research_result x USING(request_ref) WHERE t.unit_ref=u.unit_ref) END AS outcomes FROM linggan_comment_research_unit u JOIN linggan_ai_batch_item i ON i.item_ref=u.item_ref JOIN linggan_ai_batch_item_control c ON c.item_ref=u.item_ref WHERE i.batch_ref=$1 AND u.domain_ref=$2 ORDER BY i.position")
         .bind(batch)
         .bind(domain)
         .fetch_all(&mut *tx)
@@ -55,6 +55,19 @@ pub async fn read_run(db: &Database, domain: Uuid, batch: Uuid) -> Result<Value,
     if units.is_empty() {
         return Err(FoundationError::NotFound);
     }
+    // Unit works belong to this domain; titles come from the same source as the comment directory.
+    let as_of: String = sqlx::query_scalar(
+        "SELECT to_char(scope_001_now() AT TIME ZONE 'UTC', 'YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"')",
+    )
+    .fetch_one(&mut *tx)
+    .await?;
+    let works: Vec<Uuid> = units
+        .iter()
+        .map(|row| row.try_get::<Uuid, _>("work_ref"))
+        .collect::<Result<std::collections::BTreeSet<_>, _>>()?
+        .into_iter()
+        .collect();
+    let titles = crate::comment_study_source::context::read_titles(&mut tx, &works, &as_of).await?;
     // The same derivation the comment directory uses for a comment's latest study.
     let targets = sqlx::query("SELECT state,failure_code,count(*) AS n FROM (SELECT CASE WHEN x.result IS NOT NULL THEN 'succeeded' WHEN c.state='cancelled' THEN 'cancelled' WHEN x.failure_code IS NOT NULL THEN 'failed' WHEN c.state IN('pending','running') THEN c.state ELSE 'failed' END AS state,COALESCE(x.failure_code,CASE WHEN x.request_ref IS NULL THEN c.failure_code END) AS failure_code FROM linggan_comment_research_unit_target ut JOIN linggan_comment_research_unit u ON u.unit_ref=ut.unit_ref JOIN linggan_ai_batch_item i ON i.item_ref=u.item_ref JOIN linggan_ai_batch_item_control c ON c.item_ref=u.item_ref LEFT JOIN linggan_comment_research_result x ON x.request_ref=ut.request_ref WHERE i.batch_ref=$1) t GROUP BY state,failure_code ORDER BY state,failure_code")
         .bind(batch)
@@ -94,6 +107,11 @@ pub async fn read_run(db: &Database, domain: Uuid, batch: Uuid) -> Result<Value,
             "state": row.try_get::<String, _>("state")?,
             "failureCode": row.try_get::<Option<String>, _>("failure_code")?,
             "targetCount": row.try_get::<i64, _>("targets")?,
+            "workTitle": titles
+                .get(&row.try_get::<Uuid, _>("work_ref")?)
+                .map_or(Value::Null, |title| title["displayTitle"].clone()),
+            // Outcomes stored by this unit; null until the unit has succeeded.
+            "outcomes": row.try_get::<Option<Value>, _>("outcomes")?,
         }))).collect::<Result<Vec<_>, sqlx::Error>>()?,
         "targets": targets.iter().map(|row| Ok(json!({
             "state": row.try_get::<String, _>("state")?,
@@ -111,11 +129,42 @@ pub async fn read_run(db: &Database, domain: Uuid, batch: Uuid) -> Result<Value,
 }
 
 /// The newest research batches for the domain. The full unit and target receipt loads on demand.
+///
+/// Each run also carries its scale and a summary derived from the same unit items and stored
+/// results as `read_run`: comments and works in the batch, units by item state (`pending` counts
+/// pending and running; `cancelled` counts cancelled and skipped) and the outcomes stored by
+/// completed units only.
 pub async fn read_runs(db: &Database, domain: Uuid) -> Result<Value, FoundationError> {
     let runs: Vec<Value> = sqlx::query_scalar(
         "SELECT jsonb_build_object('batchRef',batch.batch_ref,'createdAt',batch.created_at,
-           'state',control.state,'cancelRequested',control.cancel_requested,'unitCount',batch.item_count)
+           'state',control.state,'cancelRequested',control.cancel_requested,'unitCount',batch.item_count,
+           'targetCount',targets.target_count,'workCount',units.work_count,
+           'unitCounts',jsonb_build_object('completed',units.completed,'failed',units.failed,
+             'pending',units.pending,'cancelled',units.cancelled),
+           'outcomes',jsonb_build_object('signals',targets.signals,'needsContext',targets.needs_context,
+             'noSignal',targets.no_signal))
          FROM linggan_ai_batch batch JOIN linggan_ai_batch_control control USING(batch_ref)
+         CROSS JOIN LATERAL (
+           SELECT count(DISTINCT unit.work_ref) AS work_count,
+             count(*) FILTER(WHERE item_control.state='succeeded') AS completed,
+             count(*) FILTER(WHERE item_control.state='failed') AS failed,
+             count(*) FILTER(WHERE item_control.state IN('pending','running')) AS pending,
+             count(*) FILTER(WHERE item_control.state IN('cancelled','skipped')) AS cancelled
+           FROM linggan_ai_batch_item item JOIN linggan_comment_research_unit unit USING(item_ref)
+           JOIN linggan_ai_batch_item_control item_control USING(item_ref)
+           WHERE item.batch_ref=batch.batch_ref AND unit.domain_ref=$1
+         ) units
+         CROSS JOIN LATERAL (
+           SELECT count(*) AS target_count,
+             count(*) FILTER(WHERE item_control.state='succeeded' AND result.result->>'outcome'='signals') AS signals,
+             count(*) FILTER(WHERE item_control.state='succeeded' AND result.result->>'outcome'='needs_context') AS needs_context,
+             count(*) FILTER(WHERE item_control.state='succeeded' AND result.result->>'outcome'='no_signal') AS no_signal
+           FROM linggan_ai_batch_item item JOIN linggan_comment_research_unit unit USING(item_ref)
+           JOIN linggan_ai_batch_item_control item_control USING(item_ref)
+           JOIN linggan_comment_research_unit_target target ON target.unit_ref=unit.unit_ref
+           LEFT JOIN linggan_comment_research_result result ON result.request_ref=target.request_ref
+           WHERE item.batch_ref=batch.batch_ref AND unit.domain_ref=$1
+         ) targets
          WHERE batch.task_key='comment_understanding' AND EXISTS(
            SELECT 1 FROM linggan_ai_batch_item item JOIN linggan_comment_research_unit unit USING(item_ref)
            WHERE item.batch_ref=batch.batch_ref AND unit.domain_ref=$1
