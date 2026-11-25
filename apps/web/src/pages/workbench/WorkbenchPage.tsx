@@ -1151,11 +1151,18 @@ function WorkEditor({
         throw new api.WorkbenchActionError('稿件正在编辑，请保存当前文字后再采用。');
       }
       const rewritten = targeted ? editedTexts?.[0] : undefined;
+      const draftEdits = ai.action === 'draft' && editedTexts
+        ? (indices ?? ai.suggestion.paragraphs.map((_, index) => index)).flatMap(index => {
+            const text = editedTexts[index];
+            return text !== undefined && text !== ai.suggestion?.paragraphs[index]?.text ? [{ index, text }] : [];
+          })
+        : [];
       const body = {
         expectedRevision: parent.id,
         paragraphIndices: targeted ? [0] : indices,
         pageIndices: pages,
         adoptTitle,
+        ...(draftEdits.length ? { draftEdits } : {}),
         ...(rewritten !== undefined && rewritten !== ai.suggestion.paragraphs[0]?.text ? { rewriteText: rewritten } : {})
       };
       const fingerprint = JSON.stringify({
@@ -1183,7 +1190,7 @@ function WorkEditor({
         return;
       }
       let unresolved=false;
-      if (editedTexts && ai.suggestion) {
+      if (ai.action !== 'draft' && editedTexts && ai.suggestion) {
         let next=receipt.revision.document;
         const chosen=indices ?? ai.suggestion.paragraphs.map((_,index)=>index);
         for(const index of chosen){const original=ai.suggestion.paragraphs[index];const changed=editedTexts[index];if(!original || changed===undefined || changed===original.text)continue;
@@ -1536,9 +1543,18 @@ function WorkEditor({
 <ActionButton variant="outline" busy={aiBusy} disabled={aiUnknown || aiBusy || !readiness?.configured || !readiness.configRef} onClick={() => void previewAi()}>准备并核对输入</ActionButton>{preview ? <section>
 <p>{preview.sourceCount} 段材料 · {preview.inputCharacterCount} 字符 · 最多 {preview.maxCalls} 次调用</p>
 <details open>
-<summary>实际发出内容 / 模型 / 方法</summary>
+<summary>AI 会看到的内容</summary>
+{aiAction === 'draft' && preview.draftMaterialCards ? <dl>
+  {(['正文及其他用途', '只做参考', '反例'] as const).map((label, index) => {
+    const cards = preview.draftMaterialCards?.filter(({ purpose }) =>
+      (purpose === 'reference_only' ? 1 : purpose === 'counterexample' ? 2 : 0) === index);
+    return <div key={label}><dt>{label}</dt>
+      <dd>{cards?.length ? <ul>{cards.map((card, item) => <li key={item}>{card.excerpt}</li>)}</ul> : '无'}</dd>
+    </div>;
+  })}
+</dl> : null}
 {preview.outboundSystem ? <pre>{preview.outboundSystem}</pre> : null}
-<pre>{JSON.stringify(preview.outboundInput, null, 2)}</pre>
+<pre>{preview.outboundPrompt ?? JSON.stringify(preview.outboundInput, null, 2)}</pre>
 <p>{preview.methodVersion} · {preview.modelRef} · {preview.connectionVersionRef}</p>
 </details>
 <label>本次额度（token）<input type="number" min={preview.reservedTokens} aria-label="本次调用额度" disabled={aiUnknown || aiBusy} value={budget} onChange={e => setBudget(e.target.value)} />

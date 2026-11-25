@@ -161,6 +161,7 @@
 .placement {display:grid;grid-template-columns:auto 1fr;gap:var(--lgi-space-5);margin:var(--lgi-space-6) 0;}
 .placement label {display:flex;align-items:center;}
 .aiPanel {display:grid;gap:var(--lgi-space-4);}
+.aiPanel pre {white-space:pre-wrap;overflow-wrap:anywhere;}
 .aiPanel label:has(input[type=checkbox]) {display:flex;align-items:center;}
 .diff {border-top:1px solid var(--lgi-border);padding:var(--lgi-space-4) 0;display:grid;gap:var(--lgi-space-3);}
 .diff del,.diff ins {display:block;white-space:pre-wrap;padding:var(--lgi-space-3);}

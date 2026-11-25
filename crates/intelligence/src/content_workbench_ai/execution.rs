@@ -1,6 +1,7 @@
 //! Reuses the writing domain's source and output contracts; trials never mutate a normal request.
 use super::{
-    AiError, PreviewRequest, inputs_in, qualify_frozen_inputs, sources, validate_suggestion,
+    AiError, PreviewRequest, inputs_in, qualify_frozen_inputs, sources, validate_material_quotes,
+    validate_suggestion,
 };
 use crate::ai_foundation::TaskKey;
 use crate::ai_foundation::transport_store::{FrozenModel, load_frozen_in};
@@ -58,6 +59,8 @@ pub(crate) async fn model_in(
 pub(crate) struct Input {
     pub manifest: PreviewRequest,
     pub payload: Value,
+    pub system: String,
+    restricted: Vec<String>,
     pub hash: String,
     pub preview_config: Uuid,
     pub experience_ref: Option<Uuid>,
@@ -88,7 +91,7 @@ pub(crate) async fn load_in(
     if row.get::<String, _>("method_version") != manifest.action.method() {
         return Err(AiError::Stale);
     }
-    let (_, payload, body_hash) = inputs_in(tx, &manifest).await?;
+    let (_, payload, body_hash, restricted) = inputs_in(tx, &manifest).await?;
     let system = system_in(tx, config, manifest.action.task()).await?;
     let hash: String = row.get("request_hash");
     if protected_preview_hash(manifest.action.method(), config, &body_hash, &system, salt) != hash {
@@ -97,6 +100,8 @@ pub(crate) async fn load_in(
     Ok(Input {
         manifest,
         payload,
+        system,
+        restricted,
         hash,
         preview_config: config,
         experience_ref,
@@ -135,6 +140,14 @@ impl Input {
         {
             return Err(AiError::Invalid);
         }
+        validate_material_quotes(
+            &self.restricted,
+            output
+                .title
+                .as_deref()
+                .into_iter()
+                .chain(output.paragraphs.iter().map(|p| p.text.as_str())),
+        )?;
         serde_json::to_value(output).map_err(|_| AiError::Invalid)
     }
 }
