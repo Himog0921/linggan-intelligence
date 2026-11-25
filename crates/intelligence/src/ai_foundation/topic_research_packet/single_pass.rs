@@ -93,7 +93,7 @@ fn input_payload(
             "content":f.model_content(),"issues":f.issues
         })).collect::<Vec<_>>());
         payload["citationSpeakerRule"] = json!(
-            "判断讨论的 speakerRole 时读取所引片段的 citationSpeakerRole。只有全部引用均为 author 才标 author。只有全部引用为 quoted 才标 quoted。混合、未知或归属不明用 unknown。作者作品中的引述或图片模型观察不自动成为作者原话。"
+            "判断讨论的 speakerRole 时读取所引片段的 citationSpeakerRole。只有全部引用均为 author 才标 author。只有全部引用为 quoted 才标 quoted。混合、未知或归属不明用 unknown。作者作品中的引述或图片模型观察不自动成为作者原话。字段 sp 为 unknown 时，陈述用“该材料讨论”等来源中立的表达。机制、疗效或因果判断要保留为来源主张及其不确定性。若 commentStudy 为空，projection.rm 必须是空数组。"
         );
         payload["commentStudy"] = input.comment_study.clone();
         payload["roleMetadata"] = input.role_metadata.clone();
