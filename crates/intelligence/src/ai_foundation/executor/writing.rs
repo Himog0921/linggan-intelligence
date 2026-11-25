@@ -96,6 +96,13 @@ async fn prepare(
     }
     let model = execution::model_in(&mut tx, item.task_config_ref, item.task_key).await?;
     let current_model = model.current_model_ref.ok_or(AiError::Model)?;
+    // Interactive requests use the verified preview verbatim. Trial arms share
+    // its source payload but each freezes the instructions for its own config.
+    let system = if request_ref.is_some() {
+        input.system.clone()
+    } else {
+        execution::system_in(&mut tx, item.task_config_ref, item.task_key).await?
+    };
     let prompt_version_ref: Uuid = sqlx::query_scalar(
         "SELECT prompt_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
     )
@@ -123,7 +130,7 @@ async fn prepare(
     }
     let request = model.request(
         secrets.get(workspace, model.secret_ref)?,
-        input.system.clone(),
+        system,
         prompt,
         Some(schema(item.task_key)),
     );
