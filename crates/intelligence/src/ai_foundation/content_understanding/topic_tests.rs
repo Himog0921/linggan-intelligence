@@ -218,22 +218,50 @@ async fn topic_candidates_reserve_progress_for_fresh_and_historical_cores() {
         let work = support::work(&db, &format!("recent-{i}"), "合成近期正文").await;
         seed_core_at(&db, work, model_config, false, Uuid::from_u128(100 + i), None).await;
     }
-    let candidates: Vec<(Uuid, Uuid, Uuid, Uuid, bool)> = sqlx::query_as(include_str!(
-        "../topic_research_automation/candidates.sql"
-    ))
-    .bind(None::<Uuid>)
-    .bind(None::<Uuid>)
-    .bind(crate::topic_map_research_analysis::METHOD_VERSION)
-    .bind(None::<Uuid>)
-    .bind(None::<Vec<Uuid>>)
-    .bind(None::<Uuid>)
-    .bind(None::<Uuid>)
-    .bind(None::<Uuid>)
-    .fetch_all(db.pool())
-    .await
-    .unwrap();
-    let order = candidates.into_iter().map(|(_, core, _, _, _)| core.as_u128()).collect::<Vec<_>>();
-    assert_eq!(order, [101, 1, 102, 2, 103, 3, 104, 4]);
+    async fn candidates(db: &Database, positions: Value) -> Vec<(Uuid, u128)> {
+        sqlx::query_as::<_, (Uuid, Uuid, Uuid, Uuid, bool)>(include_str!(
+            "../topic_research_automation/candidates.sql"
+        ))
+        .bind(positions)
+        .bind(crate::topic_map_research_analysis::METHOD_VERSION)
+        .bind(None::<Uuid>)
+        .bind(None::<Vec<Uuid>>)
+        .bind(None::<Uuid>)
+        .fetch_all(db.pool())
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|(domain, core, _, _, _)| (domain, core.as_u128()))
+        .collect()
+    }
+    let first = candidates(&db, json!({})).await;
+    assert_eq!(first.iter().map(|(_,core)| *core).collect::<Vec<_>>(),
+        [101, 1, 102, 2, 103, 3, 104, 4]);
+
+    let other = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+    topics::change(&db, &topics::Change {
+        command_ref: Uuid::new_v4(), domain_ref: other, expected_revision: 0, enabled: true,
+    }).await.unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)
+         SELECT DISTINCT ON(content_public_ref) gen_random_uuid(),content_public_ref,$2,'reference','legacy_domain_migration',package_ref
+         FROM linggan_material_domain_usage WHERE domain_ref=$1 AND use_kind='domain_research'",
+    ).bind(support::D).bind(other).execute(db.pool()).await.unwrap();
+
+    let first = candidates(&db, json!({})).await;
+    assert!(first.contains(&(support::D,2)) && first.contains(&(other,2)));
+    assert!(first.contains(&(support::D,102)) && first.contains(&(other,102)));
+    // Simulate unsuccessful admissions. Scanning lower IDs in the other domain
+    // must not skip the first domain's later eligible IDs or restart its prefix.
+    let cursor = json!({
+        (support::D.to_string()):{"recent":Uuid::from_u128(102),"historical":Uuid::from_u128(2)},
+        (other.to_string()):{"recent":Uuid::from_u128(102),"historical":Uuid::from_u128(2)}
+    });
+    let second = candidates(&db,cursor).await;
+    assert!(second.contains(&(support::D,3)) && second.contains(&(other,3)));
+    assert!(second.contains(&(support::D,103)) && second.contains(&(other,103)));
+    assert!(!second.contains(&(support::D,1)));
+
 }
 
 #[tokio::test]
