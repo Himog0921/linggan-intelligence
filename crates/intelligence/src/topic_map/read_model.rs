@@ -1,11 +1,14 @@
 //! Disposable, bounded page projections. Authority remains in canonical readers.
 //! Version fingerprints include deletes and every source table in the connected schema.
-use super::{TopicMapError, TopicMapQuery, TopicMapSnapshot, read::read_topic_map_in};
+use super::{
+    TopicMapError, TopicMapQuery, TopicMapSnapshot,
+    read::{QualifiedTopicMap, SourceScope, qualify_in, validate_query},
+};
 use linggan_storage_postgres::Database;
 use serde_json::Value;
 use sqlx::{Postgres, Row, Transaction};
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, VecDeque},
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -13,7 +16,7 @@ use tokio::sync::Mutex;
 
 #[derive(Default)]
 pub struct TopicMapReadModel {
-    entries: Mutex<BTreeMap<String, Entry>>,
+    entries: Mutex<BTreeMap<SourceScope, Arc<Entry>>>,
     builds: Arc<Mutex<()>>,
 }
 const REFRESH_AFTER: Duration = Duration::from_secs(60);
@@ -22,7 +25,8 @@ const MAX_PAGE_AGE: Duration = Duration::from_secs(300);
 struct Entry {
     revision: SourceRevision,
     created: Instant,
-    snapshot: Arc<TopicMapSnapshot>,
+    qualified: QualifiedTopicMap,
+    views: Mutex<VecDeque<(String, Arc<TopicMapSnapshot>)>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -34,122 +38,169 @@ pub struct SourceRevision {
     reading_authority: BTreeMap<String, String>,
 }
 
-impl TopicMapReadModel {
-    fn key(q: &TopicMapQuery) -> Result<String, TopicMapError> {
+impl Entry {
+    async fn project(&self, q: &TopicMapQuery) -> Result<Arc<TopicMapSnapshot>, TopicMapError> {
         let mut normalized = q.clone();
         normalized.reference_window_days = Some(q.reference_window_days.unwrap_or(30));
-        serde_json::to_string(&normalized).map_err(|e| TopicMapError::Source(e.to_string()))
+        let key = serde_json::to_string(&normalized)
+            .map_err(|error| TopicMapError::Source(error.to_string()))?;
+        let mut views = self.views.lock().await;
+        if let Some((_, view)) = views.iter().find(|(cached, _)| *cached == key) {
+            return Ok(Arc::clone(view));
+        }
+        let view = Arc::new(self.qualified.project(q)?);
+        if views.len() >= 4 {
+            views.pop_front();
+        }
+        views.push_back((key, Arc::clone(&view)));
+        Ok(view)
     }
-    async fn current(&self, key: &str, revision: &SourceRevision) -> Option<Arc<TopicMapSnapshot>> {
-        let mut entries = self.entries.lock().await;
-        entries.retain(|_, entry| entry.created.elapsed() < MAX_PAGE_AGE);
+}
+
+impl TopicMapReadModel {
+    async fn current(&self, scope: &SourceScope, revision: &SourceRevision) -> Option<Arc<Entry>> {
+        let entries = self.entries.lock().await;
         entries
-            .get(key)
+            .get(scope)
             .filter(|entry| entry.created.elapsed() < REFRESH_AFTER && entry.revision == *revision)
-            .map(|entry| Arc::clone(&entry.snapshot))
+            .cloned()
     }
 
-    /// Page requests may keep a complete, still-qualified projection while a
-    /// background build observes the newly appended material. Evidence and
-    /// commands continue through the current authoritative readers.
+    /// The same qualified source revision serves overview and every topic view.
+    /// Page readers retain a still-qualified projection while new data is loaded.
     pub async fn read_page(
         self: &Arc<Self>,
         db: &Database,
         q: &TopicMapQuery,
     ) -> Result<Arc<TopicMapSnapshot>, TopicMapError> {
-        let key = Self::key(q)?;
+        validate_query(q)?;
+        let scope = SourceScope::from_query(q);
         let revision = source_revision(db).await?;
         let cached = {
             let entries = self.entries.lock().await;
-            entries.get(&key).and_then(|entry| {
-                let age = entry.created.elapsed();
-                (age < MAX_PAGE_AGE && entry.revision.same_source_authority(&revision)).then(|| {
-                    (
-                        Arc::clone(&entry.snapshot),
-                        age >= REFRESH_AFTER || entry.revision != revision,
-                    )
+            entries
+                .get(&scope)
+                .filter(|entry| {
+                    entry.created.elapsed() < MAX_PAGE_AGE
+                        && entry.revision.same_source_authority(&revision)
+                        && q.topic_ref.is_none_or(|topic| {
+                            let topic = topic.to_string();
+                            entry.revision.topics.contains_key(&topic)
+                                || !revision.topics.contains_key(&topic)
+                        })
                 })
-            })
+                .cloned()
         };
-        if let Some((snapshot, refresh)) = cached {
-            if refresh && let Ok(build) = Arc::clone(&self.builds).try_lock_owned() {
+        if let Some(entry) = cached {
+            if (entry.created.elapsed() >= REFRESH_AFTER || entry.revision != revision)
+                && let Ok(build) = Arc::clone(&self.builds).try_lock_owned()
+            {
                 let model = Arc::clone(self);
                 let db = db.clone();
-                let q = q.clone();
                 tokio::spawn(async move {
                     let _build = build;
-                    if let Err(error) = model.build(&db, &q, key, false).await {
+                    if let Err(error) = model.build(&db, scope, false).await {
                         eprintln!("topic map background refresh deferred: {error}");
                     }
                 });
             }
-            return Ok(snapshot);
+            return entry.project(q).await;
         }
         let _build = self.builds.lock().await;
-        self.build(db, q, key, true).await
+        self.build(db, scope, true).await?.project(q).await
     }
+
     /// Current authority is validated before every reuse, including evidence opens.
     pub async fn read(
         &self,
         db: &Database,
         q: &TopicMapQuery,
     ) -> Result<Arc<TopicMapSnapshot>, TopicMapError> {
-        let key = Self::key(q)?;
+        validate_query(q)?;
+        let scope = SourceScope::from_query(q);
         let revision = source_revision(db).await?;
-        if let Some(value) = self.current(&key, &revision).await {
-            return Ok(value);
+        if let Some(entry) = self.current(&scope, &revision).await {
+            return entry.project(q).await;
         }
         let _build = self.builds.lock().await;
-        self.build(db, q, key, true).await
+        self.build(db, scope, true).await?.project(q).await
     }
-    /// Refresh atomically; readers may use the previous *still-qualified* version
-    /// during a clock refresh. A changed source revision can never use that version.
+
+    /// Refresh atomically; requests may use the previous still-qualified version.
     pub async fn refresh(&self, db: &Database, q: &TopicMapQuery) -> Result<(), TopicMapError> {
+        validate_query(q)?;
         let _build = self.builds.lock().await;
-        self.build(db, q, Self::key(q)?, false).await?;
+        self.build(db, SourceScope::from_query(q), false).await?;
         Ok(())
     }
+
+    /// Keep the default domain warm through idle periods. A warm-up never
+    /// competes with another build, and readers still verify authority.
+    pub async fn warm_default_domain(
+        &self,
+        db: &Database,
+        domain_ref: uuid::Uuid,
+    ) -> Result<(), TopicMapError> {
+        let Ok(_build) = self.builds.try_lock() else {
+            return Ok(());
+        };
+        let scope = SourceScope::from_query(&TopicMapQuery {
+            domain_ref: Some(domain_ref),
+            ..Default::default()
+        });
+        let revision = source_revision(db).await?;
+        let warm = {
+            let entries = self.entries.lock().await;
+            entries.get(&scope).is_some_and(|entry| {
+                entry.revision == revision
+                    && entry.created.elapsed() < MAX_PAGE_AGE - Duration::from_secs(120)
+            })
+        };
+        if !warm {
+            self.build(db, scope, false).await?;
+        }
+        Ok(())
+    }
+
     async fn build(
         &self,
         db: &Database,
-        q: &TopicMapQuery,
-        key: String,
+        scope: SourceScope,
         reuse_current: bool,
-    ) -> Result<Arc<TopicMapSnapshot>, TopicMapError> {
+    ) -> Result<Arc<Entry>, TopicMapError> {
         for _ in 0..2 {
             let mut tx = db.pool().begin().await?;
             sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
                 .execute(&mut *tx)
                 .await?;
             let revision = source_revision_in(&mut tx).await?;
-            if reuse_current && let Some(value) = self.current(&key, &revision).await {
+            if reuse_current && let Some(entry) = self.current(&scope, &revision).await {
                 tx.commit().await?;
-                return Ok(value);
+                return Ok(entry);
             }
-            let snapshot = Arc::new(read_topic_map_in(&mut tx, q, Some(db)).await?);
+            let qualified = qualify_in(&mut tx, &scope, Some(db)).await?;
             tx.commit().await?;
             let after = source_revision(db).await?;
             if revision.same_source_authority(&after) {
                 let mut entries = self.entries.lock().await;
                 entries.retain(|_, entry| entry.created.elapsed() < MAX_PAGE_AGE);
-                if entries.len() >= 4 && !entries.contains_key(&key) {
-                    if let Some(oldest) = entries
+                if entries.len() >= 4
+                    && !entries.contains_key(&scope)
+                    && let Some(oldest) = entries
                         .iter()
                         .min_by_key(|(_, entry)| entry.created)
-                        .map(|(key, _)| key.clone())
-                    {
-                        entries.remove(&oldest);
-                    }
+                        .map(|(scope, _)| scope.clone())
+                {
+                    entries.remove(&oldest);
                 }
-                entries.insert(
-                    key,
-                    Entry {
-                        revision,
-                        created: Instant::now(),
-                        snapshot: Arc::clone(&snapshot),
-                    },
-                );
-                return Ok(snapshot);
+                let entry = Arc::new(Entry {
+                    revision,
+                    created: Instant::now(),
+                    qualified,
+                    views: Mutex::default(),
+                });
+                entries.insert(scope, Arc::clone(&entry));
+                return Ok(entry);
             }
         }
         Err(TopicMapError::Conflict)

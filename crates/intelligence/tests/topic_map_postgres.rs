@@ -1024,6 +1024,54 @@ async fn page_refreshes_after_appended_collection_facts_without_blocking_reads()
 
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL pgvector proof harness"]
+async fn first_topic_view_reuses_the_qualified_domain_snapshot() {
+    use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
+    use std::{sync::Arc, time::Duration};
+
+    let db = fixture_database("topic_map_first_topic_view").await;
+    let first = work(&db, 0, "xhs", Some(2), 0).await;
+    work(&db, 1, "xhs", Some(4), 0).await;
+    let (topic_ref, _) = topic(&db, "shared-snapshot", "合成主题", None, &[first]).await;
+    sqlx::raw_sql("CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE plpgsql VOLATILE AS $$ BEGIN PERFORM pg_advisory_xact_lock(184513::bigint); RETURN clock_timestamp(); END $$")
+        .execute(db.pool()).await.unwrap();
+
+    let model = Arc::new(TopicMapReadModel::default());
+    let query = TopicMapQuery { domain_ref: Some(domain()), ..Default::default() };
+    model.warm_default_domain(&db, domain()).await.unwrap();
+    let mut block_qualification = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(184513::bigint)")
+        .execute(&mut *block_qualification).await.unwrap();
+    let overview = tokio::time::timeout(Duration::from_secs(3), model.read_page(&db, &query))
+        .await.expect("the first overview must use the warmed snapshot").unwrap();
+    assert_eq!(overview.scope["totalWorkCount"], 2);
+
+    let detail = TopicMapQuery {
+        topic_ref: Some(topic_ref),
+        reference_window_days: Some(90),
+        ..query.clone()
+    };
+    let view = tokio::time::timeout(Duration::from_secs(3), model.read_page(&db, &detail))
+        .await.expect("the first topic request must not run canonical qualification")
+        .unwrap();
+    assert_eq!(view.scope["asOf"], overview.scope["asOf"]);
+    assert_eq!(view.scope["totalWorkCount"], 1);
+    assert_eq!(view.scope["referenceWindowDays"], 90);
+    assert_eq!(view.scope["progress"]["graph"]["assigned"], 1);
+    assert_eq!(view.works[0].work_ref, first);
+    assert_eq!(view.works[0].topic_refs, [topic_ref]);
+
+    let other_scope = TopicMapQuery { platform: Some("douyin".into()), ..query.clone() };
+    block_qualification.rollback().await.unwrap();
+    let other = model.read_page(&db, &other_scope).await.unwrap();
+    assert!(other.works.is_empty(), "source scopes do not share qualifications");
+
+    let (new_topic, _) = topic(&db, "new-topic", "合成新主题", None, &[first]).await;
+    let view = model.read_page(&db, &TopicMapQuery { topic_ref: Some(new_topic), ..query }).await.unwrap();
+    assert!(view.works[0].topic_refs.contains(&new_topic), "a newly published topic can open before background refresh");
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL pgvector proof harness"]
 async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_and_ddl() {
     use linggan_intelligence::topic_map::read_model::{
         TopicMapReadModel, first_page, overview, source_revision,
