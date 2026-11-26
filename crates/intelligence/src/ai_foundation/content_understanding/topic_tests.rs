@@ -186,6 +186,100 @@ async fn saved_core_drives_topic_queue_and_persisted_membership() {
 }
 
 #[tokio::test]
+#[ignore = "owned isolated PostgreSQL, frozen pre-upgrade queue fixture; no provider"]
+async fn old_oversized_unsent_core_is_requeued_once_with_current_packet() {
+    use super::super::topic_research_automation as topics;
+    let (db, config) = support::setup("topic_old_packet_retry").await;
+    configure_tasks_for_test(&db, config).await;
+    topics::change(
+        &db,
+        &topics::Change {
+            command_ref: Uuid::new_v4(),
+            domain_ref: support::D,
+            expected_revision: 0,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    async fn cores(db: &Database, config: Uuid, prefix: &str, count: usize) -> Vec<Uuid> {
+        let mut works = Vec::new();
+        for index in 0..count {
+            let work = support::work(db, &format!("{prefix}-{index}"), "合成正文材料").await;
+            seed_core(db, work, config, false).await;
+            works.push(work);
+        }
+        works
+    }
+    async fn skip(db: &Database, count: i64) {
+        sqlx::query("UPDATE linggan_ai_batch_item_control SET state='skipped',usable=false,
+            failure_code='ai_input_limit_before_dispatch',finished_at=scope_001_now()-interval '2 minutes'
+            WHERE item_ref IN (SELECT item_ref FROM linggan_ai_batch_item_control JOIN linggan_topic_research_stage USING(item_ref) WHERE state='pending' ORDER BY item_ref LIMIT $1)")
+            .bind(count).execute(db.pool()).await.unwrap();
+    }
+    async fn windows(db: &Database, works: &[Uuid]) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_topic_research_window WHERE work_ref=ANY($1)",
+        )
+        .bind(works)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+    }
+    let old = cores(&db, config, "old-packet", 8).await;
+    let mut cursor = None;
+    assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 8);
+    skip(&db, 8).await;
+    assert_eq!(
+        topics::tick(&db, &mut cursor).await.unwrap(),
+        0,
+        "current packet was already tried"
+    );
+    // Recreate immutable manifests written by the old producer in this synthetic schema.
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_topic_research_window DISABLE TRIGGER topic_research_window_immutable",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE linggan_topic_research_window SET input_refs=input_refs-'singlePassPacketVersion'",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_topic_research_window ENABLE TRIGGER topic_research_window_immutable",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let new = cores(&db, config, "new-core", 10).await;
+    assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 8);
+    let initial_old = windows(&db, &old).await;
+    let initial_new = windows(&db, &new).await;
+    assert_eq!((initial_old, initial_new), (12, 4));
+    // Leave just one free slot each round while both populations still have work.
+    for _ in 0..2 {
+        assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 0);
+        skip(&db, 1).await;
+        assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 1);
+    }
+    assert_eq!(windows(&db, &old).await, initial_old + 1);
+    assert_eq!(windows(&db, &new).await, initial_new + 1);
+    for _ in 0..4 {
+        skip(&db, 8).await;
+        topics::tick(&db, &mut cursor).await.unwrap();
+    }
+    assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 0);
+    assert_eq!(windows(&db, &old).await, 16);
+    assert_eq!(windows(&db, &new).await, 10);
+}
+
+#[tokio::test]
 #[ignore = "owned isolated PostgreSQL, synthetic Core queue; no provider"]
 async fn topic_candidates_reserve_progress_for_fresh_and_historical_cores() {
     let (db, model_config) = support::setup("topic_map_core_priority").await;

@@ -9,8 +9,8 @@ JOIN linggan_topic_research_stage s ON s.window_ref=w.window_ref AND s.stage_num
 JOIN linggan_ai_batch_item i USING(item_ref)
 JOIN linggan_ai_batch b USING(batch_ref)
 JOIN linggan_ai_batch_item_control c USING(item_ref)
-JOIN linggan_topic_research_stage_result receipt USING(item_ref)
-JOIN linggan_model_invocation invocation ON invocation.invocation_ref=receipt.invocation_ref
+LEFT JOIN linggan_topic_research_stage_result receipt USING(item_ref)
+LEFT JOIN linggan_model_invocation invocation ON invocation.invocation_ref=receipt.invocation_ref
 JOIN LATERAL (
     SELECT request_ref FROM linggan_content_understanding_saved_core
     WHERE work_ref=w.work_ref AND result IS NOT NULL
@@ -24,10 +24,16 @@ WHERE ($1::uuid IS NULL OR w.window_ref=$1)
   AND w.input_refs->>'methodVersion'=$2
   AND w.input_refs->>'executionMode'='single_pass'
   AND b.kind='automatic'
-  AND c.state='failed' AND c.failure_code='ai_output_invalid'
-  AND c.invocation_ref=receipt.invocation_ref AND receipt.failure_code='ai_output_invalid'
-  AND invocation.state='failed' AND invocation.failure_code='ai_output_invalid'
-  AND invocation.dispatch_state='started'
+  AND (
+      (c.state='failed' AND c.failure_code='ai_output_invalid'
+       AND c.invocation_ref=receipt.invocation_ref AND receipt.failure_code='ai_output_invalid'
+       AND invocation.state='failed' AND invocation.failure_code='ai_output_invalid'
+       AND invocation.dispatch_state='started')
+      OR
+      (c.state='skipped' AND c.failure_code='ai_input_limit_before_dispatch'
+       AND c.attempt_count=0 AND c.invocation_ref IS NULL AND receipt.item_ref IS NULL
+       AND w.input_refs->>'singlePassPacketVersion' IS NULL)
+  )
   AND c.finished_at<=scope_001_now()-interval '1 minute'
   AND NOT EXISTS (
       SELECT 1 FROM linggan_ai_control WHERE scope_key IN

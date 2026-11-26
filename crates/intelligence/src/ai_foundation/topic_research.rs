@@ -312,6 +312,7 @@ pub(crate) async fn frozen(db: &Database, window: Uuid) -> Result<ResearchInput,
 fn single_manifest(input: &ResearchInput) -> Value {
     let mut manifest = source::reference_manifest(input);
     manifest["executionMode"] = json!("single_pass");
+    manifest["singlePassPacketVersion"] = json!(2);
     manifest
 }
 pub(crate) fn single_pass(input: &ResearchInput) -> bool {

@@ -396,7 +396,17 @@ fn author_payload_carries_the_core_once_and_other_modes_carry_only_saved_units()
     let reassignment = input_payload("reassignment", &source, &definitions, &units);
     let mut keys: Vec<_> = reassignment.as_object().unwrap().keys().cloned().collect();
     keys.sort();
-    assert_eq!(keys, ["definitions", "domain", "mode", "units", "workRef"]);
+    assert_eq!(
+        keys,
+        [
+            "definitionDefaults",
+            "definitions",
+            "domain",
+            "mode",
+            "units",
+            "workRef"
+        ]
+    );
     assert_eq!(reassignment["units"][0]["discussionIndex"], 0);
     assert_eq!(
         reassignment["units"][0]["discussion"]["statement"],
@@ -412,7 +422,7 @@ fn catalog_keeps_every_definition_and_exact_example_citations_without_nested_cor
     let mut candidate = json!({
         "topicRef":Uuid::from_u128(1),
         "definitionRef":Uuid::from_u128(2),
-        "inclusionCriteria":["合成边界"],
+        "inclusionCriteria":["合成边界"],"qualityState":"legacy_candidate","conceptRole":"parent",
         "supportExamples":[{
             "sourceSnapshot":{"identity":"synthetic"},
             "statement":"合成主题边界",
@@ -425,14 +435,36 @@ fn catalog_keeps_every_definition_and_exact_example_citations_without_nested_cor
     compact_support_examples(&mut candidate);
     assert_eq!(candidate["definitionRef"], json!(Uuid::from_u128(2)));
     assert_eq!(candidate["inclusionCriteria"], json!(["合成边界"]));
-    assert_eq!(candidate["supportExamples"][0], json!({
-        "statement":"合成主题边界",
-        "evidence":[{"sourceRef":Uuid::from_u128(3),"start":4,"end":8,"text":"合成证据"}]
-    }));
+    assert_eq!(
+        candidate["supportExamples"][0],
+        json!({
+            "statement":"合成主题边界",
+            "evidence":[{"sourceRef":Uuid::from_u128(3),"start":4,"end":8,"text":"合成证据"}]
+        })
+    );
+    let definition = model_definition(&candidate);
+    assert_eq!(definition["qualityState"], "legacy_candidate");
+    assert_eq!(definition["conceptRole"], "parent");
     let mut evidence = fragment("core-1", "合成证据");
     evidence.field = "core_text_evidence".into();
-    evidence.structure = json!({"text":"合成证据","anchor":{"start":4},"knowledgeUnits":[{"id":"u1"}]});
-    assert_eq!(fragment_content(&evidence), json!({"text":"合成证据","anchor":{"start":4}}));
+    evidence.structure =
+        json!({"text":"合成证据","anchor":{"start":4},"knowledgeUnits":[{"id":"u1"}]});
+    evidence.structure["evidenceRef"] = json!("e1");
+    assert_eq!(
+        model_fragment(3, &evidence)["content"]["text"],
+        evidence.text
+    );
+    assert_eq!(model_fragment(3, &evidence)["content"]["evidenceRef"], "e1");
+    assert_eq!(model_fragment(3, &evidence)["fragmentIndex"], 3);
+    assert!(
+        model_fragment(3, &evidence)["content"]
+            .get("anchor")
+            .is_none()
+    );
+    assert_eq!(
+        model_definition(&candidate)["supportExamples"][0]["evidence"][0],
+        json!({"text":"合成证据"})
+    );
     assert_eq!(evidence.structure["knowledgeUnits"][0]["id"], "u1");
 }
 
