@@ -36,6 +36,7 @@ async fn prepare(
     let InputRef::TopicResearch {
         window_ref: request_ref,
         stage_number,
+        collection_run_ref,
     } = item.input
     else {
         return Err(ExecutorError::Invalid);
@@ -58,6 +59,23 @@ async fn prepare(
         && !(stage_number == 2 && crate::ai_foundation::topic_comment_source::is_comment(&data))
     {
         owner::previous_in(&mut tx, request_ref, stage_number - 1).await?;
+    }
+    if collection_run_ref.is_some() {
+        let domain = serde_json::from_value(data.domain["domainRef"].clone())
+            .map_err(|_| ExecutorError::Invalid)?;
+        let core = serde_json::from_value(data.coverage["coreRef"].clone())
+            .map_err(|_| ExecutorError::Invalid)?;
+        let now = linggan_evidence::research_dossier::cutoff_in(&mut tx, None)
+            .await
+            .map_err(FoundationError::from)?;
+        crate::ai_foundation::content_understanding::check_selected_video_core_in(
+            &mut tx,
+            domain,
+            data.work.work_ref,
+            core,
+            &now,
+        )
+        .await?;
     }
     let packet = packet::prepare(db, &mut tx, request_ref, stage_number, &data).await?;
     let super::research_call::Call {

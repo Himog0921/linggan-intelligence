@@ -2,6 +2,7 @@
 use super::{
     TaskKey,
     batch_store::{self, BatchInput, BatchKind, InputRef},
+    selected_collection_scope,
     store::{Command, FoundationError},
     task_config::lock_setting,
 };
@@ -124,6 +125,16 @@ async fn start_inner(
             ]));
         }
     }
+    let collection_run_ref = if kind == BatchKind::Automatic {
+        selected_collection_scope::queue_automatic_in(
+            &mut command.tx,
+            request.domain_ref,
+            request.work_refs[0],
+        )
+        .await?
+    } else {
+        None
+    };
     let mut configurations = Vec::new();
     for task in CURRENT_TASKS {
         let revision: i64 =
@@ -134,6 +145,16 @@ async fn start_inner(
         configurations.push(lock_setting(&mut command.tx, task, revision).await?);
     }
     let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut command.tx, None).await?;
+    if let Some(core) = expected_core.filter(|_| collection_run_ref.is_some()) {
+        super::content_understanding::check_selected_video_core_in(
+            &mut command.tx,
+            request.domain_ref,
+            request.work_refs[0],
+            core,
+            &cutoff,
+        )
+        .await?;
+    }
     let (windows, eligibility) = eligibility::qualify(
         &mut command.tx,
         request.domain_ref,
@@ -162,6 +183,9 @@ async fn start_inner(
                 .bind(previous)
                 .bind(crate::topic_map_research_analysis::METHOD_VERSION)
                 .bind(Option::<Uuid>::None)
+                .bind(collection_run_ref)
+                .bind(Some(request.domain_ref))
+                .bind(Some(request.work_refs.as_slice()))
                 .fetch_optional(&mut *command.tx)
                 .await?;
         if eligible
@@ -194,8 +218,8 @@ async fn start_inner(
         }
     }
     if kind == BatchKind::Automatic {
-        let pending: i64 = sqlx::query_scalar("SELECT count(DISTINCT w.window_ref) FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=$1 AND b.kind='automatic' AND c.state IN('pending','running')")
-            .bind(request.domain_ref).fetch_one(&mut *command.tx).await?;
+        let pending: i64 = sqlx::query_scalar("SELECT count(DISTINCT w.window_ref) FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=$1 AND b.kind='automatic' AND c.state IN('pending','running') AND i.input_ref->>'collectionRunRef' IS NOT DISTINCT FROM $2::uuid::text")
+            .bind(request.domain_ref).bind(collection_run_ref).fetch_one(&mut *command.tx).await?;
         if pending >= 8 {
             return Err(FoundationError::AdmissionDenied(vec![
                 "topic_automatic_queue_full".into(),
@@ -220,6 +244,7 @@ async fn start_inner(
                 input: InputRef::TopicResearch {
                     window_ref: reference,
                     stage_number: index as u8,
+                    collection_run_ref,
                 },
             }];
             let hash = batch_store::input_hash(task, &inputs, false)?;

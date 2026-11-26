@@ -103,6 +103,9 @@ pub(super) async fn prepare_with_images_in(
         .checked_add(model.limits.output_tokens)
         .ok_or(ExecutorError::Invalid)?;
     let egress:Uuid=sqlx::query_scalar("SELECT event_ref FROM linggan_ai_current_egress WHERE endpoint_ref=$1 AND task_key=$2 AND material_class=$3 AND allowed").bind(model.endpoint_ref).bind(item.task_key.as_str()).bind(input.material_class).fetch_one(&mut **tx).await?;
+    // Recheck the durable collection scope in the provider admission transaction after
+    // preparing the packet. A lost or elapsed scope returns the untouched lease to the queue.
+    item.check_selected_collection_in(tx, input.material_class).await?;
     let admitted = budget::admit_in(tx, item.task_key, item.task_config_ref, reservation).await?;
     let invocation = Uuid::new_v4();
     let hash = content_hash(

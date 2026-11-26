@@ -131,6 +131,7 @@ if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-foundation" || "${1:-}"
   if [[ "${1:-}" == "--topic-executor" ]]; then
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test topic_research_executor_postgres --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test research_transport_postgres --locked -- --ignored --nocapture
+    cargo_proof -p linggan-intelligence --lib --locked selected_collection_claim_skips_backlog_and_survives_worker_restart -- --ignored --nocapture
     echo "Topic research executor proof passed"
     exit 0
   fi
@@ -182,6 +183,7 @@ if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-foundation" || "${1:-}"
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_foundation_postgres executor_probe:: --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test ai_executor_service_postgres --locked -- --ignored --nocapture
     AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-worker --test ai_worker_contract --locked -- --include-ignored --nocapture
+    cargo_proof -p linggan-intelligence --lib --locked selected_collection_claim_skips_backlog_and_survives_worker_restart -- --ignored --nocapture
     echo "AI-GEN1 dedicated executor service proof passed"
     exit 0
   fi

@@ -1,20 +1,26 @@
 //! Bounded advancement over accepted original packages. A normal tick never visits a platform.
 use crate::collection_run::{RunError, admit_stage};
+use crate::selected_collection_run::{self, ExecutionScope};
 use linggan_storage_postgres::Database;
 use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 pub async fn advance_runs(db: &Database) -> Result<usize, RunError> {
-    if !crate::collection_governance_enabled() {
+    if !selected_collection_run::configured() && !crate::collection_governance_enabled() {
         return Ok(0);
     }
+    let selected_run = match selected_collection_run::load(db).await? {
+        ExecutionScope::Unrestricted => None,
+        ExecutionScope::Blocked => return Ok(0),
+        ExecutionScope::Selected(scope) => Some(scope.run_ref),
+    };
     let ready: bool = sqlx::query_scalar("SELECT to_regclass('collection_run') IS NOT NULL")
         .fetch_one(db.pool())
         .await?;
     if !ready {
         return Ok(0);
     }
-    let runs:Vec<Uuid>=sqlx::query_scalar("SELECT run_ref FROM collection_run r JOIN observation_domain d USING(domain_ref) WHERE ((r.control_intent='running' AND r.phase IN('discovery','materials') AND d.status='active') OR (r.phase='discovery' AND EXISTS(SELECT 1 FROM collection_run_order o JOIN collection_work_order w USING(work_order_ref) WHERE o.run_ref=r.run_ref AND o.stage='discovery' AND w.queue_state='completed')))  ORDER BY r.last_advanced_at NULLS FIRST,r.updated_at,r.run_ref LIMIT 20").fetch_all(db.pool()).await?;
+    let runs:Vec<Uuid>=sqlx::query_scalar("SELECT run_ref FROM collection_run r JOIN observation_domain d USING(domain_ref) WHERE ($1::uuid IS NULL OR r.run_ref=$1) AND ((r.control_intent='running' AND r.phase IN('discovery','materials') AND d.status='active') OR (r.phase='discovery' AND EXISTS(SELECT 1 FROM collection_run_order o JOIN collection_work_order w USING(work_order_ref) WHERE o.run_ref=r.run_ref AND o.stage='discovery' AND w.queue_state='completed')))  ORDER BY r.last_advanced_at NULLS FIRST,r.updated_at,r.run_ref LIMIT 20").bind(selected_run).fetch_all(db.pool()).await?;
     let mut advanced = 0;
     for run in runs {
         let mut tx = db.pool().begin().await?;
@@ -24,6 +30,12 @@ pub async fn advance_runs(db: &Database) -> Result<usize, RunError> {
                 .fetch_one(&mut *tx)
                 .await?;
         if !locked {
+            continue;
+        }
+        let refresh_selected_media = selected_run.is_some();
+        if refresh_selected_media
+            && !matches!(selected_collection_run::lock_in(&mut tx).await?, ExecutionScope::Selected(scope) if scope.run_ref == run)
+        {
             continue;
         }
         let r=sqlx::query("SELECT phase,comment_mode,comment_target,control_intent,(SELECT status FROM observation_domain d WHERE d.domain_ref=collection_run.domain_ref) AS domain_status FROM collection_run WHERE run_ref=$1 FOR UPDATE").bind(run).fetch_one(&mut *tx).await?;
@@ -38,7 +50,13 @@ pub async fn advance_runs(db: &Database) -> Result<usize, RunError> {
             && r.get::<String, _>("control_intent") == "running"
             && r.get::<String, _>("domain_status") == "active"
         {
-            queue_materials(&mut tx, run, &r.get::<String, _>("comment_mode")).await?;
+            queue_materials(
+                &mut tx,
+                run,
+                &r.get::<String, _>("comment_mode"),
+                refresh_selected_media,
+            )
+            .await?;
             reconcile_materials(
                 &mut tx,
                 run,
@@ -72,7 +90,7 @@ async fn freeze_discovery(tx: &mut Transaction<'_, Postgres>, run: Uuid) -> Resu
             // Admission capacity is transient. Retain its decision, retry at most once/minute.
             let due:bool=sqlx::query_scalar("SELECT updated_at<scope_001_now()-interval '1 minute' FROM collection_run WHERE run_ref=$1").bind(run).fetch_one(&mut **tx).await?;
             if due {
-                admit_stage(tx, run, None, "discovery", 1).await?;
+                admit_stage(tx, run, None, "discovery", 1, false).await?;
             }
             return Ok(());
         }
@@ -97,12 +115,19 @@ async fn queue_materials(
     tx: &mut Transaction<'_, Postgres>,
     run: Uuid,
     mode: &str,
+    refresh_selected_media: bool,
 ) -> Result<(), RunError> {
     // One small request per work preserves fairness and independent failures in the common queue.
     // A text-only work that reuses an older detail is finished without any order of its own; it must leave
     // this three-work window or the works behind it are never queued.
     let works:Vec<Uuid>=sqlx::query_scalar("SELECT content_public_ref FROM collection_run_work w WHERE run_ref=$1 AND NOT COALESCE((w.checkpoint->>'detailComplete')::boolean,false) AND NOT EXISTS(SELECT 1 FROM collection_run_order o WHERE o.run_ref=w.run_ref AND o.content_public_ref=w.content_public_ref) ORDER BY ordinal LIMIT 3").bind(run).fetch_all(&mut **tx).await?;
     for work in works {
+        // In a selected refresh, only a package delivered for this run can
+        // complete the detail stage. Historical material stays available to readers.
+        if refresh_selected_media {
+            admit_stage(tx, run, Some(work), "detail", 1, true).await?;
+            continue;
+        }
         let reused:Option<Uuid>=sqlx::query_scalar("SELECT d.package_ref FROM linggan_material_content_detail d JOIN linggan_runtime_capture_package p USING(package_ref) JOIN linggan_runtime_submission_receipt r USING(package_ref) JOIN collection_run run ON run.run_ref=$2 WHERE d.content_public_ref=$1 AND p.accepted_at<run.created_at AND r.material_admission='ACCEPTED' ORDER BY p.accepted_at DESC LIMIT 1").bind(work).bind(run).fetch_optional(&mut **tx).await?;
         sqlx::query("UPDATE collection_run_work SET reused_detail_package_ref=$3 WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).bind(reused).execute(&mut **tx).await?;
         if mode == "none" && reused.is_some() {
@@ -122,6 +147,7 @@ async fn queue_materials(
                 "detail"
             },
             1,
+            false,
         )
         .await?;
     }
@@ -135,6 +161,7 @@ async fn queue_materials(
             Some(row.get("content_public_ref")),
             &row.get::<String, _>("stage"),
             row.get("segment"),
+            refresh_selected_media,
         )
         .await?;
     }
@@ -177,7 +204,7 @@ async fn reconcile_materials(
                 if mode == "none" {
                     sqlx::query("UPDATE collection_run_work SET checkpoint=checkpoint||'{\"detailComplete\":true,\"commentsNotRequested\":true}'::jsonb WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).execute(&mut **tx).await?;
                 } else {
-                    admit_stage(tx, run, Some(work), "comments", 1).await?;
+                    admit_stage(tx, run, Some(work), "comments", 1, false).await?;
                 }
             } else {
                 sqlx::query("UPDATE collection_run_work SET gap_reason='detail_not_accepted' WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).execute(&mut **tx).await?;
@@ -232,7 +259,7 @@ async fn reconcile_materials(
             continue;
         }
         sqlx::query("UPDATE collection_run_work SET checkpoint=checkpoint||jsonb_build_object('emptySegments',$3::integer,'lastOrder',$4::uuid,'lastSegment',$5::integer,'capturedUnique',$6::bigint) WHERE run_ref=$1 AND content_public_ref=$2").bind(run).bind(work).bind(no_progress as i32).bind(order).bind(segment).bind(captured).execute(&mut **tx).await?;
-        admit_stage(tx, run, Some(work), "comments", segment + 1).await?;
+        admit_stage(tx, run, Some(work), "comments", segment + 1, false).await?;
     }
     let done:bool=sqlx::query_scalar("SELECT NOT EXISTS(SELECT 1 FROM collection_run_work WHERE run_ref=$1 AND gap_reason IS NULL AND NOT CASE WHEN $2='none' THEN COALESCE((checkpoint->>'detailComplete')::boolean,false) ELSE COALESCE((checkpoint->>'commentsComplete')::boolean,false) END) AND scope_frozen_at IS NOT NULL FROM collection_run WHERE run_ref=$1").bind(run).bind(mode).fetch_one(&mut **tx).await?;
     if done {

@@ -18,6 +18,8 @@ JOIN LATERAL (
 ) current_core ON current_core.request_ref::text=w.input_refs#>>'{coverage,coreRef}'
 WHERE ($1::uuid IS NULL OR w.window_ref=$1)
   AND ($3::uuid IS NULL OR w.window_ref>$3)
+  AND i.input_ref->>'collectionRunRef' IS NOT DISTINCT FROM $4::uuid::text
+  AND ($5::uuid IS NULL OR (r.domain_ref=$5 AND w.work_ref=ANY($6::uuid[])))
   AND w.input_refs->>'inputContract'='topic-map.core-source.v1'
   AND w.input_refs->>'methodVersion'=$2
   AND w.input_refs->>'executionMode'='single_pass'

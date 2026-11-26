@@ -1,5 +1,5 @@
 use super::FoundationError;
-use crate::ai_foundation::{batch_store::BatchKind, topic_research};
+use crate::ai_foundation::{batch_store::BatchKind, selected_collection_scope, topic_research};
 use linggan_storage_postgres::Database;
 use sqlx::Row;
 use uuid::Uuid;
@@ -7,6 +7,7 @@ use uuid::Uuid;
 /// A scan position only, not a second task ledger. Restarting safely rescans existing command IDs.
 #[derive(Default)]
 pub struct CursorState {
+    collection_run_ref: Option<Uuid>,
     cores: Option<(Uuid, Uuid)>,
     definitions: Option<(Uuid, Uuid)>,
     comments: Option<(Uuid, Uuid)>,
@@ -15,14 +16,32 @@ pub struct CursorState {
 pub type Cursor = Option<CursorState>;
 /// Queue a bounded page of existing Core versions; no model or collection call happens here.
 pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, FoundationError> {
+    let Some(selected) = selected_collection_scope::filter(db).await? else {
+        *cursor = None;
+        return Ok(0);
+    };
     let position = cursor.get_or_insert_with(CursorState::default);
-    let repaired = super::definition_repair::tick(db, &mut position.definitions).await?
-        + super::comments::tick(db, &mut position.comments).await?;
-    let repaired = repaired + retry_confirmed_invalid_outputs(db, &mut position.retries).await?;
+    if position.collection_run_ref != selected.collection_run_ref {
+        *position = CursorState {
+            collection_run_ref: selected.collection_run_ref,
+            ..CursorState::default()
+        };
+    }
+    let repaired = if selected.collection_run_ref.is_none() {
+        super::definition_repair::tick(db, &mut position.definitions).await?
+            + super::comments::tick(db, &mut position.comments).await?
+    } else {
+        0
+    };
+    let repaired =
+        repaired + retry_confirmed_invalid_outputs(db, &mut position.retries, &selected).await?;
     let rows = sqlx::query(include_str!("candidates.sql"))
         .bind(position.cores.map(|v| v.0))
         .bind(position.cores.map(|v| v.1))
         .bind(crate::topic_map_research_analysis::METHOD_VERSION)
+        .bind(selected.domain)
+        .bind(selected.works.as_deref())
+        .bind(selected.collection_run_ref)
         .fetch_all(db.pool())
         .await?;
     if rows.is_empty() {
@@ -53,11 +72,15 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
 async fn retry_confirmed_invalid_outputs(
     db: &Database,
     position: &mut Option<Uuid>,
+    selected: &selected_collection_scope::Filter,
 ) -> Result<usize, FoundationError> {
     let repairs = sqlx::query(super::RETRY_CANDIDATES)
         .bind(Option::<Uuid>::None)
         .bind(crate::topic_map_research_analysis::METHOD_VERSION)
         .bind(*position)
+        .bind(selected.collection_run_ref)
+        .bind(selected.domain)
+        .bind(selected.works.as_deref())
         .fetch_all(db.pool())
         .await?;
     if repairs.is_empty() {

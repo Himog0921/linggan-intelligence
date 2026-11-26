@@ -31,7 +31,7 @@ async fn prepare(
     item: &ClaimedItem,
     secrets: &dyn ModelSecretStore,
 ) -> Result<Prepared, ExecutorError> {
-    let InputRef::ContentUnderstanding { request_ref } = item.input else {
+    let InputRef::ContentUnderstanding { request_ref, .. } = item.input else {
         return Err(ExecutorError::Invalid);
     };
     let mut tx = item.owner.begin(db, true).await?;

@@ -302,7 +302,7 @@ pub async fn create_run(db: &Database, input: &CreateRun) -> Result<Value, RunEr
         }
         sqlx::query("UPDATE collection_run SET scope_frozen_at=scope_001_now(),phase='materials',discovery_reason='person_selected_exact_set' WHERE run_ref=$1").bind(run).execute(&mut *tx).await?;
     } else {
-        admit_stage(&mut tx, run, None, "discovery", 1).await?;
+        admit_stage(&mut tx, run, None, "discovery", 1, false).await?;
     }
     tx.commit().await?;
     Ok(json!({"runRef":run,"replayed":false}))
@@ -314,6 +314,7 @@ pub(crate) async fn admit_stage(
     work: Option<Uuid>,
     stage: &str,
     segment: i32,
+    refresh_selected_media: bool,
 ) -> Result<(), RunError> {
     let r = sqlx::query("SELECT * FROM collection_run WHERE run_ref=$1 FOR UPDATE")
         .bind(run)
@@ -353,15 +354,17 @@ pub(crate) async fn admit_stage(
     if stage == "comments" && (comment_limit == 0 || mode == "none") {
         return Ok(());
     }
+    let ordinary_media = (stage == "detail" && mode != "none") || (sample && segment == 1);
+    let refresh_media = refresh_selected_media && stage == "detail";
     let materials: Vec<MaterialDeepeningTarget> = work
         .into_iter()
         .map(|content_public_ref| MaterialDeepeningTarget {
             content_public_ref,
             comment_limit,
             reply_expand_limit: if stage == "detail" { 0 } else { 2 },
-            acquire_media: (stage == "detail" && mode != "none") || (sample && segment == 1),
-            allow_ocr: (stage == "detail" && mode != "none") || (sample && segment == 1),
-            allow_asr: (stage == "detail" && mode != "none") || (sample && segment == 1),
+            acquire_media: ordinary_media || refresh_media,
+            allow_ocr: ordinary_media,
+            allow_asr: ordinary_media || refresh_media,
         })
         .collect();
     let result = request_and_admit_in_transaction_scoped(

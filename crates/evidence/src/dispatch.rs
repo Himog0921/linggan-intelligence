@@ -21,6 +21,7 @@ use crate::execution_input_eligibility::{
     signed_locator_predicate, stop_material_for_missing_execution_input_in_transaction,
     task_content_external_id,
 };
+use crate::selected_collection_run::{self, ExecutionScope};
 use crate::work_order_lease::{
     LeaseError, claim_queued_work_order_in_transaction, expire_lapsed_leases_in_transaction,
     recover_released_orphaned_work_orders_in_transaction,
@@ -512,7 +513,7 @@ async fn grant_detail_page_session_inner(
     execution_source_url: &str,
     register_lane_deliveries: bool,
 ) -> Result<DetailPageSessionGrant, DetailPageSessionGrantError> {
-    if !crate::collection_governance_enabled() {
+    if !selected_collection_run::configured() && !crate::collection_governance_enabled() {
         return Err(DetailPageSessionGrantError::UpgradeRecoveryOnly);
     }
     if !dispatch_schema_is_ready(database).await? {
@@ -570,6 +571,17 @@ async fn grant_detail_page_session_inner(
     else {
         return Err(DetailPageSessionGrantError::ClaimNotHeld);
     };
+    if selected_collection_run::configured()
+        && crate::collection_run_dispatch::guard_order(
+            &mut transaction,
+            work_order_ref,
+            installation_ref,
+        )
+        .await?
+        .is_some()
+    {
+        return Err(DetailPageSessionGrantError::UpgradeRecoveryOnly);
+    }
     let Some(plan) = page_session_plan_for_task(&mut transaction, lease_ref, &task_spec).await?
     else {
         return Err(DetailPageSessionGrantError::DetailScopeUnavailable);
@@ -1688,7 +1700,7 @@ pub async fn decide_dispatch(
     install_key: &str,
     installation_credential: &str,
 ) -> Result<DispatchDecision, DispatchError> {
-    if !crate::collection_governance_enabled() {
+    if !selected_collection_run::configured() && !crate::collection_governance_enabled() {
         return Ok(DispatchDecision::ControlBlocked {
             reason_code: "collection_upgrade_recovery_only".to_owned(),
         });
@@ -1697,6 +1709,17 @@ pub async fn decide_dispatch(
         return Err(DispatchError::SchemaUnavailable);
     }
     let mut transaction = database.pool().begin().await?;
+    let allowed_orders = match selected_collection_run::load_in(&mut transaction).await? {
+        ExecutionScope::Unrestricted => None,
+        ExecutionScope::Blocked => {
+            return Ok(DispatchDecision::ControlBlocked {
+                reason_code: "selected_collection_run_unavailable".into(),
+            });
+        }
+        ExecutionScope::Selected(scope) => Some(
+            crate::collection_run_dispatch::selected_orders_in(&mut transaction, &scope).await?,
+        ),
+    };
 
     let station: Option<(Uuid, Option<Uuid>, Option<i32>)> = sqlx::query_as(
         "SELECT i.installation_ref, i.station_ref, s.daily_work_quota \
@@ -1731,7 +1754,8 @@ pub async fn decide_dispatch(
     // 过了保质期的工单在这里终结，而不是靠上面那条候选查询把它们滤掉了事。
     // 只滤掉的话，它们会永远以「等待」的样子留在队列里——页面显示等待 5 单，其中 3 单
     // 永远不会跑，这正是 2026-09-08 那一天人看着队列却什么也看不出来的原因之一。
-    expire_stale_queued_work_orders_in_transaction(&mut transaction).await?;
+    expire_stale_queued_work_orders_in_transaction(&mut transaction, allowed_orders.as_deref())
+        .await?;
     let (Some(station_ref), Some(_quota)) = (station_ref, quota) else {
         // Expiry recovery above is durable even when this caller has not yet
         // claimed a station.  Returning without a commit would silently roll
@@ -1753,10 +1777,12 @@ pub async fn decide_dispatch(
            AND task.execution_state = 'in_progress' \
            AND lease.released_at IS NULL \
            AND lease.expires_at > scope_001_now() \
+           AND ($2::uuid[] IS NULL OR lease.work_order_ref=ANY($2)) \
          ORDER BY task.claimed_at, task.sequence_no \
          LIMIT 1 FOR UPDATE OF task",
     )
     .bind(installation_ref)
+    .bind(allowed_orders.as_deref())
     .fetch_optional(&mut *transaction)
     .await?;
     if let Some((task_id, lease_ref, task_spec)) = in_progress {
@@ -1811,6 +1837,7 @@ pub async fn decide_dispatch(
                AND lease.released_at IS NULL \
                AND lease.expires_at > scope_001_now() \
                AND task.execution_state = 'pending' \
+               AND ($2::uuid[] IS NULL OR work_order.work_order_ref=ANY($2)) \
                AND NOT EXISTS ( \
                    SELECT 1 FROM collection_work_order_lease_task prior \
                    WHERE prior.lease_ref = task.lease_ref \
@@ -1821,13 +1848,18 @@ pub async fn decide_dispatch(
              LIMIT 1 FOR UPDATE OF task SKIP LOCKED",
         )
         .bind(station_ref)
+        .bind(allowed_orders.as_deref())
         .fetch_optional(&mut *transaction)
         .await?;
 
         let Some((task_id, lease_ref, task_spec, _platform, _lane)) = waiting else {
-            let Some(claimed) =
-                claim_next_queued_work_order(&mut transaction, installation_ref, station_ref)
-                    .await?
+            let Some(claimed) = claim_next_queued_work_order(
+                &mut transaction,
+                installation_ref,
+                station_ref,
+                allowed_orders.as_deref(),
+            )
+            .await?
             else {
                 transaction.commit().await?;
                 return Ok(DispatchDecision::NothingWaiting);
@@ -1952,6 +1984,7 @@ async fn claim_next_queued_work_order(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     installation_ref: Uuid,
     caller_station_ref: Uuid,
+    allowed_orders: Option<&[Uuid]>,
 ) -> Result<Option<ClaimedWork>, sqlx::Error> {
     type Lane = (String, i32, Option<i32>, f64);
     type Candidate = (
@@ -2008,6 +2041,7 @@ async fn claim_next_queued_work_order(
         // through the other lanes rather than making all later work invisible.
         let candidates: Vec<Candidate> = sqlx::query_as(CANDIDATE_SQL)
             .bind(&dispatch_lane)
+            .bind(allowed_orders)
             .fetch_all(&mut **transaction)
             .await?;
         let mut seen_batch_groups = std::collections::BTreeSet::new();
@@ -2199,14 +2233,17 @@ async fn undo_failed_queue_claim(
 /// 它的租约结束后会回到队列，那时这条规则才轮到它。
 async fn expire_stale_queued_work_orders_in_transaction(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    allowed_orders: Option<&[Uuid]>,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE collection_work_order \
          SET queue_state='cancelled',station_ref=NULL,installation_ref=NULL, \
              account_ref=NULL,eligibility_ref=NULL \
          WHERE queue_state='queued' AND expires_at IS NOT NULL \
-           AND expires_at<=scope_001_now()",
+           AND expires_at<=scope_001_now() \
+           AND ($1::uuid[] IS NULL OR work_order_ref=ANY($1))",
     )
+    .bind(allowed_orders)
     .execute(&mut **transaction)
     .await?;
     Ok(())
@@ -2511,7 +2548,8 @@ const CANDIDATE_SQL: &str = concat!(
                              concat('work:',work_order.work_order_ref::text)) \
              FROM collection_work_order work_order \
              JOIN collection_observation_target target USING(target_ref) \
-             WHERE work_order.dispatch_lane=$1 AND ",
+             WHERE work_order.dispatch_lane=$1
+               AND ($2::uuid[] IS NULL OR work_order.work_order_ref=ANY($2)) AND ",
     dispatch_ready_predicate_sql!(),
     " ORDER BY ",
     dispatch_order_sql!("$1"),

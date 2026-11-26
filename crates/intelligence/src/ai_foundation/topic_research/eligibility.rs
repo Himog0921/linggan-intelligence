@@ -104,7 +104,13 @@ pub(super) async fn qualify(
                         readiness
                             .gaps
                             .into_iter()
-                            .find(|gap| gap.code == "video_transcript_required")
+                            .filter(|gap| {
+                                matches!(
+                                    gap.code.as_str(),
+                                    "video_transcript_required" | "video_transcript_unavailable"
+                                )
+                            })
+                            .max_by_key(|gap| gap.code == "video_transcript_unavailable")
                             .map(|gap| gap.code)
                     })
                     .unwrap_or_else(|| "content_understanding_required".into())

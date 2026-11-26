@@ -172,7 +172,16 @@ pub(crate) async fn issue_work_order_lease_in_transaction(
     work_order_ref: Uuid,
     valid_for_minutes: i32,
 ) -> Result<IssuedLease, LeaseError> {
-    if !crate::collection_governance_enabled() {
+    if crate::selected_collection_run::configured() {
+        if let Some(reason) =
+            crate::collection_run_dispatch::selected_order_block_in(transaction, work_order_ref)
+                .await?
+        {
+            return Err(LeaseError::ControlBlocked {
+                reason_code: reason.into(),
+            });
+        }
+    } else if !crate::collection_governance_enabled() {
         return Err(LeaseError::ControlBlocked {
             reason_code: "collection_upgrade_recovery_only".to_owned(),
         });

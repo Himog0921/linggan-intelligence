@@ -217,7 +217,7 @@ pub(crate) async fn frozen_in(
 }
 // A queued request must contain the current video transcripts in its frozen
 // input. A transcript added after enqueueing cannot repair that old payload.
-fn video_transcripts_included(saved: &Packet, current: &Packet) -> bool {
+pub(super) fn video_transcripts_included(saved: &Packet, current: &Packet) -> bool {
     if current.coverage["materialReadiness"]["kind"] != "video" {
         return true;
     }

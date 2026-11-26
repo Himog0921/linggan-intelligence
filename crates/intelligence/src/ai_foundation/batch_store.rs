@@ -61,6 +61,8 @@ pub enum InputRef {
     TopicResearch {
         window_ref: Uuid,
         stage_number: u8,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collection_run_ref: Option<Uuid>,
     },
     CreatorAccountResearch {
         request_ref: Uuid,
@@ -87,6 +89,8 @@ pub enum InputRef {
     },
     ContentUnderstanding {
         request_ref: Uuid,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        collection_run_ref: Option<Uuid>,
     },
     ContentUnderstandingDeep {
         request_ref: Uuid,

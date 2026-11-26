@@ -1,6 +1,76 @@
 //! Serialize run control with the existing dispatcher without blocking shared queue fairness.
+use crate::selected_collection_run::{self, ExecutionScope, SelectedCollectionRun};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
+
+/// Return only this run's material refresh orders. A linkage to the run is
+/// insufficient if the order contains another work or an operations target.
+const SELECTED_ORDER: &str = "SELECT orders.work_order_ref FROM collection_run_order orders
+    JOIN collection_work_order w USING(work_order_ref)
+    JOIN collection_run run USING(run_ref)
+    JOIN collection_admission_decision decision ON decision.decision_ref=w.decision_ref
+    WHERE orders.run_ref=$1 AND orders.stage='detail' AND orders.content_public_ref=ANY($2)
+      AND run.phase='materials'
+      AND w.target_ref=run.execution_target_ref AND decision.authorization_ref=run.authorization_ref
+      AND EXISTS (SELECT 1 FROM collection_work_order_material_target material
+                  WHERE material.work_order_ref=w.work_order_ref
+                    AND material.content_public_ref=orders.content_public_ref AND material.acquire_media)
+      AND NOT EXISTS (SELECT 1 FROM collection_work_order_material_target material
+                      WHERE material.work_order_ref=w.work_order_ref
+                        AND (material.content_public_ref<>orders.content_public_ref
+                             OR material.comment_limit<>0 OR material.reply_expand_limit<>0))
+      AND NOT EXISTS (SELECT 1 FROM collection_work_order_ops_publication_target ops
+                      WHERE ops.work_order_ref=w.work_order_ref)";
+
+pub(crate) async fn selected_orders_in(
+    tx: &mut Transaction<'_, Postgres>,
+    scope: &SelectedCollectionRun,
+) -> Result<Vec<Uuid>, sqlx::Error> {
+    sqlx::query_scalar(SELECTED_ORDER)
+        .bind(scope.run_ref)
+        .bind(&scope.work_refs)
+        .fetch_all(&mut **tx)
+        .await
+}
+
+/// A run command locks the same identity before changing authority. Take that
+/// lock before the row-level authority lock to preserve the existing lock order.
+pub(crate) async fn lock_selected_run_in(
+    tx: &mut Transaction<'_, Postgres>,
+    run: Uuid,
+) -> Result<Option<SelectedCollectionRun>, sqlx::Error> {
+    let locked: bool =
+        sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1,400))")
+            .bind(run.to_string())
+            .fetch_one(&mut **tx)
+            .await?;
+    if !locked {
+        return Ok(None);
+    }
+    match selected_collection_run::lock_in(tx).await? {
+        ExecutionScope::Selected(scope) if scope.run_ref == run => Ok(Some(scope)),
+        _ => Ok(None),
+    }
+}
+
+/// Used when issuing a lease or revalidating a previously issued task. Without an
+/// explicit selection this preserves the existing lease and delivery rules.
+pub(crate) async fn selected_order_block_in(
+    tx: &mut Transaction<'_, Postgres>,
+    order: Uuid,
+) -> Result<Option<&'static str>, sqlx::Error> {
+    match selected_collection_run::load_in(tx).await? {
+        ExecutionScope::Unrestricted => Ok(None),
+        ExecutionScope::Blocked => Ok(Some("selected_collection_run_unavailable")),
+        ExecutionScope::Selected(scope) => {
+            let Some(scope) = lock_selected_run_in(tx, scope.run_ref).await? else {
+                return Ok(Some("selected_collection_run_unavailable"));
+            };
+            Ok((!selected_orders_in(tx, &scope).await?.contains(&order))
+                .then_some("outside_selected_collection_run"))
+        }
+    }
+}
 
 pub(crate) async fn guard_order(
     tx: &mut Transaction<'_, Postgres>,
@@ -11,14 +81,19 @@ pub(crate) async fn guard_order(
         .fetch_one(&mut **tx)
         .await?;
     if !ready {
-        return Ok(None);
+        return Ok(selected_collection_run::configured()
+            .then(|| "selected_collection_run_unavailable".into()));
     }
     let run: Option<Uuid> =
         sqlx::query_scalar("SELECT run_ref FROM collection_run_order WHERE work_order_ref=$1")
             .bind(order)
             .fetch_optional(&mut **tx)
             .await?;
-    let Some(run) = run else { return Ok(None) };
+    let Some(run) = run else {
+        return Ok(
+            selected_collection_run::configured().then(|| "outside_selected_collection_run".into())
+        );
+    };
     let locked: bool =
         sqlx::query_scalar("SELECT pg_try_advisory_xact_lock(hashtextextended($1,400))")
             .bind(run.to_string())
@@ -28,6 +103,9 @@ pub(crate) async fn guard_order(
         return Ok(Some("collection_run_control_in_progress".into()));
     }
     let (intent,status,mode,phase):(String,String,String,String)=sqlx::query_as("SELECT r.control_intent,d.status,r.comment_mode,r.phase FROM collection_run r JOIN observation_domain d USING(domain_ref) WHERE r.run_ref=$1").bind(run).fetch_one(&mut **tx).await?;
+    if let Some(reason) = selected_order_block_in(tx, order).await? {
+        return Ok(Some(reason.into()));
+    }
     let reason = if intent != "running" {
         Some(format!("collection_run_{intent}"))
     } else if matches!(phase.as_str(), "ended" | "blocked") {

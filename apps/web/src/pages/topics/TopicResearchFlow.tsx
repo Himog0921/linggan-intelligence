@@ -23,6 +23,7 @@ const REASONS: Record<string,string> = {
 const ELIGIBILITY_REASONS: Record<string, string> = {
   content_understanding_required: '缺少当前材料版本的分析底稿',
   video_transcript_required: '等待视频转录',
+  video_transcript_unavailable: '处理结束，未取得可用口播',
   ai_source_unavailable: '来源当前不可用',
   ai_prior_dispatch_unresolved: '上次模型调用的送达状态待核对',
 };

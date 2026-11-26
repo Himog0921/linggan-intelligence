@@ -133,6 +133,7 @@ async fn enqueue(
             input: InputRef::TopicResearch {
                 window_ref: window,
                 stage_number: index as u8,
+                collection_run_ref: None,
             },
         }];
         let hash = batch_store::input_hash(task, &inputs, false)?;

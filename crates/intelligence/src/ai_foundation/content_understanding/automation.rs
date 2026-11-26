@@ -1,6 +1,6 @@
 //! Domain opt-in and bounded queue production for L1 into the existing content-understanding ledger.
 use super::{FoundationError, METHOD, Start, preview_automatic, source, start_with_kind};
-use crate::ai_foundation::{batch_store::BatchKind, store::Command};
+use crate::ai_foundation::{batch_store::BatchKind, selected_collection_scope, store::Command};
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -10,7 +10,13 @@ use uuid::Uuid;
 
 /// Automatic work waiting or running; the scan pauses at this size.
 pub(super) const QUEUE_LIMIT: i64 = 20;
-pub(super) const AUTOMATIC_WAITING: &str = "SELECT count(*) FROM linggan_content_understanding_request r JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE b.kind='automatic' AND c.state IN('pending','running')";
+pub(super) const AUTOMATIC_WAITING: &str = "
+    SELECT count(*) FROM linggan_content_understanding_request r
+    JOIN linggan_ai_batch b USING(batch_ref)
+    JOIN linggan_ai_batch_item_control c USING(item_ref)
+    JOIN linggan_ai_batch_item item ON item.item_ref=r.item_ref
+    WHERE b.kind='automatic' AND c.state IN('pending','running')
+      AND item.input_ref->>'collectionRunRef' IS NOT DISTINCT FROM $1::uuid::text";
 const SCAN_PAGE: i64 = 40;
 /// A finished pass over every work waits this long before it looks again.
 const IDLE_AFTER_PASS: Duration = Duration::from_secs(60);
@@ -160,6 +166,7 @@ pub async fn change(db: &Database, request: &Change) -> Result<Setting, Foundati
 /// A scan position only, not a second task ledger. Restarting safely rescans existing command IDs.
 #[derive(Default)]
 pub struct CursorState {
+    collection_run_ref: Option<Uuid>,
     after: Option<(Uuid, Uuid)>,
     idle_until: Option<Instant>,
     /// Whether this pass looked at any work; an empty pass (nothing enabled) is cheap and need not idle.
@@ -170,7 +177,18 @@ pub type Cursor = Option<CursorState>;
 /// Queue only new, qualified material versions. An attempt on the same material version
 /// remains authoritative, so a persistent output failure cannot turn into a paid retry loop.
 pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, FoundationError> {
+    let Some(selected) = selected_collection_scope::filter(db).await? else {
+        *cursor = None;
+        return Ok(0);
+    };
+    let collection_run_ref = selected.collection_run_ref;
     let state = cursor.get_or_insert_with(CursorState::default);
+    if state.collection_run_ref != collection_run_ref {
+        *state = CursorState {
+            collection_run_ref,
+            ..CursorState::default()
+        };
+    }
     if state.idle_until.is_some_and(|until| Instant::now() < until) {
         return Ok(0);
     }
@@ -178,6 +196,7 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
     // A full queue pauses the scan in place. It must not look like the end of a pass, or the
     // cursor would reset and the scan would idle while the queue drains.
     let waiting: i64 = sqlx::query_scalar(AUTOMATIC_WAITING)
+        .bind(collection_run_ref)
         .fetch_one(db.pool())
         .await?;
     if waiting >= QUEUE_LIMIT {
@@ -187,6 +206,8 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
         .bind(state.after.map(|v| v.0))
         .bind(state.after.map(|v| v.1))
         .bind(SCAN_PAGE)
+        .bind(selected.domain)
+        .bind(selected.works.as_deref())
         .fetch_all(db.pool())
         .await?;
     let refs: Vec<Uuid> = rows.iter().map(|row| row.get("work_ref")).collect();

@@ -14,10 +14,11 @@
 use std::time::Duration;
 
 use linggan_evidence::{
-    COLLECTION_RUNTIME_REQUIREMENTS, EVENT_TICK, PatrolTickSummary, RuntimeEvent, RuntimeReadiness,
-    SERVICE_WORKER, STEP_MEDIA_ACQUISITION, STEP_PATROL, STEP_PROGRESSIVE_DOSSIERS, StepOutcome,
-    StepReport, TickLedger, connect_runtime_readiness, ensure_discovery_cover_media_work,
-    probe_runtime_readiness, run_due_patrol_step, run_progressive_archives, tick_outcome,
+    COLLECTION_RUNTIME_REQUIREMENTS, EVENT_TICK, PatrolStepError, PatrolTickSummary, RuntimeEvent,
+    RuntimeReadiness, SERVICE_WORKER, STEP_MEDIA_ACQUISITION, STEP_PATROL,
+    STEP_PROGRESSIVE_DOSSIERS, StepOutcome, StepReport, TICK_STEP_KEYS, TickLedger,
+    connect_runtime_readiness, ensure_discovery_cover_media_work, probe_runtime_readiness,
+    run_due_patrol_step, run_progressive_archives, selected_collection_run, tick_outcome,
 };
 use linggan_storage_postgres::Database;
 
@@ -90,12 +91,27 @@ pub async fn run_collection_tick(database: &Database) {
     };
     // 顺序是有意的：先做投影，再推进档案与关键词，最后按到期派活——巡查看到的是前三步
     // 已经落库的世界。四步各自 await 完毕再开下一步，不并发。
-    let reports = vec![
-        media_step(database, &ledger).await,
-        dossier_step(database, &ledger).await,
-        keyword_details::advance_keyword_details(database, &ledger).await,
-        patrol_step(database, &ledger).await,
-    ];
+    let reports = if selected_collection_run::configured() {
+        // The API advances the selected run. Keep the patrol heartbeat and recovery
+        // running, without queuing work or changing other targets' patrol schedules.
+        let mut reports = Vec::with_capacity(TICK_STEP_KEYS.len());
+        for &step in TICK_STEP_KEYS {
+            let (report, _) = ledger
+                .run_step(step, async { Ok::<_, PatrolStepError>(()) }, |_| {
+                    StepOutcome::skipped("selected_collection_run")
+                })
+                .await;
+            reports.push(report);
+        }
+        reports
+    } else {
+        vec![
+            media_step(database, &ledger).await,
+            dossier_step(database, &ledger).await,
+            keyword_details::advance_keyword_details(database, &ledger).await,
+            patrol_step(database, &ledger).await,
+        ]
+    };
     for report in &reports {
         emit_step(&ledger, report);
     }

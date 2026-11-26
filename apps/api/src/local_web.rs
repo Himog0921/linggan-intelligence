@@ -684,9 +684,24 @@ async fn health(State(state): State<LocalWebState>) -> Json<Value> {
             "lastOutcome": "unknown"
         }),
     };
+    use linggan_evidence::selected_collection_run::{self, ExecutionScope};
+    let selected_collection_run = if selected_collection_run::configured() {
+        match state.database.database() {
+            Some(database) => match selected_collection_run::load(database).await {
+                Ok(ExecutionScope::Selected(scope)) => {
+                    json!({"state":"active","runRef":scope.run_ref})
+                }
+                _ => json!({"state":"blocked"}),
+            },
+            None => json!({"state":"blocked"}),
+        }
+    } else {
+        Value::Null
+    };
     Json(json!({
         "service": "linggan-local-web",
         "collectionUpgradePhase": linggan_evidence::collection_upgrade_phase(),
+        "selectedCollectionRun": selected_collection_run,
         "listener": "loopback-only",
         "dataState": data_state,
         "evidenceReadModel": evidence_read_model,
@@ -2609,6 +2624,8 @@ fn lease_error_code(error: &LeaseError) -> &'static str {
             "rule_missing" => "rule_missing",
             "rule_revision_changed" => "rule_revision_changed",
             "monitoring_paused" => "monitoring_paused",
+            "outside_selected_collection_run" => "outside_selected_collection_run",
+            "selected_collection_run_unavailable" => "selected_collection_run_unavailable",
             _ => "capacity_unknown",
         },
         LeaseError::AuthorizationLapsed => "authorization_lapsed",
