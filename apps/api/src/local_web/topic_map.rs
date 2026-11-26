@@ -83,6 +83,7 @@ pub(super) fn routes(
         .route("/api/local/topic-map/context", get(page_context))
         .route("/api/local/topic-map/overview", get(overview))
         .route("/api/local/topic-map/summary", get(summary))
+        .route("/api/local/topic-map/summary/current", get(current_summary))
         .route("/api/local/topic-map/evidence", get(evidence))
         .route("/api/local/topic-map/alternative", get(saved_alternative))
         .route("/api/local/topic-map/commands", post(command))
@@ -174,14 +175,36 @@ async fn summary(
     Extension(model): Extension<Arc<TopicMapReadModel>>,
     query: Result<Query<TopicMapQuery>, QueryRejection>,
 ) -> Response {
+    read_summary(&state, &model, query, false).await
+}
+async fn current_summary(
+    State(state): State<LocalWebState>,
+    Extension(model): Extension<Arc<TopicMapReadModel>>,
+    query: Result<Query<TopicMapQuery>, QueryRejection>,
+) -> Response {
+    read_summary(&state, &model, query, true).await
+}
+async fn read_summary(
+    state: &LocalWebState,
+    model: &Arc<TopicMapReadModel>,
+    query: Result<Query<TopicMapQuery>, QueryRejection>,
+    current: bool,
+) -> Response {
     let Ok(Query(query)) = query else {
         return error(StatusCode::BAD_REQUEST, "invalid_topic_map_query");
     };
-    let db = match database(&state) {
+    let db = match database(state) {
         Ok(db) => db,
         Err(response) => return response,
     };
-    match model.read_page(db, &query).await {
+    let snapshot = if current {
+        // A completion receipt already committed. Keep the page bounded while
+        // reading a snapshot that includes that publication.
+        model.read(db, &query).await
+    } else {
+        model.read_page(db, &query).await
+    };
+    match snapshot {
         Ok(snapshot) => match linggan_intelligence::topic_map::read_model::first_page(&snapshot) {
             Ok(value) => Json(value).into_response(),
             Err(_) => error(

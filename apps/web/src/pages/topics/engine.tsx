@@ -392,7 +392,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
   });
   const topicDialogs = createTopicDialogs({
     get researchProgress() { return snapshot?.scope.progress; },
-    onResearchCompleted: () => { void load(); },
+    onResearchCompleted: () => { void load(true); },
     researchRequest: (domain: string) => {
       let request = researchRequests.get(domain);
       if (!request) {
@@ -485,7 +485,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     (path, body, parse) => request(path, parse, { method: "POST", body }),
     notify,
   );
-  async function load() {
+  async function load(requireCurrent = false) {
     const epoch = ++fetchEpoch;
     readControllers.forEach((controller) => controller.abort());
     readControllers.clear();
@@ -500,7 +500,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     render();
     try {
       const result = await request(
-        `/api/local/topic-map/summary?${query()}`,
+        `/api/local/topic-map/summary${requireCurrent ? "/current" : ""}?${query()}`,
         decodeSnapshot,
       );
       if (epoch !== fetchEpoch) return;
@@ -1741,7 +1741,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     }
     if (target instanceof HTMLButtonElement && target.disabled) return;
     if (action === "refresh") {
-      await load();
+      await load(true);
       return;
     }
     if (action === "research") {
