@@ -1,3 +1,15 @@
+-- Apply the per-domain queue bound before selecting the shared retry page.
+WITH full_domains AS (
+    SELECT r.domain_ref FROM linggan_topic_research_run r
+    JOIN linggan_topic_research_window w USING(run_ref)
+    JOIN linggan_topic_research_stage s USING(window_ref)
+    JOIN linggan_ai_batch_item i USING(item_ref)
+    JOIN linggan_ai_batch b USING(batch_ref)
+    JOIN linggan_ai_batch_item_control c USING(item_ref)
+    WHERE b.kind='automatic' AND c.state IN ('pending','running')
+      AND i.input_ref->>'collectionRunRef' IS NOT DISTINCT FROM $4::uuid::text
+    GROUP BY r.domain_ref HAVING count(DISTINCT w.window_ref)>=8
+)
 SELECT r.domain_ref, w.work_ref, w.window_ref,
        (w.input_refs#>>'{coverage,coreRef}')::uuid AS core_ref,
        md5('topic-auto-retry:'||w.window_ref::text)::uuid AS command_ref
@@ -16,7 +28,8 @@ JOIN LATERAL (
     WHERE work_ref=w.work_ref AND result IS NOT NULL
     ORDER BY created_at DESC,request_ref DESC LIMIT 1
 ) current_core ON current_core.request_ref::text=w.input_refs#>>'{coverage,coreRef}'
-WHERE ($1::uuid IS NULL OR w.window_ref=$1)
+WHERE r.domain_ref NOT IN (SELECT domain_ref FROM full_domains)
+  AND ($1::uuid IS NULL OR w.window_ref=$1)
   AND ($3::uuid IS NULL OR w.window_ref>$3)
   AND i.input_ref->>'collectionRunRef' IS NOT DISTINCT FROM $4::uuid::text
   AND ($5::uuid IS NULL OR (r.domain_ref=$5 AND w.work_ref=ANY($6::uuid[])))
