@@ -124,10 +124,21 @@ async fn topic_pages_keep_qualified_snapshot_during_l1_and_unselected_ocr_writes
     ).bind(unit).bind(version.to_string()).execute(&mut *tx).await.unwrap();
     tx.commit().await.unwrap();
 
+    sqlx::query("CREATE TABLE unrelated_projection (payload text)")
+        .execute(db.pool())
+        .await
+        .unwrap();
     let model = Arc::new(TopicMapReadModel::default());
     let query = TopicMapQuery { domain_ref: Some(support::D), ..Default::default() };
     let before = model.read_page(&db, &query).await.unwrap();
     assert_eq!(before.scope["progress"]["understanding"]["missing"], 1);
+
+    sqlx::query("INSERT INTO unrelated_projection VALUES ('SYNTHETIC unrelated projection refresh')")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let unchanged = model.read(&db, &query).await.unwrap();
+    assert!(Arc::ptr_eq(&before, &unchanged));
 
     seed_core(&db, work, model_config, false).await;
     let reading: Uuid = sqlx::query_scalar(
@@ -152,6 +163,19 @@ async fn topic_pages_keep_qualified_snapshot_during_l1_and_unselected_ocr_writes
     tx.commit().await.unwrap();
     let adopted = model.read_page(&db, &query).await.unwrap();
     assert!(!Arc::ptr_eq(&refreshed, &adopted), "selecting a reading invalidates the old source authority");
+
+    sqlx::query(
+        "INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,state,authority_ref,reason,effective_at)
+         SELECT gen_random_uuid(),slot_key,'WITHDRAWN_OR_RESTRICTED','synthetic','synthetic restriction',scope_001_now()
+         FROM linggan_material_unit WHERE unit_ref=$1",
+    )
+    .bind(unit)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let restricted = model.read_page(&db, &query).await.unwrap();
+    assert!(adopted.works.iter().any(|item| item.work_ref == work));
+    assert!(restricted.works.iter().all(|item| item.work_ref != work));
 }
 
 #[tokio::test]
@@ -159,6 +183,57 @@ async fn topic_pages_keep_qualified_snapshot_during_l1_and_unselected_ocr_writes
 async fn saved_core_drives_topic_queue_and_persisted_membership() {
     roundtrip(false).await;
     roundtrip(true).await;
+}
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL, synthetic Core queue; no provider"]
+async fn topic_candidates_reserve_progress_for_fresh_and_historical_cores() {
+    let (db, model_config) = support::setup("topic_map_core_priority").await;
+    configure_tasks_for_test(&db, model_config).await;
+    use super::super::topic_research_automation as topics;
+    topics::change(
+        &db,
+        &topics::Change {
+            command_ref: Uuid::new_v4(),
+            domain_ref: support::D,
+            expected_revision: 0,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    for i in 1..=10u128 {
+        let work = support::work(&db, &format!("history-{i}"), "合成历史正文").await;
+        seed_core_at(
+            &db,
+            work,
+            model_config,
+            false,
+            Uuid::from_u128(i),
+            Some("2020-01-01T00:00:00Z"),
+        )
+        .await;
+    }
+    for i in 1..=5u128 {
+        let work = support::work(&db, &format!("recent-{i}"), "合成近期正文").await;
+        seed_core_at(&db, work, model_config, false, Uuid::from_u128(100 + i), None).await;
+    }
+    let candidates: Vec<(Uuid, Uuid, Uuid, Uuid, bool)> = sqlx::query_as(include_str!(
+        "../topic_research_automation/candidates.sql"
+    ))
+    .bind(None::<Uuid>)
+    .bind(None::<Uuid>)
+    .bind(crate::topic_map_research_analysis::METHOD_VERSION)
+    .bind(None::<Uuid>)
+    .bind(None::<Vec<Uuid>>)
+    .bind(None::<Uuid>)
+    .bind(None::<Uuid>)
+    .bind(None::<Uuid>)
+    .fetch_all(db.pool())
+    .await
+    .unwrap();
+    let order = candidates.into_iter().map(|(_, core, _, _, _)| core.as_u128()).collect::<Vec<_>>();
+    assert_eq!(order, [101, 1, 102, 2, 103, 3, 104, 4]);
 }
 
 #[tokio::test]
@@ -462,7 +537,17 @@ pub(crate) async fn seed_core(
     model_config: Uuid,
     image_only: bool,
 ) -> Uuid {
-    let reference = Uuid::new_v4();
+    seed_core_at(db, work, model_config, image_only, Uuid::new_v4(), None).await
+}
+
+async fn seed_core_at(
+    db: &Database,
+    work: Uuid,
+    model_config: Uuid,
+    image_only: bool,
+    reference: Uuid,
+    created_at: Option<&str>,
+) -> Uuid {
     let mut command = Command::begin(
         &db,
         reference,
@@ -544,8 +629,8 @@ pub(crate) async fn seed_core(
     let invocation = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_model_invocation(invocation_ref,connection_version_ref,model_ref,config_ref,operation,request_hash,state,reserved_tokens,charged_tokens,result,finished_at) SELECT $1,m.connection_version_ref,m.model_ref,$2,'analyze',$3,'succeeded',0,0,'{\"synthetic\":true}',scope_001_now() FROM linggan_model_config c JOIN linggan_model_entry m USING(model_ref) WHERE c.config_ref=$2")
         .bind(invocation).bind(model_config).bind(linggan_evidence::creator_discovery::hash(&reference.to_string())).execute(&mut *command.tx).await.unwrap();
-    sqlx::query("INSERT INTO linggan_content_understanding_result(request_ref,work_ref,material_snapshot_identity,method_version,invocation_ref,result) VALUES($1,$2,$3,$4,$5,$6)")
-        .bind(reference).bind(work).bind(&packet.snapshot.material_snapshot_identity).bind(METHOD).bind(invocation).bind(accepted).execute(&mut *command.tx).await.unwrap();
+    sqlx::query("INSERT INTO linggan_content_understanding_result(request_ref,work_ref,material_snapshot_identity,method_version,invocation_ref,result,created_at) VALUES($1,$2,$3,$4,$5,$6,COALESCE($7::timestamptz,scope_001_now()))")
+        .bind(reference).bind(work).bind(&packet.snapshot.material_snapshot_identity).bind(METHOD).bind(invocation).bind(accepted).bind(created_at).execute(&mut *command.tx).await.unwrap();
     command.finish(json!({"seeded":reference})).await.unwrap();
     reference
 }

@@ -8,7 +8,8 @@ use uuid::Uuid;
 #[derive(Default)]
 pub struct CursorState {
     collection_run_ref: Option<Uuid>,
-    cores: Option<(Uuid, Uuid)>,
+    recent_cores: Option<(Uuid, Uuid)>,
+    historical_cores: Option<(Uuid, Uuid)>,
     definitions: Option<(Uuid, Uuid)>,
     comments: Option<(Uuid, Uuid)>,
     retries: Option<Uuid>,
@@ -36,23 +37,29 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
     let repaired =
         repaired + retry_confirmed_invalid_outputs(db, &mut position.retries, &selected).await?;
     let rows = sqlx::query(include_str!("candidates.sql"))
-        .bind(position.cores.map(|v| v.0))
-        .bind(position.cores.map(|v| v.1))
+        .bind(position.recent_cores.map(|v| v.0))
+        .bind(position.recent_cores.map(|v| v.1))
         .bind(crate::topic_map_research_analysis::METHOD_VERSION)
         .bind(selected.domain)
         .bind(selected.works.as_deref())
         .bind(selected.collection_run_ref)
+        .bind(position.historical_cores.map(|v| v.0))
+        .bind(position.historical_cores.map(|v| v.1))
         .fetch_all(db.pool())
         .await?;
-    if rows.is_empty() {
-        position.cores = None;
-        return Ok(repaired);
-    }
+    // Empty lanes wrap independently. A stopped worker can safely rescan both.
+    let mut recent_seen = false;
+    let mut historical_seen = false;
     let mut queued = repaired;
     for row in rows {
         let domain: Uuid = row.get("domain_ref");
         let core: Uuid = row.get("request_ref");
-        position.cores = Some((domain, core));
+        let recent: bool = row.get("recent");
+        if recent {
+            recent_seen = true;
+        } else {
+            historical_seen = true;
+        }
         let request = topic_research::Start {
             command_ref: row.get("command_ref"),
             domain_ref: domain,
@@ -61,10 +68,28 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
         match topic_research::start_with_kind(db, &request, BatchKind::Automatic, Some(core)).await
         {
             Ok(_) => queued += 1,
-            // One unavailable source/configuration must not drain the shared AI executor.
+            // A full queue must not move the scan past work it could not admit.
+            Err(FoundationError::AdmissionDenied(reasons))
+                if reasons
+                    .iter()
+                    .any(|reason| reason == "topic_automatic_queue_full") =>
+            {
+                continue;
+            }
             Err(FoundationError::Database(error)) => return Err(error.into()),
-            Err(_) => continue,
+            Err(_) => {}
         }
+        if recent {
+            position.recent_cores = Some((domain, core));
+        } else {
+            position.historical_cores = Some((domain, core));
+        }
+    }
+    if !recent_seen {
+        position.recent_cores = None;
+    }
+    if !historical_seen {
+        position.historical_cores = None;
     }
     Ok(queued)
 }

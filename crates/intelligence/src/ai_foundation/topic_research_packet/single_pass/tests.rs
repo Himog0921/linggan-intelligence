@@ -408,6 +408,35 @@ fn author_payload_carries_the_core_once_and_other_modes_carry_only_saved_units()
 }
 
 #[test]
+fn catalog_keeps_every_definition_and_exact_example_citations_without_nested_cores() {
+    let mut candidate = json!({
+        "topicRef":Uuid::from_u128(1),
+        "definitionRef":Uuid::from_u128(2),
+        "inclusionCriteria":["合成边界"],
+        "supportExamples":[{
+            "sourceSnapshot":{"identity":"synthetic"},
+            "statement":"合成主题边界",
+            "evidence":[{
+                "sourceRef":Uuid::from_u128(3),"start":4,"end":8,"text":"合成证据",
+                "anchor":{"quote":"合成证据"},"knowledgeUnits":[{"statement":"重复的 Core"}]
+            }]
+        }]
+    });
+    compact_support_examples(&mut candidate);
+    assert_eq!(candidate["definitionRef"], json!(Uuid::from_u128(2)));
+    assert_eq!(candidate["inclusionCriteria"], json!(["合成边界"]));
+    assert_eq!(candidate["supportExamples"][0], json!({
+        "statement":"合成主题边界",
+        "evidence":[{"sourceRef":Uuid::from_u128(3),"start":4,"end":8,"text":"合成证据"}]
+    }));
+    let mut evidence = fragment("core-1", "合成证据");
+    evidence.field = "core_text_evidence".into();
+    evidence.structure = json!({"text":"合成证据","anchor":{"start":4},"knowledgeUnits":[{"id":"u1"}]});
+    assert_eq!(fragment_content(&evidence), json!({"text":"合成证据","anchor":{"start":4}}));
+    assert_eq!(evidence.structure["knowledgeUnits"][0]["id"], "u1");
+}
+
+#[test]
 fn comment_mode_cannot_create_topics() {
     let mut comment = fragment("c1", "需要提醒");
     comment.field = "studied_comment".into();
