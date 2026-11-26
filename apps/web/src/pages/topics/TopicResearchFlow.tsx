@@ -4,7 +4,7 @@ import { Link } from 'react-router';
 import { TopicAutomation } from './TopicAutomation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ApiError, isRecord, requestJson } from '../../shared/api';
-import { decode, str } from '../../shared/decode';
+import { decode, list, optStr, str } from '../../shared/decode';
 import { c } from './styles';
 
 import { parseTopicRuns as runs, type Run } from './topicResearchModel';
@@ -20,7 +20,14 @@ const REASONS: Record<string,string> = {
   topic_publication_withheld:'来源、许可或控制状态已变化',ai_output_invalid:'模型结果未通过校验',ai_provider_failed:'模型调用失败',
   ai_dispatch_unknown:'发送结果未知，请先核对调用记录',ai_input_limit_before_dispatch:'完整输入超过模型额度，未发送',ai_source_unavailable:'来源当前不可读取',
 };
-export type ResearchSubmission = { commandRef: string; workRefs: string[]; inFlight: Promise<string> | null };
+const ELIGIBILITY_REASONS: Record<string, string> = {
+  content_understanding_required: '缺少当前材料版本的分析底稿',
+  video_transcript_required: '等待视频转录',
+  ai_source_unavailable: '来源当前不可用',
+  ai_prior_dispatch_unresolved: '上次模型调用的送达状态待核对',
+};
+type SubmissionReceipt = { runRef: string; skippedWorks: { workRef: string; reason: string | null }[] };
+export type ResearchSubmission = { commandRef: string; workRefs: string[]; inFlight: Promise<SubmissionReceipt> | null };
 export type ResearchRequestState = { get: () => ResearchSubmission | null; set: (value: ResearchSubmission | null) => void };
 type Props = { progress?: Progress; requestState?: ResearchRequestState; onCompleted?: () => void; domain: string; works: { workRef: string; title?: string | null }[] };
 export function TopicResearchFlow(props: Props) {
@@ -39,6 +46,25 @@ function DomainResearchFlow({ domain, works, onCompleted, requestState, progress
   const pages = Math.max(1, Math.ceil(filtered.length / 20));
   const currentPage = Math.min(page, pages - 1);
   const visibleWorks = filtered.slice(currentPage * 20, (currentPage + 1) * 20);
+  const visibleRefs = visibleWorks.map(work => work.workRef).join(',');
+  const [eligibility, setEligibility] = useState<{ refs: string; reasons: Map<string, string | null> | null }>({ refs: '', reasons: null });
+  const [eligibilityRevision, setEligibilityRevision] = useState(0);
+  useEffect(() => {
+    if (!visibleRefs) return;
+    const abort = new AbortController();
+    const params = new URLSearchParams({ domainRef: domain, workRefs: visibleRefs });
+    void requestJson(`/api/local/topic-research/eligibility?${params}`, { signal: abort.signal })
+      .then(value => {
+        const reasons = decode(value, root => new Map(list(root, 'works', item => (
+          [str(item, 'workRef'), optStr(item, 'reason')] as const
+        ))));
+        if (!abort.signal.aborted) setEligibility({ refs: visibleRefs, reasons });
+      })
+      .catch(() => {
+        if (!abort.signal.aborted) setEligibility({ refs: visibleRefs, reasons: null });
+      });
+    return () => abort.abort();
+  }, [domain, visibleRefs, eligibilityRevision]);
   const mounted = useRef(false);
   const readVersion = useRef(0);
   const pendingRuns = useRef(new Set<string>());
@@ -80,13 +106,18 @@ function DomainResearchFlow({ domain, works, onCompleted, requestState, progress
     timer = setTimeout(() => void tick(), interval);
     return () => { active = false; clearTimeout(timer); };
   }, [poll, automaticEnabled, read]);
-  async function refresh() { setBusy(true); await read(); if (mounted.current) setBusy(false); }
-  const followSubmission = useCallback(async (pending: Promise<string>) => {
+  async function refresh() { setEligibilityRevision(value => value + 1); setBusy(true); await read(); if (mounted.current) setBusy(false); }
+  const followSubmission = useCallback(async (pending: Promise<SubmissionReceipt>) => {
     try {
-      const runRef = await pending;
+      const { runRef, skippedWorks } = await pending;
       if (!mounted.current) return;
       pendingRuns.current.add(runRef);
-      setUncertain(false); setNotice('已提交'); setPoll(true); await read();
+      if (skippedWorks.length) {
+        setSelected(old => old.filter(ref => !skippedWorks.some(work => work.workRef === ref)));
+        setEligibilityRevision(value => value + 1);
+      }
+      const reasons = [...new Set(skippedWorks.map(work => ELIGIBILITY_REASONS[work.reason ?? ''] ?? '材料资格已变化'))];
+      setUncertain(false); setNotice(reasons.length ? `已提交可研究作品。跳过 ${skippedWorks.length} 篇（${reasons.join('、')}）` : '已提交'); setPoll(true); await read();
     } catch (error) {
       if (mounted.current) { setNotice(message(error)); setUncertain(Boolean(request.get())); }
     } finally { if (mounted.current) setBusy(false); }
@@ -103,9 +134,14 @@ function DomainResearchFlow({ domain, works, onCompleted, requestState, progress
     if (!submission.inFlight) {
       submission.inFlight = requestJson('/api/local/topic-research', { method: 'POST', body: { commandRef: submission.commandRef, domainRef: domain, workRefs: submission.workRefs } })
         .then(value => {
-          const runRef = decode(value, root => str(root, 'runRef'));
+          const receipt = decode(value, root => ({
+            runRef: str(root, 'runRef'),
+            skippedWorks: root.skippedWorks === undefined ? [] : list(root, 'skippedWorks', item => ({
+              workRef: str(item, 'workRef'), reason: optStr(item, 'reason'),
+            })),
+          }));
           if (request.get() === submission) request.set(null);
-          return runRef;
+          return receipt;
         }).catch((error: unknown) => {
           submission.inFlight = null;
           if (error instanceof ApiError && error.answered && request.get() === submission) request.set(null);
@@ -118,7 +154,20 @@ function DomainResearchFlow({ domain, works, onCompleted, requestState, progress
   return <section className={c('lgi-tm-section')} aria-label="主题研究流程"><h3>主题研究</h3><TopicProgress progress={progress} /><TopicAutomation domain={domain} onEnabledChange={setAutomaticEnabled} /><Link to="/settings/models?view=advanced&area=work&task=topic_research">去 AI 设置</Link>
     <div className={c('lgi-tm-row')}><input type="search" aria-label="搜索研究作品" placeholder="搜索作品" value={search} onChange={event => { setSearch(event.target.value); setPage(0); }} /><span>已选 {selected.length} / 10</span></div>
     <div className={c('lgi-tm-row')}><button className={c('lgi-tm-button')} type="button" disabled={busy || selected.length === 0} onClick={() => void start()}>{uncertain ? '重试同一请求' : '开始研究'}</button><button className={c('lgi-tm-button')} type="button" disabled={busy} onClick={() => void refresh()}>刷新进度</button></div>
-    <fieldset className={c('lgi-tm-research-works')} disabled={busy || uncertain}><legend>本次作品</legend>{visibleWorks.map(work => <label className={c('lgi-tm-check-label')} key={work.workRef}><input type="checkbox" checked={selected.includes(work.workRef)} disabled={selected.length >= 10 && !selected.includes(work.workRef)} onChange={event => setSelected(old => event.target.checked ? [...old, work.workRef] : old.filter(ref => ref !== work.workRef))} /><span>{work.title || '未命名作品'}</span></label>)}{filtered.length === 0 ? <span>没有匹配作品</span> : null}</fieldset>
+    <fieldset className={c('lgi-tm-research-works')} disabled={busy || uncertain}><legend>本次作品</legend>
+      {visibleWorks.map(work => {
+        const checked = selected.includes(work.workRef);
+        const reason = eligibility.refs === visibleRefs ? eligibility.reasons?.get(work.workRef) : undefined;
+        const note = reason ? ELIGIBILITY_REASONS[reason] ?? '当前无法研究' : '';
+        return <label className={c('lgi-tm-check-label')} key={work.workRef}>
+          <input type="checkbox" checked={checked} disabled={!checked && (reason !== null || selected.length >= 10)} onChange={event => setSelected(old => event.target.checked ? [...old, work.workRef] : old.filter(ref => ref !== work.workRef))} />
+          <span>{work.title || '未命名作品'}{note && <small> · {note}</small>}</span>
+        </label>;
+      })}
+      {filtered.length === 0 ? <span>没有匹配作品</span> : null}
+      {visibleRefs && eligibility.refs !== visibleRefs ? <span role="status">正在核对作品资格</span> : null}
+      {visibleRefs && eligibility.refs === visibleRefs && !eligibility.reasons ? <span role="status">作品资格暂不可用。可刷新进度后重试。</span> : null}
+    </fieldset>
     {pages > 1 ? <nav className={c('lgi-tm-row')} aria-label="研究作品分页"><button className={c('lgi-tm-button')} type="button" disabled={currentPage === 0} onClick={() => setPage(currentPage - 1)}>上一页</button><span>{currentPage + 1} / {pages}</span><button className={c('lgi-tm-button')} type="button" disabled={currentPage + 1 === pages} onClick={() => setPage(currentPage + 1)}>下一页</button></nav> : null}
     {notice ? <p role="status">{notice}</p> : null}{records.map(run => <article key={run.runRef}><h4>{run.pending ? '研究进行中' : run.failed ? '研究未完成' : run.stages.some(stage => stage.state === 'cancelled') ? '研究已取消' : '研究完成'} · {run.windows} 个窗口</h4>{run.pending ? <button className={c('lgi-tm-button')} type="button" disabled={busy} onClick={() => void cancel(run.runRef)}>取消研究</button> : null}<ul>{run.stages.map(stage => <li key={stage.window + stage.phase}>窗口 {Array.from(new Set(run.stages.map(item => item.window))).indexOf(stage.window) + 1} · {run.executionMode === 'single_pass' ? '主题归并' : PHASES[stage.phase] ?? '阶段未知'}：{run.executionMode === 'single_pass' && stage.state === 'succeeded' ? '已完成' : STATES[stage.state] ?? stage.state}{stage.failure ? ` · ${REASONS[stage.failure] ?? '请查看 AI 调用记录'}` : stage.wait ? ' · 等待运行条件满足' : ''}</li>)}</ul></article>)}
   </section>;

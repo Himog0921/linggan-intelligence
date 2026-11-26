@@ -23,7 +23,7 @@ pub(crate) use restoration::{research_result_sources_current, restore_scoped_win
 #[cfg(test)]
 use restoration::{restore_window, sources_current};
 pub(crate) use source::{
-    load_core_inputs_for_works_at, load_inputs_for_works, load_inputs_for_works_at,
+    load_core_inputs_for_works_at_in, load_inputs_for_works, load_inputs_for_works_at,
     load_inputs_for_works_at_in, load_inputs_for_works_in, manifest_as_of,
     manifest_source_work_refs,
 };

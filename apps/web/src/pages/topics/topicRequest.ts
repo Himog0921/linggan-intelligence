@@ -15,6 +15,7 @@ const friendlyNames: Record<string, string> = {
   structure_source_restricted: "部分来源材料当前不可用，不能重新分配",
   request_identity_conflict: "本次请求身份与已保存内容冲突，请刷新后重新检查",
   topic_map_conflict: "定义或规则版本已变化，请刷新当前版本",
+  topic_map_version_conflict: "图谱来源正在变化，请刷新后查看",
   model_configuration_missing: "所选模型配置尚未取得",
   research_not_found: "该研究运行尚未读取",
   domain_required: "先选择明确研究领域",

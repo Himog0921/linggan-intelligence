@@ -48,6 +48,10 @@ pub(super) fn routes(
         )
         .route("/api/local/topic-research", post(current_research_start))
         .route(
+            "/api/local/topic-research/eligibility",
+            get(current_research_eligibility),
+        )
+        .route(
             "/api/local/topic-research/automation",
             get(research_automation_read).post(research_automation_change),
         )
@@ -170,7 +174,7 @@ async fn summary(
         Ok(db) => db,
         Err(response) => return response,
     };
-    match model.read(db, &query).await {
+    match model.read_page(db, &query).await {
         Ok(snapshot) => match linggan_intelligence::topic_map::read_model::first_page(&snapshot) {
             Ok(value) => Json(value).into_response(),
             Err(_) => error(
@@ -193,7 +197,7 @@ async fn overview(
         Ok(db) => db,
         Err(response) => return response,
     };
-    match model.read(db, &query).await {
+    match model.read_page(db, &query).await {
         Ok(value) => match linggan_intelligence::topic_map::read_model::overview(&value) {
             Ok(value) => Json(value).into_response(),
             Err(_) => error(
@@ -646,6 +650,41 @@ async fn current_research_start(
     crate::local_web::ai_settings::respond(
         linggan_intelligence::ai_foundation::topic_research::start(db, &body).await,
     )
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct ResearchEligibilityQuery {
+    domain_ref: Uuid,
+    work_refs: String,
+}
+
+async fn current_research_eligibility(
+    State(state): State<LocalWebState>,
+    Query(query): Query<ResearchEligibilityQuery>,
+) -> Response {
+    let Some(db) = state.database.database() else {
+        return crate::local_web::ai_settings::unavailable();
+    };
+    let Ok(works) = query
+        .work_refs
+        .split(',')
+        .take(21)
+        .map(str::parse::<Uuid>)
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return error(StatusCode::BAD_REQUEST, "invalid_topic_map_query");
+    };
+    match linggan_intelligence::ai_foundation::topic_research::read_eligibility(
+        db,
+        query.domain_ref,
+        &works,
+    )
+    .await
+    {
+        Ok(eligibility) => Json(json!({"works":eligibility})).into_response(),
+        Err(err) => crate::local_web::ai_settings::respond::<serde_json::Value>(Err(err)),
+    }
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]

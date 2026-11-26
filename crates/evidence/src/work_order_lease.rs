@@ -612,7 +612,7 @@ pub(crate) async fn expire_lapsed_leases_in_transaction(
     )
     .fetch_all(&mut **transaction)
     .await?;
-    requeue_work_orders_after_release(transaction, &expired).await?;
+    settle_work_orders_after_release(transaction, &expired).await?;
     Ok(u64::try_from(expired.len()).unwrap_or(u64::MAX))
 }
 
@@ -628,13 +628,35 @@ pub(crate) async fn expire_lapsed_leases_in_transaction(
 ///
 /// 过期与顶替共用同一条延迟：一个已经死掉的浏览器不该在 claim/expire 的紧循环里反复吃掉
 /// 账号与平台名额。租约本身和它名下的任务都保持为不可变历史，这里只动工单的队列态。
-pub(crate) async fn requeue_work_orders_after_release(
+pub(crate) async fn settle_work_orders_after_release(
     transaction: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     work_order_refs: &[Uuid],
 ) -> Result<(), sqlx::Error> {
     if work_order_refs.is_empty() {
         return Ok(());
     }
+    // Stop locks the same order rows before cancelling queued work. Read the
+    // run intent in a fresh statement after waiting for any concurrent stop.
+    sqlx::query(
+        "SELECT work_order_ref FROM collection_work_order WHERE work_order_ref=ANY($1) \
+         ORDER BY work_order_ref FOR NO KEY UPDATE",
+    )
+    .bind(work_order_refs)
+    .fetch_all(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "UPDATE collection_work_order SET queue_state='cancelled' \
+         WHERE work_order_ref=ANY($1) AND queue_state='leased' \
+           AND NOT EXISTS (SELECT 1 FROM collection_work_order_lease live \
+                           WHERE live.work_order_ref=collection_work_order.work_order_ref \
+                             AND live.released_at IS NULL) \
+           AND EXISTS (SELECT 1 FROM collection_run_order link JOIN collection_run run USING(run_ref) \
+                        WHERE link.work_order_ref=collection_work_order.work_order_ref \
+                          AND (run.control_intent='stopped' OR run.phase='ended'))",
+    )
+    .bind(work_order_refs)
+    .execute(&mut **transaction)
+    .await?;
     sqlx::query(
         "UPDATE collection_work_order SET queue_state='queued',station_ref=NULL, \
              installation_ref=NULL,account_ref=NULL,eligibility_ref=NULL, \
@@ -689,8 +711,33 @@ pub(crate) async fn recover_released_orphaned_work_orders_in_transaction(
     )
     .fetch_all(&mut **transaction)
     .await?;
-    requeue_work_orders_after_release(&mut *transaction, &work_order_refs).await?;
+    settle_work_orders_after_release(transaction, &work_order_refs).await?;
     Ok(u64::try_from(work_order_refs.len()).unwrap_or(u64::MAX))
+}
+
+/// Reconcile queue state without requiring a producer to request more work.
+pub async fn reconcile_collection_work_orders(database: &Database) -> Result<u64, LeaseError> {
+    if !lease_schema_is_ready(database).await? {
+        return Err(LeaseError::SchemaUnavailable);
+    }
+    let mut tx = database.pool().begin().await?;
+    let expired = expire_lapsed_leases_in_transaction(&mut tx).await?;
+    let orphaned = recover_released_orphaned_work_orders_in_transaction(&mut tx).await?;
+    // Loss of a source target also stops its runs. Reconcile old stopped runs
+    // that still have a queued order from before or concurrent with that stop.
+    let stopped_queued = sqlx::query(
+        "WITH stopped AS (
+             SELECT w.work_order_ref
+             FROM collection_work_order w JOIN collection_run_order o USING(work_order_ref)
+             JOIN collection_run r USING(run_ref)
+             WHERE w.queue_state='queued' AND (r.control_intent='stopped' OR r.phase='ended')
+             ORDER BY w.work_order_ref LIMIT 100 FOR NO KEY UPDATE OF w SKIP LOCKED
+         )
+         UPDATE collection_work_order w SET queue_state='cancelled'
+         FROM stopped WHERE w.work_order_ref=stopped.work_order_ref AND w.queue_state='queued'",
+    ).execute(&mut *tx).await?.rows_affected();
+    tx.commit().await?;
+    Ok(expired.saturating_add(orphaned).saturating_add(stopped_queued))
 }
 
 async fn load_subject(

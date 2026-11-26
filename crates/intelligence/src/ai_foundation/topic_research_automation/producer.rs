@@ -10,6 +10,7 @@ pub struct CursorState {
     cores: Option<(Uuid, Uuid)>,
     definitions: Option<(Uuid, Uuid)>,
     comments: Option<(Uuid, Uuid)>,
+    retries: Option<Uuid>,
 }
 pub type Cursor = Option<CursorState>;
 /// Queue a bounded page of existing Core versions; no model or collection call happens here.
@@ -17,6 +18,7 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
     let position = cursor.get_or_insert_with(CursorState::default);
     let repaired = super::definition_repair::tick(db, &mut position.definitions).await?
         + super::comments::tick(db, &mut position.comments).await?;
+    let repaired = repaired + retry_confirmed_invalid_outputs(db, &mut position.retries).await?;
     let rows = sqlx::query(include_str!("candidates.sql"))
         .bind(position.cores.map(|v| v.0))
         .bind(position.cores.map(|v| v.1))
@@ -43,6 +45,37 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
             // One unavailable source/configuration must not drain the shared AI executor.
             Err(FoundationError::Database(error)) => return Err(error.into()),
             Err(_) => continue,
+        }
+    }
+    Ok(queued)
+}
+
+async fn retry_confirmed_invalid_outputs(
+    db: &Database,
+    position: &mut Option<Uuid>,
+) -> Result<usize, FoundationError> {
+    let repairs = sqlx::query(super::RETRY_CANDIDATES)
+        .bind(Option::<Uuid>::None)
+        .bind(crate::topic_map_research_analysis::METHOD_VERSION)
+        .bind(*position)
+        .fetch_all(db.pool())
+        .await?;
+    if repairs.is_empty() {
+        *position = None;
+    }
+    let mut queued = 0;
+    for row in repairs {
+        let window = row.get("window_ref");
+        *position = Some(window);
+        let request = topic_research::Start {
+            command_ref: row.get("command_ref"),
+            domain_ref: row.get("domain_ref"),
+            work_refs: vec![row.get("work_ref")],
+        };
+        match topic_research::retry_automatic(db, &request, row.get("core_ref"), window).await {
+            Ok(_) => queued += 1,
+            Err(FoundationError::Database(error)) => return Err(error.into()),
+            Err(_) => {}
         }
     }
     Ok(queued)

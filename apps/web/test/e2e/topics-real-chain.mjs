@@ -493,7 +493,7 @@ try {
     },
   );
   await step(
-    "research search and pagination retain selection; automation persists visibly without dispatch",
+    "research search and pagination preserve qualification; automation persists visibly without dispatch",
     async () => {
       await go();
       await action("research");
@@ -510,18 +510,24 @@ try {
         assert.ok(box && box.y >= 0 && box.y + box.height <= 900, `${name} must be visible in the desktop viewport`);
       }
       assert.equal(await flow.getByRole("checkbox").count(), 20);
-      await flow.getByRole("checkbox").first().check();
-      const firstTitle = await flow.locator("fieldset label").first().innerText();
+      await flow.getByText(/缺少当前材料版本的分析底稿/).first().waitFor();
+      assert.equal(await flow.getByRole("checkbox").first().isDisabled(), true);
+      const firstTitle = await flow.locator("fieldset label span").first()
+        .evaluate(el => el.firstChild?.textContent?.trim());
+      assert.ok(firstTitle);
       const rowDirection = await flow.locator("fieldset label").first().evaluate(el => getComputedStyle(el).flexDirection);
       assert.equal(rowDirection, "row", "checkbox and title must share a horizontal row");
       await flow.getByRole("button", { name: "下一页", exact: true }).click();
       assert.equal(await flow.getByRole("checkbox").count(), 6);
-      await flow.getByRole("checkbox").first().check();
+      await flow.getByText(/缺少当前材料版本的分析底稿/).first().waitFor();
+      assert.equal(await flow.getByRole("checkbox").first().isDisabled(), true);
       await flow.getByRole("searchbox", { name: "搜索研究作品" }).fill(firstTitle);
       assert.equal(await flow.getByRole("checkbox").count(), 1);
-      assert.equal(await flow.getByRole("checkbox").first().isChecked(), true);
+      await flow.getByText(/缺少当前材料版本的分析底稿/).first().waitFor();
+      assert.equal(await flow.getByRole("checkbox").first().isDisabled(), true);
       await flow.getByRole("searchbox", { name: "搜索研究作品" }).fill("");
-      await flow.getByText("已选 2 / 10", { exact: true }).waitFor();
+      await flow.getByText("已选 0 / 10", { exact: true }).waitFor();
+      assert.equal(await flow.getByRole("button", { name: "开始研究", exact: true }).isDisabled(), true);
       const enabledResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/local/topic-research/automation");
       await toggle.click();
       assert.equal((await enabledResponse).status(), 200);

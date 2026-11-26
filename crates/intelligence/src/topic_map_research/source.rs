@@ -218,18 +218,6 @@ async fn load_scoped_inputs_in(
     Ok(inputs)
 }
 
-async fn attach_cores(
-    db: &Database,
-    domain: Uuid,
-    inputs: &mut [ResearchInput],
-    works: &[Uuid],
-    cutoff: &str,
-) -> Result<(), ResearchError> {
-    let mut tx = db.pool().begin().await?;
-    attach_cores_in(&mut tx, domain, inputs, works, cutoff).await?;
-    tx.commit().await?;
-    Ok(())
-}
 async fn attach_cores_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     domain: Uuid,
@@ -257,8 +245,8 @@ async fn attach_cores_in(
     Ok(())
 }
 
-pub(crate) async fn load_core_inputs_for_works_at(
-    db: &Database,
+pub(crate) async fn load_core_inputs_for_works_at_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     domain: Uuid,
     config: Uuid,
     works: &[Uuid],
@@ -266,13 +254,13 @@ pub(crate) async fn load_core_inputs_for_works_at(
     expected_core: Option<Uuid>,
 ) -> Result<Vec<ResearchInput>, ResearchError> {
     let mut inputs =
-        load_scoped_inputs(db, domain, config, Some(works), Some(cutoff), true).await?;
+        load_scoped_inputs_in(tx, domain, config, Some(works), Some(cutoff), true).await?;
     let missing: Vec<_> = inputs
         .iter()
         .filter(|i| i.coverage.get("availableCores").is_none())
         .map(|i| i.work.work_ref)
         .collect();
-    attach_cores(db, domain, &mut inputs, &missing, cutoff).await?;
+    attach_cores_in(tx, domain, &mut inputs, &missing, cutoff).await?;
     Ok(inputs
         .into_iter()
         .filter_map(|input| super::from_core(&input, expected_core))
@@ -342,7 +330,8 @@ async fn comment_lineage_in(
             .await?;
         for row in rows {
             let request: Uuid = row.get("request_ref");
-            match crate::ai_foundation::comment_understanding::current_source_in(tx, request).await {
+            match crate::ai_foundation::comment_understanding::current_source_in(tx, request).await
+            {
                 Ok(_) => {}
                 Err(crate::ai_foundation::store::FoundationError::AdmissionDenied(_)) => continue,
                 Err(crate::ai_foundation::store::FoundationError::Database(e)) => {

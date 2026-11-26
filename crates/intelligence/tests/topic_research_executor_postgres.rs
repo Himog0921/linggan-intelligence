@@ -125,17 +125,36 @@ async fn exercise(variant: &'static str) {
     for task in research::CURRENT_TASKS {
         versions.push(method::assign(&db, &adapter, task, "V1", None).await);
     }
+    let unavailable = Uuid::new_v4();
+    let mixed_selection = variant == "normal";
     let request = research::Start {
         command_ref: Uuid::new_v4(),
         domain_ref: dossier::DOMAIN,
-        work_refs: vec![work],
+        work_refs: if mixed_selection { vec![work, unavailable] } else { vec![work] },
     };
-    let receipt = research::start(&db, &request).await.unwrap();
-    assert_eq!(receipt.stage_count, 1);
-    assert_eq!(
-        research::start(&db, &request).await.unwrap().run_ref,
-        receipt.run_ref
-    );
+    let automatic_retry = variant == "invalid_output";
+    use linggan_intelligence::ai_foundation::topic_research_automation as automation;
+    let (run_ref, stage_count) = if automatic_retry {
+        let settings = automation::read(&db, dossier::DOMAIN).await.unwrap();
+        automation::change(&db, &automation::Change {
+            command_ref: Uuid::new_v4(), domain_ref: dossier::DOMAIN,
+            expected_revision: settings.revision, enabled: true,
+        }).await.unwrap();
+        assert_eq!(automation::tick(&db, &mut None).await.unwrap(), 1);
+        (sqlx::query_scalar("SELECT run_ref FROM linggan_topic_research_run").fetch_one(db.pool()).await.unwrap(), 1)
+    } else {
+        let receipt = research::start(&db, &request).await.unwrap();
+        assert_eq!(research::start(&db, &request).await.unwrap().run_ref, receipt.run_ref);
+        if mixed_selection {
+            let eligibility = research::read_eligibility(&db, dossier::DOMAIN, &[work, unavailable]).await.unwrap();
+            assert!(eligibility[0].reason.is_none());
+            assert_eq!(eligibility[1].reason.as_deref(), Some("ai_source_unavailable"));
+            assert_eq!(receipt.skipped_works.len(), 1);
+            assert_eq!(receipt.skipped_works[0].work_ref, unavailable);
+        }
+        (receipt.run_ref, receipt.stage_count)
+    };
+    assert_eq!(stage_count, 1);
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_research_result")
             .fetch_one(db.pool())
@@ -155,7 +174,7 @@ async fn exercise(variant: &'static str) {
         adapter,
         drain.clone(),
     ));
-    let run = wait_for(&db, receipt.run_ref, &running).await;
+    let run = wait_for(&db, run_ref, &running).await;
     assert_eq!(run["executionMode"], "single_pass");
     assert_eq!(run["windowCount"], 1);
     assert_eq!(
@@ -194,6 +213,25 @@ async fn exercise(variant: &'static str) {
         .await
         .unwrap();
     assert_eq!(!graph.topics.is_empty(), variant == "normal");
+    if automatic_retry {
+        let retry_ref = tokio::time::timeout(std::time::Duration::from_secs(85), async {
+            loop {
+                let retry: Option<Uuid> = sqlx::query_scalar("SELECT run_ref FROM linggan_topic_research_run WHERE run_ref<>$1")
+                    .bind(run_ref).fetch_optional(db.pool()).await.unwrap();
+                if let Some(retry) = retry {
+                    break retry;
+                }
+                assert!(!running.is_finished(), "AI worker stopped before the retry cycle");
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+        }).await.expect("the worker should create a retry after the backoff");
+        let retry = wait_for(&db, retry_ref, &running).await;
+        assert_eq!(retry["failedStageCount"], 1);
+        tokio::time::sleep(std::time::Duration::from_secs(66)).await;
+        let invocations: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_model_invocation WHERE task_key='topic_research'")
+            .fetch_one(db.pool()).await.unwrap();
+        assert_eq!(invocations, 2, "the invalid output permits a single auditable retry");
+    }
     if let Some(second) = second {
         // A recovered-only L1 must pass the automatic scan, source qualification
         // and frozen-window restore using its original analysis identity.
@@ -237,7 +275,7 @@ async fn exercise(variant: &'static str) {
         );
     }
     let requests = endpoint.requests.lock().unwrap().clone();
-    assert_eq!(requests.len(), if variant == "normal" { 3 } else { 2 });
+    assert_eq!(requests.len(), if variant == "normal" || automatic_retry { 3 } else { 2 });
     // The first run is pinned to V1 even after the setting advances; the later run starts on V2.
     for request in &requests[1..2] {
         let system = wire::text(request, "system");
@@ -247,7 +285,7 @@ async fn exercise(variant: &'static str) {
         );
         assert!(!system.contains("METHOD V2") && !system.contains("SKILL V2"));
     }
-    if variant == "normal" {
+    if variant == "normal" || automatic_retry {
         let system = wire::text(&requests[2], "system");
         assert!(
             system.contains("METHOD V2") && system.contains("SKILL V2"),

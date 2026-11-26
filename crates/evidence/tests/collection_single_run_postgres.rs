@@ -936,6 +936,82 @@ async fn old_plugin_waits_instead_of_silently_sampling_all_public() {
 
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL harness"]
+async fn stopped_and_running_runs_settle_expired_leases_differently() {
+    let db = proof_current_collection_database("single_run_expired_lease_recovery").await;
+    let d = domain(&db).await;
+    let (install, credential) = station(&db).await;
+    for stopped in [true, false] {
+        let created = create_run(
+            &db,
+            &CreateRun {
+                idempotency_key: Uuid::new_v4(),
+                domain_ref: d,
+                source: RunSource::TemporaryKeyword {
+                    query: format!("合成过期租约 {stopped}"),
+                },
+                ranking: None,
+                work_limit: 8,
+                comment_mode: CommentMode::None,
+                comment_target: None,
+            },
+        )
+        .await
+        .unwrap();
+        let run: Uuid = serde_json::from_value(created["runRef"].clone()).unwrap();
+        assert!(matches!(
+            decide_dispatch(&db, &install.to_string(), &credential)
+                .await
+                .unwrap(),
+            DispatchDecision::Dispatch { .. }
+        ));
+        sqlx::query("UPDATE collection_work_order_lease SET issued_at=scope_001_now()-interval '2 seconds', expires_at=scope_001_now()-interval '1 second' WHERE work_order_ref IN (SELECT work_order_ref FROM collection_run_order WHERE run_ref=$1)")
+            .bind(run).execute(db.pool()).await.unwrap();
+        if stopped {
+            let stop = RunCommand {
+                command_ref: Uuid::new_v4(),
+                domain_ref: d,
+                expected_revision: 1,
+                action: "stop".into(),
+            };
+            let (receipt, recovered) = tokio::join!(
+                command_run(&db, run, &stop),
+                linggan_evidence::reconcile_collection_work_orders(&db),
+            );
+            assert_eq!(receipt.unwrap()["controlIntent"], "stopped");
+            assert_eq!(recovered.unwrap(), 1);
+        } else {
+            assert_eq!(
+                linggan_evidence::reconcile_collection_work_orders(&db)
+                    .await
+                    .unwrap(),
+                1
+            );
+        }
+        let (order, reason, backoff): (String, String, bool) = sqlx::query_as(
+            "SELECT w.queue_state,l.release_reason,w.retry_not_before_at>scope_001_now() FROM collection_run_order o JOIN collection_work_order w USING(work_order_ref) JOIN collection_work_order_lease l USING(work_order_ref) WHERE o.run_ref=$1"
+        ).bind(run).fetch_one(db.pool()).await.unwrap();
+        assert_eq!(order, if stopped { "cancelled" } else { "queued" });
+        assert_eq!(reason, "expired");
+        if !stopped {
+            assert!(backoff);
+        } else {
+            // Upgrading can encounter a queued row left by the older stop path.
+            sqlx::query("UPDATE collection_work_order SET queue_state='queued' WHERE work_order_ref IN (SELECT work_order_ref FROM collection_run_order WHERE run_ref=$1)")
+                .bind(run).execute(db.pool()).await.unwrap();
+            assert_eq!(linggan_evidence::reconcile_collection_work_orders(&db).await.unwrap(), 1);
+            assert_eq!(sqlx::query_scalar::<_, String>("SELECT queue_state FROM collection_run_order JOIN collection_work_order USING(work_order_ref) WHERE run_ref=$1").bind(run).fetch_one(db.pool()).await.unwrap(), "cancelled");
+        }
+        assert_eq!(
+            linggan_evidence::reconcile_collection_work_orders(&db)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL harness"]
 async fn stop_and_real_dispatch_compete_without_post_stop_execution() {
     let db = proof_current_collection_database("single_run_stop_dispatch_race").await;
     let d = domain(&db).await;

@@ -601,6 +601,10 @@ export function createTopicOverview(context: TopicOverviewContext) {
   }
   function summary() {
     const activeSnapshot = context.requireSnapshot();
+    const asOf = new Date(activeSnapshot.scope.asOf);
+    const observedThrough = Number.isFinite(asOf.getTime())
+      ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(asOf)
+      : null;
     const selected = context.topic(context.state.topicRef),
       parents = [],
       visited = new Set();
@@ -640,6 +644,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
             {context.state.view === "overview" ? (
               <span className={cls("lgi-tm-scope-subtitle")}>
                 {selected ? "当前主题的已观察材料" : "当前领域的已观察材料"}
+                {observedThrough && <time dateTime={asOf.toISOString()}> · 更新于 {observedThrough}</time>}
               </span>
             ) : null}
             </div>
