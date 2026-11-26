@@ -1,17 +1,24 @@
 use super::FoundationError;
 use crate::ai_foundation::{batch_store::BatchKind, selected_collection_scope, topic_research};
 use linggan_storage_postgres::Database;
+use serde::Serialize;
 use sqlx::Row;
+use std::collections::BTreeMap;
 use uuid::Uuid;
 
 /// A scan position only, not a second task ledger. Restarting safely rescans existing command IDs.
 #[derive(Default)]
 pub struct CursorState {
     collection_run_ref: Option<Uuid>,
-    cores: Option<(Uuid, Uuid)>,
+    cores: BTreeMap<Uuid, CoreCursor>,
     definitions: Option<(Uuid, Uuid)>,
     comments: Option<(Uuid, Uuid)>,
     retries: Option<Uuid>,
+}
+#[derive(Default, Serialize)]
+struct CoreCursor {
+    recent: Option<Uuid>,
+    historical: Option<Uuid>,
 }
 pub type Cursor = Option<CursorState>;
 /// Queue a bounded page of existing Core versions; no model or collection call happens here.
@@ -36,23 +43,17 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
     let repaired =
         repaired + retry_confirmed_invalid_outputs(db, &mut position.retries, &selected).await?;
     let rows = sqlx::query(include_str!("candidates.sql"))
-        .bind(position.cores.map(|v| v.0))
-        .bind(position.cores.map(|v| v.1))
+        .bind(serde_json::json!(&position.cores))
         .bind(crate::topic_map_research_analysis::METHOD_VERSION)
         .bind(selected.domain)
         .bind(selected.works.as_deref())
         .bind(selected.collection_run_ref)
         .fetch_all(db.pool())
         .await?;
-    if rows.is_empty() {
-        position.cores = None;
-        return Ok(repaired);
-    }
     let mut queued = repaired;
     for row in rows {
         let domain: Uuid = row.get("domain_ref");
         let core: Uuid = row.get("request_ref");
-        position.cores = Some((domain, core));
         let request = topic_research::Start {
             command_ref: row.get("command_ref"),
             domain_ref: domain,
@@ -61,9 +62,23 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
         match topic_research::start_with_kind(db, &request, BatchKind::Automatic, Some(core)).await
         {
             Ok(_) => queued += 1,
-            // One unavailable source/configuration must not drain the shared AI executor.
+            // A full queue must not move the scan past work it could not admit.
+            Err(FoundationError::AdmissionDenied(reasons))
+                if reasons
+                    .iter()
+                    .any(|reason| reason == "topic_automatic_queue_full") =>
+            {
+                continue;
+            }
             Err(FoundationError::Database(error)) => return Err(error.into()),
-            Err(_) => continue,
+            Err(_) => {}
+        }
+        // Domains and age groups wrap independently without forgetting another lane's progress.
+        let cursor = position.cores.entry(domain).or_default();
+        if row.get("recent") {
+            cursor.recent = Some(core);
+        } else {
+            cursor.historical = Some(core);
         }
     }
     Ok(queued)

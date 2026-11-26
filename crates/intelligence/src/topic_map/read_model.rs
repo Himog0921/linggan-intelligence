@@ -1,5 +1,5 @@
 //! Disposable, bounded page projections. Authority remains in canonical readers.
-//! Version fingerprints include deletes and every source table in the connected schema.
+//! Version fingerprints include deletes from the canonical readers’ source tables.
 use super::{
     TopicMapError, TopicMapQuery, TopicMapSnapshot,
     read::{QualifiedTopicMap, SourceScope, qualify_in, validate_query},
@@ -304,6 +304,27 @@ fn additive_facts(table: &str) -> bool {
             | "collection_admission_decision"
             | "linggan_content_understanding_request"
             | "linggan_content_understanding_result"
+            | "linggan_content_understanding_offline_recovery"
+            | "linggan_creator_account_research_request"
+            | "linggan_creator_account_research_result"
+            | "linggan_creator_research_request"
+            | "linggan_creator_research_result"
+            | "linggan_historical_image_inventory"
+            | "linggan_material_media_origin"
+            | "linggan_material_media_candidate"
+            | "linggan_material_derived_text"
+            | "linggan_media_blob"
+            | "linggan_media_derivative"
+            | "linggan_media_download_attempt"
+            | "linggan_media_materialization"
+            | "linggan_media_observation"
+            | "linggan_media_processing_job"
+            | "linggan_media_processing_job_event"
+            | "linggan_media_resource_relation"
+            | "linggan_media_slot"
+            | "linggan_topic_classification_run"
+            | "linggan_topic_map_membership"
+            | "linggan_topic_material_member"
     )
 }
 
@@ -345,15 +366,103 @@ const ADDITIVE_SELECTION: &str = "
         ))
     )";
 
-/// MVCC versions plus semantic settings signatures, never asynchronous pg_stat counters.
-/// One READ ONLY snapshot covers all table signatures. No source text is copied here.
-/// Scheduler heartbeat/run/fairness ledgers cannot affect material, definition or
-/// research qualification. The invocation ledger feeds independent live progress,
-/// never this snapshot. The dedicated AI executor's instance, leases, batches,
-/// rounds and command/control ledgers likewise cannot change Topic Map source facts.
-/// Comment intake schedules and selection receipts are also independent of saved research.
-/// Semantic row signatures omit only audited worker fields;
-/// all their business fields (including future columns) remain in the signature.
+/// The shared material, dossier, research and Operations readers supply the page.
+/// Rows in other projections and worker ledgers have no role in its validity.
+const SOURCE_TABLES: &[&str] = &[
+    "observation_domain",
+    "observation_domain_target",
+    "collection_monitor_rule",
+    "collection_monitor_rule_revision",
+    "collection_observation_target",
+    "collection_work_order",
+    "collection_work_order_domain_usage",
+    "collection_work_order_lease",
+    "collection_work_order_lease_task",
+    "collection_acquisition_request",
+    "collection_admission_decision",
+    "plugin_installation",
+    "linggan_ai_task_config",
+    "linggan_creator_account_research_request",
+    "linggan_creator_account_research_result",
+    "linggan_creator_author_override",
+    "linggan_creator_discovery_threshold",
+    "linggan_creator_research_request",
+    "linggan_creator_research_result",
+    "linggan_creator_work_override",
+    "linggan_model_workspace",
+    "linggan_model_config",
+    "linggan_historical_image_inventory",
+    "linggan_material_content",
+    "linggan_material_content_detail",
+    "linggan_material_discovery_finding",
+    "linggan_material_author_profile",
+    "linggan_material_comment",
+    "linggan_material_comment_engagement",
+    "linggan_material_comment_platform_time",
+    "linggan_material_comment_restriction",
+    "linggan_material_comment_first_admission",
+    "linggan_material_domain_usage",
+    "linggan_material_lane_observation",
+    "linggan_material_content_hashtag",
+    "linggan_material_hashtag_projection",
+    "linggan_material_derived_text",
+    "linggan_material_media_candidate",
+    "linggan_material_media_disposition_event",
+    "linggan_material_media_origin",
+    "linggan_material_unit",
+    "linggan_material_reading",
+    "linggan_material_reading_selection",
+    "linggan_media_acquisition_work",
+    "linggan_media_blob",
+    "linggan_media_derivative",
+    "linggan_media_download_attempt",
+    "linggan_media_materialization",
+    "linggan_media_observation",
+    "linggan_media_ocr_retirement",
+    "linggan_media_processing_job",
+    "linggan_media_processing_job_event",
+    "linggan_media_resource_relation",
+    "linggan_media_slot",
+    "linggan_runtime_attempt",
+    "linggan_runtime_task",
+    "linggan_runtime_capture_package",
+    "linggan_runtime_submission_receipt",
+    "linggan_runtime_record_disposition",
+    "linggan_content_understanding_request",
+    "linggan_content_understanding_result",
+    "linggan_content_understanding_offline_recovery",
+    "linggan_comment_research_request",
+    "linggan_comment_research_result",
+    "linggan_ops_account",
+    "linggan_ops_publication",
+    "linggan_ops_publication_material_projection",
+    "linggan_ops_view_report",
+    "linggan_topic_classification_run",
+    "linggan_topic_definition",
+    "linggan_topic_map_alternative",
+    "linggan_topic_map_alternative_evidence",
+    "linggan_topic_map_binding",
+    "linggan_topic_map_breakout",
+    "linggan_topic_map_concept_relation",
+    "linggan_topic_map_concept_rule",
+    "linggan_topic_map_discussion_unit",
+    "linggan_topic_map_membership",
+    "linggan_topic_map_own_creator",
+    "linggan_topic_map_performance_rule",
+    "linggan_topic_map_structure_source",
+    "linggan_topic_map_unit_assignment",
+    "linggan_topic_map_unit_resolution",
+    "linggan_topic_map_viewed",
+    "linggan_topic_map_work_annotation",
+    "linggan_topic_material_member",
+    "linggan_topic_research_dispatch",
+    "linggan_topic_research_result",
+    "linggan_topic_research_run",
+    "linggan_topic_research_window",
+    "linggan_topic_workspace",
+];
+
+/// One read-only MVCC snapshot covers the source signatures without copying text.
 pub async fn source_revision(db: &Database) -> Result<SourceRevision, sqlx::Error> {
     let mut tx = db.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
@@ -376,7 +485,8 @@ async fn source_revision_in(
     sqlx::query("SET LOCAL statement_timeout='5s'")
         .execute(&mut **tx)
         .await?;
-    let tables = sqlx::query("SELECT c.oid::text AS id,c.relname AS relation,format('%I.%I',n.nspname,c.relname) AS name,c.relfilenode::text AS file FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relkind='r' AND c.relname NOT IN ('collection_scheduler_run','collection_scheduler_run_step','collection_scheduler_heartbeat','collection_dispatch_lane_fairness','linggan_model_invocation','linggan_ai_failure_code','linggan_ai_executor_instance','linggan_ai_executor_current','linggan_ai_execution_attempt','linggan_ai_late_usage_receipt','linggan_ai_batch','linggan_ai_batch_control','linggan_ai_batch_item','linggan_ai_batch_item_control','linggan_ai_trial_comparison','linggan_ai_round','linggan_ai_task_round_state','linggan_ai_command','linggan_ai_control','linggan_ai_control_event','linggan_comment_research_selection','linggan_comment_research_selection_target') ORDER BY c.oid")
+    let tables = sqlx::query("SELECT c.oid::text AS id,c.relname AS relation,format('%I.%I',n.nspname,c.relname) AS name,c.relfilenode::text AS file FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() AND c.relkind='r' AND c.relname::text=ANY($1)")
+        .bind(SOURCE_TABLES)
         .fetch_all(&mut **tx).await?;
     let mut parts = Vec::new();
     let mut names = BTreeMap::new();
@@ -385,17 +495,6 @@ async fn source_revision_in(
         let file: String = table.get("file");
         let name: String = table.get("name");
         let relation: String = table.get("relation");
-        if matches!(
-            relation.as_str(),
-            "collection_run"
-                | "collection_run_order"
-                | "collection_run_work"
-                | "collection_run_package"
-                | "collection_run_command"
-        ) {
-            // One-off run progress is read independently of the Topic Map.
-            continue;
-        }
         names.insert(id.clone(), relation.clone());
         // Worker heartbeat and discovery scan position change every patrol tick,
         // but are not inputs to material or Topic Map source qualification.
@@ -405,9 +504,6 @@ async fn source_revision_in(
             "collection_observation_target" => {
                 Some("(to_jsonb(r)-'last_scheduler_considered_at')::text")
             }
-            "execution_station" => Some(
-                "(to_jsonb(r)-'last_dispatch_answer_at'-'last_dispatch_answer_code'-'last_dispatch_answer_reason')::text",
-            ),
             "plugin_installation" => Some("(to_jsonb(r)-'last_seen_at'-'selector_health')::text"),
             "collection_work_order" => Some(
                 "(to_jsonb(r)-'queue_state'-'station_ref'-'installation_ref'-'account_ref'-'eligibility_ref'-'retry_not_before_at')::text",
@@ -418,6 +514,12 @@ async fn source_revision_in(
             "collection_work_order_lease_task" => Some(
                 "(to_jsonb(r)-'execution_state'-'claimed_at'-'claimed_by_installation_ref'-'completed_at')::text",
             ),
+            "linggan_media_acquisition_work" => Some(
+                "jsonb_build_array(r.observation_ref,r.component_kind,(r.state='completed'))::text",
+            ),
+            "linggan_material_media_disposition_event" => Some(
+                "jsonb_build_array(r.xmin::text,r.ctid::text,(r.recorded_at<=scope_001_now() AND r.effective_at<=scope_001_now()))::text",
+            ),
             _ => None,
         };
         let automatic_reading = match relation.as_str() {
@@ -426,7 +528,9 @@ async fn source_revision_in(
             "linggan_material_reading_selection" => Some(ADDITIVE_SELECTION),
             _ => None,
         };
-        let include_rows = additive_facts(&relation)
+        let completed_component = relation == "linggan_media_acquisition_work";
+        let include_rows = completed_component
+            || additive_facts(&relation)
             || automatic_reading.is_some()
             || matches!(
                 relation.as_str(),
@@ -436,7 +540,13 @@ async fn source_revision_in(
             );
         let filter = automatic_reading
             .map(|value| format!(" FILTER (WHERE {value})"))
-            .unwrap_or_default();
+            .unwrap_or_else(|| {
+                if completed_component {
+                    " FILTER (WHERE r.state='completed')".into()
+                } else {
+                    String::new()
+                }
+            });
         let authority = automatic_reading.map(|value| format!(
             "md5(COALESCE(string_agg(xmin::text||':'||ctid::text,',' ORDER BY ctid) FILTER (WHERE NOT ({value})),''))"
         )).unwrap_or_else(|| "NULL::text".into());

@@ -1229,7 +1229,7 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
             .display_name,
         "合成更新后的定义"
     );
-    // A new relation is automatically covered; same-count replacement and DELETE are distinct.
+    // DDL remains part of the schema identity. Unrelated projection DML does not invalidate.
     let before = source_revision(&db).await.unwrap();
     sqlx::query("CREATE TABLE topic_map_revision_probe(value integer)")
         .execute(db.pool())
@@ -1242,18 +1242,18 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
         .await
         .unwrap();
     let inserted = source_revision(&db).await.unwrap();
-    assert_ne!(created, inserted);
+    assert_eq!(created, inserted);
     sqlx::query("UPDATE topic_map_revision_probe SET value=2")
         .execute(db.pool())
         .await
         .unwrap();
     let updated = source_revision(&db).await.unwrap();
-    assert_ne!(inserted, updated);
+    assert_eq!(inserted, updated);
     sqlx::query("DELETE FROM topic_map_revision_probe")
         .execute(db.pool())
         .await
         .unwrap();
-    assert_ne!(updated, source_revision(&db).await.unwrap());
+    assert_eq!(updated, source_revision(&db).await.unwrap());
     // New accepted material invalidates full statistics and crosses the first-page boundary.
     let added = work(&db, 13, "xhs", None, 0).await;
     let updated = model.read(&db, &query).await.unwrap();

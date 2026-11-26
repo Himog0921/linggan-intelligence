@@ -348,8 +348,24 @@ async fn thirty_first_comment_and_real_creator_parent_reopen_then_restrict_toget
         assert_eq!(restored.text, expected.text);
         assert_eq!(restored.context_only, expected.context_only);
     }
+    let page = std::sync::Arc::new(topic_map::read_model::TopicMapReadModel::default());
+    let query = topic_map::TopicMapQuery { domain_ref: Some(D), ..Default::default() };
+    let before_withdrawal = page.read_page(&db, &query).await.unwrap();
+    let strict = topic_map::read_model::TopicMapReadModel::default();
+    let strict_before = strict.read(&db, &query).await.unwrap();
+    let alternative_state = |snapshot: &topic_map::TopicMapSnapshot| {
+        snapshot.alternatives.iter()
+            .find(|item| item["alternativeRef"] == json!(saved))
+            .unwrap()["sourceState"].as_str().unwrap().to_owned()
+    };
+    assert_ne!(alternative_state(&before_withdrawal), "source_unavailable");
+    assert_ne!(alternative_state(&strict_before), "source_unavailable");
     sqlx::query("INSERT INTO linggan_material_comment_restriction(content_public_ref,comment_external_id,reason) VALUES($1,'creator-parent','synthetic parent withdrawal')")
         .bind(work).execute(db.pool()).await.unwrap();
+    // Check both entry points against entries primed before the withdrawal.
+    let after_withdrawal = page.read_page(&db, &query).await.unwrap();
+    assert_eq!(alternative_state(&after_withdrawal), "source_unavailable");
+    assert_eq!(alternative_state(&strict.read(&db, &query).await.unwrap()), "source_unavailable");
     let hidden = topic_map::read_saved_alternative(&db, D, saved)
         .await
         .unwrap();

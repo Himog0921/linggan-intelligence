@@ -32,13 +32,16 @@ pub(super) async fn prepare(
     };
     let domain =
         serde_json::from_value(input.domain["domainRef"].clone()).map_err(|_| invalid())?;
-    let catalog = crate::topic_map_core::catalog(db, domain)
+    let mut catalog = crate::topic_map_core::catalog(db, domain)
         .await
         .map_err(|e| match e {
             crate::model_settings::ModelError::Database(e) => FoundationError::Database(e),
             _ => invalid(),
         })?;
-    let candidates = catalog.as_array().ok_or_else(invalid)?;
+    let candidates = catalog.as_array_mut().ok_or_else(invalid)?;
+    for candidate in candidates.iter_mut() {
+        compact_support_examples(candidate);
+    }
     let mut schema = output_schema(mode);
     schema["properties"]["contract"]["enum"] = json!([CONTRACT]);
     if mode == "author" && input.comment_study.as_array().is_some_and(Vec::is_empty) {
@@ -90,7 +93,7 @@ fn input_payload(
             "fragmentIndex":index,"fragmentId":f.fragment_id,"field":f.field,
             "sourceRef":f.source_ref,"sourceVersion":f.source_version,"speaker":f.speaker,
             "citationSpeakerRole":analysis::fragment_role(f),
-            "content":f.model_content(),"issues":f.issues
+            "content":fragment_content(f),"issues":f.issues
         })).collect::<Vec<_>>());
         payload["citationSpeakerRule"] = json!(
             "判断讨论的 speakerRole 时读取所引片段的 citationSpeakerRole。只有全部引用均为 author 才标 author。只有全部引用为 quoted 才标 quoted。混合、未知或归属不明用 unknown。作者作品中的引述或图片模型观察不自动成为作者原话。字段 sp 为 unknown 时，陈述用“该材料讨论”等来源中立的表达。机制、疗效或因果判断要保留为来源主张及其不确定性。若 commentStudy 为空，projection.rm 必须是空数组。"
@@ -107,6 +110,42 @@ fn input_payload(
         payload["units"] = json!(units.iter().enumerate().map(|(index,(_,discussion))|json!({"discussionIndex":index,"discussion":discussion})).collect::<Vec<_>>());
     }
     payload
+}
+
+/// Keep full topic coverage and exact source quotes, with each example limited
+/// to the boundary statement and its own citations. Core units and raw anchors
+/// are retained by the original research window, where they can be qualified.
+fn compact_support_examples(candidate: &mut Value) {
+    let Some(examples) = candidate
+        .get_mut("supportExamples")
+        .and_then(Value::as_array_mut)
+    else {
+        return;
+    };
+    for example in examples {
+        if let Some(example) = example.as_object_mut() {
+            example.remove("sourceSnapshot");
+            if let Some(evidence) = example.get_mut("evidence").and_then(Value::as_array_mut) {
+                for citation in evidence.iter_mut().filter_map(Value::as_object_mut) {
+                    citation.remove("anchor");
+                    citation.remove("knowledgeUnits");
+                }
+            }
+        }
+    }
+}
+
+fn fragment_content(fragment: &linggan_evidence::creator_discovery::Fragment) -> Value {
+    let mut content = fragment.model_content();
+    if matches!(
+        fragment.field.as_str(),
+        "core_text_evidence" | "core_image_evidence"
+    ) && let Some(content) = content.as_object_mut()
+    {
+        // The author packet already holds these same units in contentCore.
+        content.remove("knowledgeUnits");
+    }
+    content
 }
 
 #[derive(Deserialize)]
