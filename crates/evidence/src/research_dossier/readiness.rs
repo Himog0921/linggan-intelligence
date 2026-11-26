@@ -164,34 +164,26 @@ fn video_transcript_gap(
     }
     let asr = &video["processing"]["asr"];
     let audio = &video["processing"]["audio_extract"];
-    if [asr, audio].iter().any(|job| {
-        job["reason"] != "provider_not_enabled"
-            && (matches!(
-                job["queueState"].as_str(),
-                Some("pending" | "leased" | "retry_wait")
-            ) || (job["queueState"].is_null()
-                && (job["state"] == "running"
-                    || (job["state"] == "pending"
-                        && job["reason"] == "queued_for_local_processor"))))
-    }) {
-        return (
-            "video_transcript_pending",
-            Preparing,
-            "音频提取或转录任务正在队列中，生成有效转录后会自动重新检查。",
-        );
-    }
-    if (asr["state"] == "completed" && cleaned_empty)
-        || [asr, audio].iter().any(|job| {
-            matches!(
-                job["reason"].as_str(),
-                Some("no_speech_observed" | "no_audio_stream_observed")
-            )
-        })
+    if !processing_is_pending(asr)
+        && ((asr["state"] == "completed" && cleaned_empty)
+            || [asr, audio].iter().any(|job| {
+                matches!(
+                    job["reason"].as_str(),
+                    Some("no_speech_observed" | "no_audio_stream_observed")
+                )
+            }))
     {
         return (
             "video_transcript_unavailable",
             Blocked,
             "无可用口播，已结案",
+        );
+    }
+    if [asr, audio].into_iter().any(processing_is_pending) {
+        return (
+            "video_transcript_pending",
+            Preparing,
+            "音频提取或转录任务正在队列中，生成有效转录后会自动重新检查。",
         );
     }
     match video["download"]["state"].as_str() {
@@ -214,6 +206,17 @@ fn video_transcript_gap(
             Blocked,
             "视频口播尚未取得有效转录，完成转录后才能进行内容理解。",
         ),
+    }
+}
+
+fn processing_is_pending(job: &Value) -> bool {
+    match job["queueState"].as_str() {
+        Some("pending" | "leased" | "retry_wait") => true,
+        None => {
+            job["state"] == "running"
+                || (job["state"] == "pending" && job["reason"] == "queued_for_local_processor")
+        }
+        _ => false,
     }
 }
 
@@ -296,6 +299,9 @@ mod tests {
             .code
         };
         assert_eq!(gap(&video, &cleaned), "video_transcript_unavailable");
+        video["processing"]["audio_extract"] = json!({"state":"pending","queueState":"pending"});
+        assert_eq!(gap(&video, &cleaned), "video_transcript_unavailable");
+        video["processing"]["audio_extract"] = Value::Null;
         let mut unrelated = cleaned.clone();
         unrelated["slotKey"] = json!("video:2");
         assert_eq!(gap(&video, &unrelated), "video_transcript_required");
@@ -306,6 +312,8 @@ mod tests {
         assert_eq!(gap(&video, &cleaned), "video_transcript_pending");
         video["processing"]["asr"] = json!({"state":"pending","reason":"provider_not_enabled"});
         assert_eq!(gap(&video, &cleaned), "video_transcript_required");
+        video["processing"]["asr"]["queueState"] = json!("pending");
+        assert_eq!(gap(&video, &cleaned), "video_transcript_pending");
         video["processing"]["asr"] = json!({"state":"failed","queueState":"terminal"});
         assert_eq!(gap(&video, &cleaned), "video_transcript_required");
         video["sourceState"] = json!("restricted");
