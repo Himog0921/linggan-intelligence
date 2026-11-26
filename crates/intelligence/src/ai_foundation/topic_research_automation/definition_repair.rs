@@ -150,6 +150,7 @@ async fn enqueue(
     }
     command
         .finish(Receipt {
+            skipped_works: Vec::new(),
             run_ref: run,
             window_count: 1,
             stage_count: 1,

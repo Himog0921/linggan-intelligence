@@ -556,7 +556,10 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
         return await load();
       }
       if (epoch === fetchEpoch) {
-        if (materialsLoading) materialsError = error.message;
+        if ([403, 409].includes(errorStatus(caughtError) ?? 0)) {
+          snapshot = null;
+          readError = error.message;
+        } else if (materialsLoading) materialsError = error.message;
         else readError = error.message;
         materialsLoading = false;
       }

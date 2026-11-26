@@ -11,16 +11,30 @@ pub async fn run(db: Database, mut stop: watch::Receiver<bool>) -> Result<(), &'
     let mut tick = tokio::time::interval(Duration::from_secs(10));
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut last_error = None;
+    let mut last_recovery_error = None;
     let mut last_unparseable_count = None;
     loop {
         if *stop.borrow() {
-            return last_error.map_or(Ok(()), Err);
+            return last_error.or(last_recovery_error).map_or(Ok(()), Err);
         }
         tokio::select! {
-            changed=stop.changed()=>{if changed.is_err() {return last_error.map_or(Ok(()),Err);}},
+            changed=stop.changed()=>{if changed.is_err() {return last_error.or(last_recovery_error).map_or(Ok(()),Err);}},
             _=tick.tick()=>{
-                let outcome=tokio::time::timeout(ATTEMPT_LIMIT,
-                    linggan_intelligence::comment_study_catalog::maintain_comment_catalog(&db)).await;
+                let (outcome, recovery) = tokio::join!(
+                    tokio::time::timeout(ATTEMPT_LIMIT,
+                        linggan_intelligence::comment_study_catalog::maintain_comment_catalog(&db)),
+                    tokio::time::timeout(ATTEMPT_LIMIT,
+                        linggan_evidence::reconcile_collection_work_orders(&db)),
+                );
+                let recovery_error = match recovery {
+                    Ok(Ok(_)) => None,
+                    Ok(Err(_)) => Some("collection_recovery_unavailable"),
+                    Err(_) => Some("collection_recovery_timed_out"),
+                };
+                if recovery_error != last_recovery_error {
+                    eprintln!("linggan worker: {}", recovery_error.unwrap_or("collection_recovery_resumed"));
+                }
+                last_recovery_error = recovery_error;
                 let error=match outcome {
                     Ok(Ok(Some(report)))=>{
                         let count=report.unparseable_observation_count;

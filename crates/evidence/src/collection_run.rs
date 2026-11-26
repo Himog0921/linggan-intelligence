@@ -471,6 +471,7 @@ pub async fn command_run(db: &Database, run: Uuid, input: &RunCommand) -> Result
     sqlx::query("UPDATE collection_run SET control_intent=$2,revision=revision+1,updated_at=scope_001_now(),ended_at=CASE WHEN $2='stopped' THEN scope_001_now() ELSE ended_at END WHERE run_ref=$1").bind(run).bind(intent).execute(&mut *tx).await?;
     // Lock order matches dispatch: run first, then order. Obtained packages are never deleted.
     if intent == "stopped" {
+        sqlx::query("SELECT w.work_order_ref FROM collection_work_order w JOIN collection_run_order o USING(work_order_ref) WHERE o.run_ref=$1 AND w.queue_state IN ('queued','leased') ORDER BY w.work_order_ref FOR NO KEY UPDATE OF w").bind(run).fetch_all(&mut *tx).await?;
         sqlx::query("UPDATE collection_work_order SET queue_state='cancelled' WHERE work_order_ref IN(SELECT work_order_ref FROM collection_run_order WHERE run_ref=$1) AND queue_state='queued'").bind(run).execute(&mut *tx).await?;
     }
     let receipt = json!({"runRef":run,"commandRef":input.command_ref,"controlIntent":intent,"revision":input.expected_revision+1});

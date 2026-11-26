@@ -6,13 +6,22 @@ vi.mock('./TopicAutomation', () => ({ TopicAutomation: ({ onEnabledChange }: { o
 const response = (pending: number, ref = 'run') => ({ runs: [{ runRef: ref, executionMode: 'single_pass', pendingStageCount: pending, failedStageCount: 0, windowCount: 1, stages: [] }] });
 const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'Content-Type': 'application/json' } });
 const works = [{ workRef: 'work', title: '作品' }];
+function stubFetch(mock: (path: string, options: RequestInit) => unknown, reasons: Record<string, string> = {}) {
+  vi.stubGlobal('fetch', (path: string, options: RequestInit) => {
+    const url = new URL(path, 'http://localhost');
+    if (url.pathname !== '/api/local/topic-research/eligibility') return mock(path, options);
+    const refs = url.searchParams.get('workRefs')?.split(',') ?? [];
+    return Promise.resolve(json({ works: refs.map(workRef => ({ workRef, reason: reasons[workRef] ?? null })) }));
+  });
+}
+
 beforeEach(() => { vi.useFakeTimers(); });
 afterEach(() => { cleanup(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 async function settle() { await act(async () => { await vi.advanceTimersByTimeAsync(0); }); }
 it('polls running work, refreshes the map once at completion, then stops polling', async () => {
   const done = vi.fn();
   const fetch = vi.fn().mockResolvedValueOnce(json(response(1))).mockImplementation(async () => json(response(0)));
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   render(<MemoryRouter><TopicResearchFlow domain="one" works={works} onCompleted={done} /></MemoryRouter>);
   await settle();
   expect(screen.getByText(/研究进行中/)).toBeInTheDocument();
@@ -28,7 +37,7 @@ it('reads progress immediately after submitting and cancelling', async () => {
     if (options.method === 'POST') { submitted = true; return json({ runRef: 'run' }); }
     return json(submitted ? response(1) : { runs: [] });
   });
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   render(<MemoryRouter><TopicResearchFlow domain="one" works={works} /></MemoryRouter>);
   await settle();
   fireEvent.click(screen.getByRole('checkbox'));
@@ -43,7 +52,7 @@ it('reads progress immediately after submitting and cancelling', async () => {
 it('resets selection on domain change and ignores a late previous-domain response', async () => {
   let finish!: (value: Response) => void;
   const fetch = vi.fn().mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve; })).mockResolvedValue(json({ runs: [] }));
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   const page = render(<MemoryRouter><TopicResearchFlow domain="one" works={works} /></MemoryRouter>);
   await settle();
   fireEvent.click(screen.getByRole('checkbox'));
@@ -58,7 +67,7 @@ it('resets selection on domain change and ignores a late previous-domain respons
 it('refreshes the map when a newly submitted run has already completed at the first read', async () => {
   const done = vi.fn();
   let submitted = false;
-  vi.stubGlobal('fetch', vi.fn(async (_path: string, options: RequestInit) => {
+  stubFetch(vi.fn(async (_path: string, options: RequestInit) => {
     if (options.method === 'POST') { submitted = true; return json({ runRef: 'run' }); }
     return json(submitted ? response(0) : { runs: [] });
   }));
@@ -75,7 +84,7 @@ it('refreshes once after reopening a run that completed while closed, without a 
   const done = vi.fn();
   let pending = 1;
   const fetch = vi.fn(async () => json(response(pending)));
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   const page = render(<MemoryRouter><TopicResearchFlow domain="one" works={works} onCompleted={done} /></MemoryRouter>);
   await settle();
   expect(done).not.toHaveBeenCalled();
@@ -96,7 +105,7 @@ it('reuses the frozen request after closing during a network-unknown submission'
   const requestState = { get: () => current, set: (value: ResearchSubmission | null) => { current = value; } };
   let reject!: (error: Error) => void;
   const posts: string[] = [];
-  vi.stubGlobal('fetch', vi.fn(async (_path: string, options: RequestInit) => {
+  stubFetch(vi.fn(async (_path: string, options: RequestInit) => {
     if (options.method === 'POST') {
       posts.push(String(options.body));
       if (posts.length === 1) return new Promise<Response>((_resolve, fail) => { reject = fail; });
@@ -125,7 +134,7 @@ it('follows an in-flight submission after reopening without issuing another POST
   const requestState = { get: () => current, set: (value: ResearchSubmission | null) => { current = value; } };
   let finish!: (value: Response) => void;
   let posts = 0;
-  vi.stubGlobal('fetch', vi.fn(async (_path: string, options: RequestInit) => {
+  stubFetch(vi.fn(async (_path: string, options: RequestInit) => {
     if (options.method === 'POST') {
       posts++;
       return new Promise<Response>(resolve => { finish = resolve; });
@@ -148,7 +157,7 @@ it('follows an in-flight submission after reopening without issuing another POST
 
 it('keeps selections across search and pages and submits only those selections', async () => {
   const posts: { workRefs: string[] }[] = [];
-  vi.stubGlobal('fetch', vi.fn(async (_path: string, options: RequestInit) => {
+  stubFetch(vi.fn(async (_path: string, options: RequestInit) => {
     if (options.method === 'POST') { posts.push(JSON.parse(String(options.body))); return json({ runRef: 'run' }); }
     return json({ runs: [] });
   }));
@@ -158,19 +167,41 @@ it('keeps selections across search and pages and submits only those selections',
   expect(screen.getAllByRole('checkbox')).toHaveLength(20);
   fireEvent.click(screen.getByRole('checkbox', { name: '作品0' }));
   fireEvent.click(screen.getByRole('button', { name: '下一页' }));
+  await settle();
   fireEvent.click(screen.getByRole('checkbox', { name: '作品20' }));
   fireEvent.change(screen.getByRole('searchbox'), { target: { value: '作品40' } });
+  await settle();
   fireEvent.click(screen.getByRole('checkbox', { name: '作品40' }));
   fireEvent.click(screen.getByRole('button', { name: '开始研究' }));
   await settle();
   expect(posts[0]?.workRefs).toEqual(['work-0', 'work-20', 'work-40']);
 });
 
+it('disables blocked works and preserves the receipt when one selected work loses eligibility', async () => {
+  stubFetch(async (_path, options) => options.method === 'POST'
+    ? json({ runRef: 'run', skippedWorks: [{ workRef: 'changed', reason: 'content_understanding_required' }] })
+    : json({ runs: [] }), { blocked: 'video_transcript_required' });
+  render(<MemoryRouter><TopicResearchFlow domain="one" works={[
+    { workRef: 'good', title: '可用作品' },
+    { workRef: 'changed', title: '变化前可用' },
+    { workRef: 'blocked', title: '缺转录作品' },
+  ]} /></MemoryRouter>);
+  await settle();
+  expect(screen.getByRole('checkbox', { name: /缺转录作品.*等待视频转录/ })).toBeDisabled();
+  fireEvent.click(screen.getByRole('checkbox', { name: '可用作品' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: '变化前可用' }));
+  fireEvent.click(screen.getByRole('button', { name: '开始研究' }));
+  await settle();
+  expect(screen.getByText(/跳过 1 篇.*缺少当前材料版本/)).toBeVisible();
+  expect(screen.getByRole('checkbox', { name: '可用作品' })).toBeChecked();
+  expect(screen.getByRole('checkbox', { name: '变化前可用' })).not.toBeChecked();
+});
+
 it('discovers automatically queued runs after an initially empty response', async () => {
   const done = vi.fn();
   const fetch = vi.fn().mockResolvedValueOnce(json({ runs: [] }))
     .mockResolvedValueOnce(json(response(1))).mockResolvedValue(json(response(0)));
-  vi.stubGlobal('fetch', fetch);
+  stubFetch(fetch);
   render(<MemoryRouter><TopicResearchFlow domain="one" works={works} onCompleted={done} /></MemoryRouter>);
   await settle();
   fireEvent.click(screen.getByRole('button', { name: '启用自动归并测试' }));
@@ -182,7 +213,7 @@ it('discovers automatically queued runs after an initially empty response', asyn
 
 it('refreshes for a new automatic run completed between two reads only once', async () => {
   const done = vi.fn();
-  vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(json({ runs: [] })).mockResolvedValue(json(response(0, 'fast-auto'))));
+  stubFetch(vi.fn().mockResolvedValueOnce(json({ runs: [] })).mockResolvedValue(json(response(0, 'fast-auto'))));
   render(<MemoryRouter><TopicResearchFlow domain="one" works={works} onCompleted={done} /></MemoryRouter>);
   await settle();
   fireEvent.click(screen.getByRole('button', { name: '启用自动归并测试' }));
@@ -195,7 +226,7 @@ it('refreshes for a new automatic run completed between two reads only once', as
 it('uses the explicit execution mode while preserving legacy phase labels', async () => {
   const single = { ...response(0).runs[0]!, stages: [{ windowRef: 'w1', stageNumber: 0, state: 'succeeded' }] };
   const legacy = { ...response(0, 'legacy').runs[0]!, executionMode: 'legacy_four_stage', stages: [{ windowRef: 'w2', stageNumber: 0, state: 'succeeded' }, { windowRef: 'w2', stageNumber: 3, state: 'succeeded' }] };
-  vi.stubGlobal('fetch', vi.fn(async () => json({ runs: [single, legacy] })));
+  stubFetch(vi.fn(async () => json({ runs: [single, legacy] })));
   render(<MemoryRouter><TopicResearchFlow domain="one" works={works} /></MemoryRouter>);
   await settle();
   expect(screen.getByText(/主题归并：已完成/)).toBeVisible();

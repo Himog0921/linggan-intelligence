@@ -122,6 +122,9 @@ pub(super) async fn read_topic_map_in(
                 core_states.entry(work).or_insert(state);
             }
             for resource in resources {
+                if resource.summary.restriction_state == "WITHDRAWN_OR_RESTRICTED" {
+                    continue;
+                }
                 let source_manifest = canonical_source_manifest(&resource);
                 let reference = resource.identity.public_ref;
                 if !seen.insert(reference) {
@@ -140,8 +143,7 @@ pub(super) async fn read_topic_map_in(
                     })
                 });
                 let mut annotation = annotations.get(&reference).cloned();
-                let readable = resource.summary.restriction_state != "WITHDRAWN_OR_RESTRICTED"
-                    && (resource.evidence_fragment.is_some() || resource.display.title.is_some());
+                let readable = resource.evidence_fragment.is_some() || resource.display.title.is_some();
                 if !readable {
                     annotation = None;
                 }
@@ -476,7 +478,7 @@ pub(super) async fn read_topic_map_in(
         .collect();
     Ok(TopicMapSnapshot {
         domains,
-        scope: json!({"operations":operations,"progress":progress,"domainRef":q.domain_ref,"topicRef":q.topic_ref,"platform":q.platform,"windowDays":q.window_days,"referenceWindowDays":reference_days,"asOf":as_of,"totalWorkCount":work_count,"loadedWorkCount":scoped_works.len(),"canonicalWorkCount":refs.len(),"readableWorkCount":readable,"unclassifiedWorkCount":pending,"readLimit":null,"ownIdentityState":if !operation_facts.is_empty() || own_creators.iter().any(|v|v["active"]==true){"partial_observed"}else{"unknown"},"includeReference":q.include_reference,"ownHistoricalWorkRefs":history_own_refs,"ownHistoryPublishedCount":history_own_published,"ownHistoryPublicationUnknownCount":history_own_unknown,"recentReferenceWorkRefs":recent}),
+        scope: json!({"operations":operations,"progress":progress,"domainRef":q.domain_ref,"topicRef":q.topic_ref,"platform":q.platform,"windowDays":q.window_days,"referenceWindowDays":reference_days,"asOf":as_of,"totalWorkCount":work_count,"loadedWorkCount":scoped_works.len(),"canonicalWorkCount":seen.len(),"readableWorkCount":readable,"unclassifiedWorkCount":pending,"readLimit":null,"ownIdentityState":if !operation_facts.is_empty() || own_creators.iter().any(|v|v["active"]==true){"partial_observed"}else{"unknown"},"includeReference":q.include_reference,"ownHistoricalWorkRefs":history_own_refs,"ownHistoryPublishedCount":history_own_published,"ownHistoryPublicationUnknownCount":history_own_unknown,"recentReferenceWorkRefs":recent}),
         topics,
         works: scoped_works,
         statistics: stats,

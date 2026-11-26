@@ -9,6 +9,8 @@ mod definition_repair;
 pub use comments::{Retry as RetryCommentAssignment, retry as retry_comment_assignment};
 mod producer;
 pub use producer::tick;
+pub(super) const RETRY_CANDIDATES: &str =
+    include_str!("topic_research_automation/retry_candidates.sql");
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

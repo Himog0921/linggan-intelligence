@@ -42,6 +42,10 @@
 
 图谱、人工结构操作和已保存备选仍使用现有 topic-map 接口；每次读取/保存/导出重新检查来源与定义资格。主题采集配置与研究执行分开，`linggan_topic_collection_policy` 只管既有采集意图，不保存模型配置或研究状态。旧 `/topic-map/research` 读写入口返回退役。
 
+主题研究作品选择、手动提交和 Core 自动入队共用来源资格判断。提交时重新核对材料，只为通过的作品创建窗口。部分作品资格变化时，回执逐篇说明跳过原因；全部不合格时拒绝提交。同一 Core 和方法的自动单阶段主题任务只对已确认的 `ai_output_invalid` 退避重试一次，保留原调用、失败回执和新尝试；送达未知继续待核对。
+
+图谱首页可在后台刷新期间读取上一份仍合格的完整快照。普通新增采集事实可延迟到下一份快照展示。来源撤回、旧记录被改变、权限或定义失效时，旧快照即时退出可读范围。证据详情继续通过当前来源资格检查。页面显示快照时间。
+
 ## 创作者研究
 
 单篇 `GET /api/local/creator-research/preview`、`POST /api/local/creator-research`、`GET /api/local/creator-research/{requestRef}` 使用当前合格标准底稿，独立任务 `creator_research`。

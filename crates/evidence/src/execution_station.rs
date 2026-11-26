@@ -676,7 +676,7 @@ async fn teardown_installation(
     .bind(installation_ref)
     .fetch_all(&mut **transaction)
     .await?;
-    crate::work_order_lease::requeue_work_orders_after_release(transaction, &released).await?;
+    crate::work_order_lease::settle_work_orders_after_release(transaction, &released).await?;
     Ok(())
 }
 

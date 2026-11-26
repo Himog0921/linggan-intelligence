@@ -33,7 +33,19 @@ pub struct Receipt {
     pub run_ref: Uuid,
     pub window_count: usize,
     pub stage_count: usize,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped_works: Vec<WorkEligibility>,
 }
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkEligibility {
+    pub work_ref: Uuid,
+    pub reason: Option<String>,
+}
+
+mod eligibility;
+pub use eligibility::read as read_eligibility;
 fn source_error(error: source::ResearchError) -> FoundationError {
     match error {
         source::ResearchError::Database(e) => FoundationError::Database(e),
@@ -49,6 +61,32 @@ pub(crate) async fn start_with_kind(
     request: &Start,
     kind: BatchKind,
     expected_core: Option<Uuid>,
+) -> Result<Receipt, FoundationError> {
+    start_inner(db, request, kind, expected_core, None).await
+}
+
+pub(super) async fn retry_automatic(
+    db: &Database,
+    request: &Start,
+    core: Uuid,
+    previous_window: Uuid,
+) -> Result<Receipt, FoundationError> {
+    start_inner(
+        db,
+        request,
+        BatchKind::Automatic,
+        Some(core),
+        Some(previous_window),
+    )
+    .await
+}
+
+async fn start_inner(
+    db: &Database,
+    request: &Start,
+    kind: BatchKind,
+    expected_core: Option<Uuid>,
+    previous_window: Option<Uuid>,
 ) -> Result<Receipt, FoundationError> {
     if !matches!(kind, BatchKind::Interactive | BatchKind::Automatic)
         || (kind == BatchKind::Automatic
@@ -96,22 +134,52 @@ pub(crate) async fn start_with_kind(
         configurations.push(lock_setting(&mut command.tx, task, revision).await?);
     }
     let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut command.tx, None).await?;
-    let input = source::load_core_inputs_for_works_at(
-        db,
+    let (windows, eligibility) = eligibility::qualify(
+        &mut command.tx,
         request.domain_ref,
         configurations[0],
         &request.work_refs,
         &cutoff,
         expected_core,
     )
-    .await
-    .map_err(source_error)?;
-    if input.len() != request.work_refs.len() {
-        return Err(FoundationError::AdmissionDenied(vec![
-            "content_understanding_required".into(),
-        ]));
+    .await?;
+    let (skipped_works, accepted): (Vec<_>, Vec<_>) = eligibility
+        .into_iter()
+        .partition(|work| work.reason.is_some());
+    if accepted.is_empty() {
+        let reasons = skipped_works
+            .iter()
+            .filter_map(|work| work.reason.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        return Err(FoundationError::AdmissionDenied(
+            reasons.into_iter().collect(),
+        ));
     }
-    if kind == BatchKind::Automatic {
+    let work_refs: Vec<_> = accepted.into_iter().map(|work| work.work_ref).collect();
+    if let Some(previous) = previous_window {
+        let eligible: Option<(Uuid, Uuid, Uuid, Uuid, Uuid)> =
+            sqlx::query_as(super::topic_research_automation::RETRY_CANDIDATES)
+                .bind(previous)
+                .bind(crate::topic_map_research_analysis::METHOD_VERSION)
+                .bind(Option::<Uuid>::None)
+                .fetch_optional(&mut *command.tx)
+                .await?;
+        if eligible
+            != expected_core.map(|core| {
+                (
+                    request.domain_ref,
+                    request.work_refs[0],
+                    previous,
+                    core,
+                    request.command_ref,
+                )
+            })
+        {
+            return Err(FoundationError::AdmissionDenied(vec![
+                "topic_retry_not_available".into(),
+            ]));
+        }
+    } else if kind == BatchKind::Automatic {
         let existing = sqlx::query("SELECT r.run_ref,count(DISTINCT w.window_ref) AS windows,count(s.item_ref) AS stages FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) WHERE r.domain_ref=$1 AND EXISTS(SELECT 1 FROM linggan_topic_research_window frozen WHERE frozen.run_ref=r.run_ref AND frozen.input_refs#>>'{coverage,coreRef}'=$2 AND frozen.input_refs->>'methodVersion'=$3) GROUP BY r.run_ref,r.created_at ORDER BY r.created_at DESC LIMIT 1")
             .bind(request.domain_ref).bind(expected_core.map(|reference| reference.to_string())).bind(crate::topic_map_research_analysis::METHOD_VERSION).fetch_optional(&mut *command.tx).await?;
         if let Some(row) = existing {
@@ -120,6 +188,7 @@ pub(crate) async fn start_with_kind(
                     run_ref: row.get("run_ref"),
                     window_count: row.get::<i64, _>("windows") as usize,
                     stage_count: row.get::<i64, _>("stages") as usize,
+                    skipped_works: Vec::new(),
                 })
                 .await;
         }
@@ -133,32 +202,14 @@ pub(crate) async fn start_with_kind(
             ]));
         }
     }
-    let windows: Vec<_> = input.iter().flat_map(source::research_windows).collect();
     if windows.is_empty() || windows.len() > 50 {
         return Err(FoundationError::AdmissionDenied(vec![
             "research_scope_too_large".into(),
         ]));
     }
-    let uncertain:Vec<Value>=sqlx::query_scalar("SELECT DISTINCT w.input_refs FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=$1 AND w.work_ref=ANY($2) AND c.failure_code='ai_dispatch_unknown'").bind(request.domain_ref).bind(&request.work_refs).fetch_all(&mut *command.tx).await?;
-    let refs: Vec<Value> = uncertain
-        .iter()
-        .flat_map(|v| v["fragments"].as_array().into_iter().flatten().cloned())
-        .collect();
-    for window in &windows {
-        if let Some(full) = input
-            .iter()
-            .find(|i| i.work.work_ref == window.work.work_ref)
-        {
-            if source::overlaps_unknown_dispatch(window, full, &refs) {
-                return Err(FoundationError::AdmissionDenied(vec![
-                    "ai_prior_dispatch_unresolved".into(),
-                ]));
-            }
-        }
-    }
     let run = Uuid::new_v4();
     sqlx::query("INSERT INTO linggan_topic_research_run(run_ref,command_ref,domain_ref,work_refs,knowledge_cutoff,configurations) VALUES($1,$2,$3,$4,$5::timestamptz,$6)")
-        .bind(run).bind(request.command_ref).bind(request.domain_ref).bind(&request.work_refs).bind(cutoff).bind(json!(configurations)).execute(&mut *command.tx).await?;
+        .bind(run).bind(request.command_ref).bind(request.domain_ref).bind(&work_refs).bind(cutoff).bind(json!(configurations)).execute(&mut *command.tx).await?;
     for window in &windows {
         let reference = Uuid::new_v4();
         sqlx::query("INSERT INTO linggan_topic_research_window(window_ref,run_ref,work_ref,input_hash,input_refs) VALUES($1,$2,$3,$4,$5)")
@@ -191,6 +242,7 @@ pub(crate) async fn start_with_kind(
             run_ref: run,
             window_count: windows.len(),
             stage_count: windows.len(),
+            skipped_works,
         })
         .await
 }

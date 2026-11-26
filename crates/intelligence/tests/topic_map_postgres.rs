@@ -902,12 +902,12 @@ async fn manual_alternative_without_classification_keeps_sources_and_rejects_fal
     sqlx::query("INSERT INTO linggan_media_slot(slot_key,platform,content_external_id,role,ordinal,first_package_ref) SELECT $1,platform,content_external_id,'cover',1,first_package_ref FROM linggan_material_content WHERE public_ref=$2").bind(slot).bind(source).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_media_observation(observation_ref,slot_key,package_ref,observed_external_uri,observed_at) VALUES($1,$2,$3,'https://example.invalid/synthetic.jpg',scope_001_now()::text)").bind(observation).bind(slot).bind(package).execute(db.pool()).await.unwrap();
     sqlx::query("INSERT INTO linggan_material_media_origin(observation_ref,content_public_ref,slot_key,package_ref,record_ordinal,source_generation,purpose,producer_ordinal,display_order_state,display_order_basis,candidate_set_state,composite_state) VALUES($1,$2,$3,$4,1,1,'cover',1,'UNKNOWN','unknown','UNKNOWN','NOT_APPLICABLE')").bind(observation).bind(source).bind(slot).bind(package).execute(db.pool()).await.unwrap();
-    let projection = linggan_intelligence::topic_map::read_model::TopicMapReadModel::default();
+    let projection = std::sync::Arc::new(linggan_intelligence::topic_map::read_model::TopicMapReadModel::default());
     let projection_query = TopicMapQuery {
         domain_ref: Some(domain()),
         ..Default::default()
     };
-    let before_restriction = projection.read(&db, &projection_query).await.unwrap();
+    let before_restriction = projection.read_page(&db, &projection_query).await.unwrap();
     assert!(
         before_restriction
             .works
@@ -915,14 +915,17 @@ async fn manual_alternative_without_classification_keeps_sources_and_rejects_fal
             .any(|w| w.work_ref == source && w.readable)
     );
     sqlx::query("INSERT INTO linggan_material_media_disposition_event(event_ref,slot_key,state,authority_ref,reason,effective_at) VALUES($1,$2,'WITHDRAWN_OR_RESTRICTED','synthetic-proof','manual source withdrawal',clock_timestamp())").bind(Uuid::new_v4()).bind(slot).execute(db.pool()).await.unwrap();
-    let after_restriction = projection.read(&db, &projection_query).await.unwrap();
+    let after_restriction = projection.read_page(&db, &projection_query).await.unwrap();
     assert!(
         !after_restriction
             .works
             .iter()
-            .any(|w| w.work_ref == source && w.readable),
+            .any(|w| w.work_ref == source),
         "withdrawal cannot reuse a qualified page snapshot"
     );
+    let after_wire = serde_json::to_string(&*after_restriction).unwrap();
+    assert!(!after_wire.contains("synthetic-manual-source"));
+    assert!(!after_wire.contains("https://example.invalid/synthetic.jpg"));
     let withdrawn = read_saved_alternative(&db, domain(), first.subject_ref.unwrap())
         .await
         .unwrap();
@@ -975,6 +978,48 @@ async fn page_read_model_returns_a_consistent_snapshot_during_research_writes() 
     assert_eq!(first.scope["totalWorkCount"], 1);
     let refreshed = model.read(&db, &query).await.unwrap();
     assert!(!Arc::ptr_eq(&first, &refreshed), "the earlier revision was not cached");
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL pgvector proof harness"]
+async fn page_refreshes_after_appended_collection_facts_without_blocking_reads() {
+    use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    let db = fixture_database("topic_map_appended_capture").await;
+    let existing = work(&db, 0, "xhs", Some(2), 0).await;
+    let query = TopicMapQuery { domain_ref: Some(domain()), ..Default::default() };
+    let model = Arc::new(TopicMapReadModel::default());
+    let published = model.read_page(&db, &query).await.unwrap();
+    assert_eq!(published.scope["totalWorkCount"], 1);
+
+    work(&db, 1, "xhs", Some(4), 0).await;
+    let package: Uuid = sqlx::query_scalar("SELECT first_package_ref FROM linggan_material_content WHERE public_ref=$1")
+        .bind(existing).fetch_one(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_runtime_record_disposition(package_ref,record_ordinal,disposition,reason)VALUES($1,1,'accepted_for_library_content','SYNTHETIC_RECAPTURE')")
+        .bind(package).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_material_content_detail(material_ref,content_public_ref,package_ref,record_ordinal,observed_at,title,title_state,body_text,body_state,searchable_text,creator_display_name,creator_display_name_state,published_at_source_text_state) VALUES($1,$2,$3,1,scope_001_now()::text,'新一轮的合成标题','KNOWN','SYNTHETIC CHANGED BODY','KNOWN','SYNTHETIC CHANGED BODY','合成账号','KNOWN','UNKNOWN')")
+        .bind(Uuid::new_v4()).bind(existing).bind(package).execute(db.pool()).await.unwrap();
+    publish_current_body(&db, existing).await;
+    let while_refreshing = model.read_page(&db, &query).await.unwrap();
+    assert!(Arc::ptr_eq(&published, &while_refreshing), "append-only capture cannot invalidate an already qualified page");
+    tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            let current = model.read_page(&db, &query).await.unwrap();
+            if current.scope["totalWorkCount"] == 2 {
+                assert!(!Arc::ptr_eq(&published, &current));
+                assert_eq!(current.works.iter().find(|work| work.work_ref == existing).unwrap().title.as_deref(), Some("新一轮的合成标题"));
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.unwrap();
+
+    sqlx::query("UPDATE observation_domain SET description='已更改的合成领域说明' WHERE domain_ref=$1")
+        .bind(domain()).execute(db.pool()).await.unwrap();
+    let restricted = model.read_page(&db, &query).await.unwrap();
+    assert!(restricted.domains.iter().any(|row| row["description"] == "已更改的合成领域说明"));
 }
 
 #[tokio::test]
