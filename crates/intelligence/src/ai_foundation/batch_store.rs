@@ -183,14 +183,14 @@ impl BatchKind {
         }
         match task {
             TaskKey::ModelProbe => self == Self::Probe,
-            TaskKey::ContentUnderstanding | TaskKey::CommentProblemConsolidation => {
+            TaskKey::ContentUnderstanding | TaskKey::CommentUnderstanding | TaskKey::CommentProblemConsolidation => {
                 matches!(self, Self::Interactive | Self::Automatic)
             }
             TaskKey::ContentUnderstandingDeep
             | TaskKey::WorkComparison
             | TaskKey::CreatorResearch
             | TaskKey::CreatorAccountResearch
-            | TaskKey::OpsTitleLabel | TaskKey::CommentUnderstanding => self == Self::Interactive,
+            | TaskKey::OpsTitleLabel => self == Self::Interactive,
             TaskKey::WritingLegacy
             | TaskKey::CreationTitle
             | TaskKey::WritingAssistant

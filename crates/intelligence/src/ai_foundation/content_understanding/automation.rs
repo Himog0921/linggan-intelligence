@@ -1,18 +1,19 @@
 //! Domain opt-in and bounded queue production for L1 into the existing content-understanding ledger.
-use super::{FoundationError, METHOD, Start, preview, start_with_kind};
+use super::{FoundationError, METHOD, Start, preview_automatic, source, start_with_kind};
 use crate::ai_foundation::{batch_store::BatchKind, store::Command};
 use linggan_storage_postgres::Database;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use sqlx::Row;
-use std::time::{Duration, Instant};
+use std::{collections::HashSet, time::{Duration, Instant}};
 use uuid::Uuid;
 
 /// Automatic work waiting or running; the scan pauses at this size.
-const QUEUE_LIMIT: i64 = 20;
-const SCAN_PAGE: i64 = 10;
+pub(super) const QUEUE_LIMIT: i64 = 20;
+pub(super) const AUTOMATIC_WAITING: &str = "SELECT count(*) FROM linggan_content_understanding_request r JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE b.kind='automatic' AND c.state IN('pending','running')";
+const SCAN_PAGE: i64 = 40;
 /// A finished pass over every work waits this long before it looks again.
-const IDLE_AFTER_PASS: Duration = Duration::from_secs(600);
+const IDLE_AFTER_PASS: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -166,9 +167,8 @@ pub struct CursorState {
 }
 pub type Cursor = Option<CursorState>;
 
-/// Queue a bounded page of works that have never been attempted; the model is not called here.
-/// A work that already has any request (even a failed one) is left to a person, so a persistent
-/// output failure cannot turn into a paid retry loop.
+/// Queue only new, qualified material versions. An attempt on the same material version
+/// remains authoritative, so a persistent output failure cannot turn into a paid retry loop.
 pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, FoundationError> {
     let state = cursor.get_or_insert_with(CursorState::default);
     if state.idle_until.is_some_and(|until| Instant::now() < until) {
@@ -176,8 +176,8 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
     }
     state.idle_until = None;
     // A full queue pauses the scan in place. It must not look like the end of a pass, or the
-    // cursor would reset and the scan would idle for ten minutes while the queue drains.
-    let waiting: i64 = sqlx::query_scalar("SELECT count(*) FROM linggan_content_understanding_request r JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE b.kind='automatic' AND c.state IN('pending','running')")
+    // cursor would reset and the scan would idle while the queue drains.
+    let waiting: i64 = sqlx::query_scalar(AUTOMATIC_WAITING)
         .fetch_one(db.pool())
         .await?;
     if waiting >= QUEUE_LIMIT {
@@ -186,19 +186,29 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
     let rows = sqlx::query(include_str!("automation_candidates.sql"))
         .bind(state.after.map(|v| v.0))
         .bind(state.after.map(|v| v.1))
-        .bind(METHOD)
         .bind(SCAN_PAGE)
         .fetch_all(db.pool())
         .await?;
+    let refs: Vec<Uuid> = rows.iter().map(|row| row.get("work_ref")).collect();
+    let check = new_material_versions(db, &refs).await?;
     let mut queued = 0;
     state.scanned |= !rows.is_empty();
     for row in &rows {
         let domain: Uuid = row.get("domain_ref");
         let work: Uuid = row.get("work_ref");
+        let previous = state.after;
         state.after = Some((domain, work));
-        // One unreadable work must not stop the others.
-        let Ok(plan) = preview(db, domain, work).await else {
+        if !check.contains(&work) {
             continue;
+        }
+        // One unreadable work must not stop the others.
+        let (plan, material_identity) = match preview_automatic(db, domain, work).await {
+            Ok(Some(plan)) => plan,
+            Err(FoundationError::Database(error)) => {
+                state.after = previous;
+                return Err(error.into());
+            }
+            _ => continue,
         };
         if plan["canStart"] != true {
             continue;
@@ -212,7 +222,9 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
             continue;
         };
         let command_ref: Uuid = sqlx::query_scalar("SELECT md5($1)::uuid")
-            .bind(format!("l1-auto:{domain}:{work}:{hash}:{METHOD}"))
+            .bind(format!(
+                "l1-auto:{domain}:{work}:{material_identity}:{METHOD}"
+            ))
             .fetch_one(db.pool())
             .await?;
         let request = Start {
@@ -228,6 +240,13 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
             Ok(receipt) if !receipt.reused => queued += 1,
             Ok(_) => {}
             Err(FoundationError::Database(error)) => return Err(error.into()),
+            Err(FoundationError::AdmissionDenied(reasons))
+                if reasons.iter().any(|reason| reason == "automatic_l1_queue_full") =>
+            {
+                // This work is first to be reconsidered after the queue drains.
+                state.after = previous;
+                return Ok(queued);
+            }
             Err(_) => {}
         }
     }
@@ -238,4 +257,28 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
         }
     }
     Ok(queued)
+}
+
+/// Batch the canonical dossiers as a cheap candidate check. Start still
+/// reconstructs the exact packet, including strict source-kind and current permissions.
+async fn new_material_versions(
+    db: &Database,
+    refs: &[Uuid],
+) -> Result<HashSet<Uuid>, FoundationError> {
+    if refs.is_empty() {
+        return Ok(HashSet::new());
+    }
+    let mut tx = super::begin_preview(db).await?;
+    let cutoff = linggan_evidence::research_dossier::cutoff_in(&mut tx, None).await?;
+    let dossiers = linggan_evidence::research_dossier::read_in(&mut tx, refs, &cutoff).await?;
+    let attempted = sqlx::query_as::<_, (Uuid, String)>("SELECT work_ref,material_snapshot_identity FROM linggan_content_understanding_request WHERE work_ref=ANY($1) AND method_version=$2")
+        .bind(refs).bind(METHOD).fetch_all(&mut *tx).await?
+        .into_iter().collect::<HashSet<_>>();
+    tx.commit().await?;
+    Ok(dossiers.into_iter().filter_map(|(work,dossier)| {
+        let packet = source::from_dossier(dossier, &cutoff).ok()?;
+        (packet.coverage["materialReadiness"]["state"] == "ready"
+            && !attempted.contains(&(work, packet.snapshot.material_snapshot_identity)))
+            .then_some(work)
+    }).collect())
 }

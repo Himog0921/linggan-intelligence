@@ -96,7 +96,13 @@ async fn prepare(
     }
     let model = execution::model_in(&mut tx, item.task_config_ref, item.task_key).await?;
     let current_model = model.current_model_ref.ok_or(AiError::Model)?;
-    let system = execution::system_in(&mut tx, item.task_config_ref, item.task_key).await?;
+    // Interactive requests use the verified preview verbatim. Trial arms share
+    // its source payload but each freezes the instructions for its own config.
+    let system = if request_ref.is_some() {
+        input.system.clone()
+    } else {
+        execution::system_in(&mut tx, item.task_config_ref, item.task_key).await?
+    };
     let prompt_version_ref: Uuid = sqlx::query_scalar(
         "SELECT prompt_version_ref FROM linggan_ai_task_config WHERE task_config_ref=$1",
     )
@@ -316,9 +322,11 @@ async fn settle(
     let suggestion = response
         .filter(|r| r.ok)
         .and_then(|r| r.text.as_deref())
-        .and_then(|text| prepared.input.validate(text).ok());
-    let suggestion =
-        suggestion.filter(|value| value.to_string().len() <= AI_LIMITS.max_text_bytes as usize);
+        .map(|text| prepared.input.validate(text));
+    let material_quote = matches!(&suggestion, Some(Err(AiError::MaterialQuoteForbidden)));
+    let suggestion = suggestion
+        .and_then(Result::ok)
+        .filter(|value| value.to_string().len() <= AI_LIMITS.max_text_bytes as usize);
     let provider_ok = response.is_some_and(|r| r.ok);
     let no_send = receipt::not_dispatched(response);
     let failure = if no_send {
@@ -327,6 +335,8 @@ async fn settle(
         Some("ai_dispatch_unknown")
     } else if !provider_ok {
         Some("ai_provider_failed")
+    } else if material_quote {
+        Some("creation_ai_material_quote_forbidden")
     } else if suggestion.is_none() {
         Some("ai_output_invalid")
     } else {
@@ -338,7 +348,9 @@ async fn settle(
     result["adapterVersion"] = json!(PI_PROTOCOL);
     result["executorReceipt"] = json!(item.lease_token);
     result["promptVersion"] = json!(prepared.prompt_version_ref);
-    result["writingQualified"] = json!(suggestion.is_some());
+    if !material_quote {
+        result["writingQualified"] = json!(suggestion.is_some());
+    }
     result["sourceQualifiedAtSettlement"] = json!(readable);
     receipt::observe_in(&mut tx, prepared.invocation, response).await?;
     finish_invocation_in(
@@ -384,7 +396,7 @@ async fn settle(
     } else {
         suggestion
     };
-    if provider_ok {
+    if provider_ok && !material_quote {
         sqlx::query("INSERT INTO linggan_creation_writing_qualification(model_ref,connection_version_ref,method_version,invocation_ref,qualified)
             SELECT model_ref,connection_version_ref,$2,invocation_ref,$3 FROM linggan_model_invocation WHERE invocation_ref=$1")
             .bind(prepared.invocation).bind(prepared.input.manifest.action.method()).bind(output.is_some()&&failure.is_none()).execute(&mut *tx).await?;

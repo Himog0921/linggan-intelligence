@@ -3,13 +3,22 @@ use super::*;
 use sqlx::Row;
 
 pub(super) async fn attach_rules(
-    db: &Database,
+    tx: &mut Transaction<'_, Postgres>,
     q: &TopicMapQuery,
     topics: &mut [TopicMapTopic],
     unavailable: &HashSet<Uuid>,
 ) -> Result<(), TopicMapError> {
-    let rows = sqlx::query("SELECT c.definition_ref,c.inclusion_criteria,c.exclusion_criteria,c.method_version,r.method_version AS induction_method FROM linggan_topic_map_concept_rule c LEFT JOIN linggan_topic_research_result r ON r.invocation_ref=c.invocation_ref WHERE ($1::uuid IS NULL OR c.domain_ref=$1)")
-        .bind(q.domain_ref).fetch_all(db.pool()).await?;
+    let rows = sqlx::query(r#"
+        SELECT c.definition_ref,c.inclusion_criteria,c.exclusion_criteria,c.method_version,
+               r.method_version AS induction_method,
+               coalesce(l1.input_manifest#>'{snapshot,texts}' @> '[{"kind":"frame_text"}]',false) AS uses_retired_frame_text
+        FROM linggan_topic_map_concept_rule c
+        LEFT JOIN linggan_topic_research_result r ON r.invocation_ref=c.invocation_ref
+        LEFT JOIN linggan_topic_research_window w USING(window_ref)
+        LEFT JOIN linggan_content_understanding_request l1
+            ON l1.request_ref::text=coalesce(w.input_refs#>>'{source,coverage,coreRef}',w.input_refs#>>'{coverage,coreRef}')
+        WHERE ($1::uuid IS NULL OR c.domain_ref=$1)"#)
+        .bind(q.domain_ref).fetch_all(&mut **tx).await?;
     for topic in topics {
         let rule = rows
             .iter()
@@ -20,8 +29,12 @@ pub(super) async fn attach_rules(
                 r.get::<Vec<String>, _>("exclusion_criteria"),
             )
         });
-        apply_rule(topic, criteria, unavailable.contains(&topic.definition_ref));
+        let source_unavailable = unavailable.contains(&topic.definition_ref);
+        apply_rule(topic, criteria, source_unavailable);
         if let Some(rule) = rule {
+            if source_unavailable && rule.get::<bool, _>("uses_retired_frame_text") {
+                topic.definition_text = "原研究使用了已下线的视频画面文字。作品有可用的新底稿后，可用新底稿重新进行主题研究。".into();
+            }
             topic.core["inductionMethod"] =
                 json!(rule.get::<Option<String>, _>("induction_method"));
             topic.core["conceptRole"] = json!(if rule.get::<String, _>("method_version")

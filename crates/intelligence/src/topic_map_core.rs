@@ -8,8 +8,8 @@ pub(crate) use recall::catalog;
 #[path = "topic_map_core/source_qualification.rs"]
 mod source_qualification;
 pub(crate) use source_qualification::{
-    definition_dependencies, qualify_definitions_and_inputs, unavailable_definitions,
-    unavailable_definitions_in,
+    definition_dependencies, qualify_definitions_and_inputs, qualify_definitions_and_inputs_in,
+    unavailable_definitions, unavailable_definitions_in,
 };
 
 use crate::{

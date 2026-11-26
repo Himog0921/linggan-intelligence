@@ -106,6 +106,52 @@ async fn saved_core_drives_topic_queue_and_persisted_membership() {
     roundtrip(false).await;
     roundtrip(true).await;
 }
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL; no model dispatch"]
+async fn automatic_l1_reconsiders_changed_material_without_retrying_identical_input() {
+    let (db, original_config) = support::setup("l1_automatic_material_versions").await;
+    let model_config = Uuid::new_v4();
+    sqlx::query("INSERT INTO linggan_model_config(config_ref,model_ref,capability_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts,thinking_level) SELECT $1,model_ref,capability_ref,input_token_limit,output_token_limit,timeout_seconds,max_attempts,'high' FROM linggan_model_config WHERE config_ref=$2")
+        .bind(model_config).bind(original_config).execute(db.pool()).await.unwrap();
+    configure_tasks_for_test(&db, model_config).await;
+    let work = support::work(&db, "dossier-note", "合成旧版本正文").await;
+    change_automation(
+        &db,
+        &automation::Change {
+            command_ref: Uuid::new_v4(),
+            domain_ref: support::D,
+            expected_revision: 0,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    let plan = preview(&db, support::D, work).await.unwrap();
+    assert_eq!(plan["canStart"], true, "{}", plan["reasons"]);
+    assert_eq!(automation_tick(&db, &mut None).await.unwrap(), 1);
+    sqlx::query("UPDATE linggan_ai_batch_item_control SET state='failed',failure_code='ai_output_invalid',usable=false,finished_at=scope_001_now() WHERE item_ref=(SELECT item_ref FROM linggan_content_understanding_request WHERE work_ref=$1)")
+        .bind(work).execute(db.pool()).await.unwrap();
+    assert_eq!(automation_tick(&db, &mut None).await.unwrap(), 0);
+    assert_eq!(support::work_at(&db, "dossier-note", "合成新版标题", "合成新版正文", 10, "2026-11-11T00:00:00Z").await, work);
+    assert_eq!(automation_tick(&db, &mut None).await.unwrap(), 1);
+    assert_eq!(automation_tick(&db, &mut None).await.unwrap(), 0);
+    let versions: i64 = sqlx::query_scalar("SELECT count(DISTINCT material_snapshot_identity) FROM linggan_content_understanding_request WHERE work_ref=$1")
+        .bind(work).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(versions, 2);
+
+    let with_saved_core = support::work(&db, "other-saved-note", "合成已完成的作者正文").await;
+    let saved = seed_core(&db, with_saved_core, model_config, false).await;
+    assert_eq!(automation_tick(&db, &mut None).await.unwrap(), 0);
+    support::work_at(
+        &db, "other-saved-note", "合成更正后的标题", "合成更正后的正文", 10, "2026-11-12T00:00:00Z",
+    ).await;
+    assert_eq!(automation_tick(&db, &mut None).await.unwrap(), 1);
+    let still_saved: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_content_understanding_saved_core WHERE request_ref=$1 AND result IS NOT NULL)")
+        .bind(saved).fetch_one(db.pool()).await.unwrap();
+    assert!(still_saved);
+}
+
 pub(crate) async fn configure_tasks_for_test(db: &Database, model_config: Uuid) {
     // Seed selected configurations in this isolated fixture, not live settings.
     let settings: Vec<(String,Uuid)> = sqlx::query_as("SELECT task_key,current_config_ref FROM linggan_ai_task_setting WHERE task_key LIKE 'topic_research%' OR task_key='content_understanding'").fetch_all(db.pool()).await.unwrap();
@@ -314,8 +360,9 @@ async fn roundtrip(image_only: bool) {
             .fetch_one(db.pool())
             .await
             .unwrap();
+        // A compatible old Core remains readable; the replacement still has its own identity.
         assert_eq!(
-            scope_coverage(&db, &[work], &cutoff).await.unwrap()["stale"],
+            scope_coverage(&db, &[work], &cutoff).await.unwrap()["available"],
             1
         );
         let next = seed_core(&db, work, model_config, image_only).await;

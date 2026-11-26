@@ -2,12 +2,26 @@ use super::*;
 use crate::ai_foundation::content_understanding::{count_coverage, coverage_from_dossiers};
 use linggan_storage_postgres::Database;
 use serde_json::json;
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 pub async fn read_topic_map(
     database: &Database,
     q: &TopicMapQuery,
+) -> Result<TopicMapSnapshot, TopicMapError> {
+    let mut tx = database.pool().begin().await?;
+    sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+        .execute(&mut *tx)
+        .await?;
+    let snapshot = read_topic_map_in(&mut tx, q, None).await?;
+    tx.commit().await?;
+    Ok(snapshot)
+}
+
+pub(super) async fn read_topic_map_in(
+    tx: &mut Transaction<'_, Postgres>,
+    q: &TopicMapQuery,
+    page_database: Option<&Database>,
 ) -> Result<TopicMapSnapshot, TopicMapError> {
     if q.platform
         .as_deref()
@@ -23,9 +37,9 @@ pub async fn read_topic_map(
         return Err(TopicMapError::Invalid("invalid scope"));
     }
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
-        .fetch_one(database.pool())
+        .fetch_one(&mut **tx)
         .await?;
-    let domains:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'name',name,'status',status,'description',description,'researchGoal',research_goal) FROM observation_domain ORDER BY name").fetch_all(database.pool()).await?;
+    let domains:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'name',name,'status',status,'description',description,'researchGoal',research_goal) FROM observation_domain ORDER BY name").fetch_all(&mut **tx).await?;
     if q.domain_ref.is_some_and(|d| {
         !domains
             .iter()
@@ -33,7 +47,7 @@ pub async fn read_topic_map(
     }) {
         return Err(TopicMapError::NotFound);
     }
-    let scope_rows=sqlx::query("SELECT u.content_public_ref,u.domain_ref,array_agg(DISTINCT u.role) AS roles FROM linggan_material_domain_usage u JOIN linggan_material_content c ON c.public_ref=u.content_public_ref WHERE ($1::uuid IS NULL OR u.domain_ref=$1) AND ($2::text IS NULL OR c.platform=$2) AND ($3::bool OR u.role='primary') AND u.use_kind='domain_research' GROUP BY u.content_public_ref,u.domain_ref ORDER BY u.domain_ref,u.content_public_ref").bind(q.domain_ref).bind(&q.platform).bind(q.include_reference).fetch_all(database.pool()).await?;
+    let scope_rows=sqlx::query("SELECT u.content_public_ref,u.domain_ref,array_agg(DISTINCT u.role) AS roles FROM linggan_material_domain_usage u JOIN linggan_material_content c ON c.public_ref=u.content_public_ref WHERE ($1::uuid IS NULL OR u.domain_ref=$1) AND ($2::text IS NULL OR c.platform=$2) AND ($3::bool OR u.role='primary') AND u.use_kind='domain_research' GROUP BY u.content_public_ref,u.domain_ref ORDER BY u.domain_ref,u.content_public_ref").bind(q.domain_ref).bind(&q.platform).bind(q.include_reference).fetch_all(&mut **tx).await?;
     let mut roles: HashMap<Uuid, BTreeSet<String>> = HashMap::new();
     let mut domain_batches: BTreeMap<Uuid, Vec<Uuid>> = BTreeMap::new();
     for r in &scope_rows {
@@ -48,20 +62,20 @@ pub async fn read_topic_map(
             .or_default()
             .extend(r.get::<Vec<String>, _>("roles"));
     }
-    let annotation_rows=sqlx::query("SELECT DISTINCT ON(work_public_ref) work_public_ref,to_jsonb(a)-'receipt_ref' AS value FROM linggan_topic_map_work_annotation a WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY work_public_ref,created_at DESC,annotation_ref DESC").bind(q.domain_ref).fetch_all(database.pool()).await?;
+    let annotation_rows=sqlx::query("SELECT DISTINCT ON(work_public_ref) work_public_ref,to_jsonb(a)-'receipt_ref' AS value FROM linggan_topic_map_work_annotation a WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY work_public_ref,created_at DESC,annotation_ref DESC").bind(q.domain_ref).fetch_all(&mut **tx).await?;
     let annotations: HashMap<Uuid, Value> = annotation_rows
         .iter()
         .map(|r| (r.get("work_public_ref"), r.get("value")))
         .collect();
-    let own_creators:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'platform',platform,'authorExternalId',author_external_id,'active',active,'membershipRef',membership_ref) FROM (SELECT DISTINCT ON(domain_ref,platform,author_external_id) * FROM linggan_topic_map_own_creator WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,platform,author_external_id,created_at DESC,membership_ref DESC) current").bind(q.domain_ref).fetch_all(database.pool()).await?;
-    let breakout_rows=sqlx::query("SELECT DISTINCT ON(domain_ref,work_public_ref) domain_ref,work_public_ref,marked FROM linggan_topic_map_breakout WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,work_public_ref,created_at DESC,marking_ref DESC").bind(q.domain_ref).fetch_all(database.pool()).await?;
+    let own_creators:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'platform',platform,'authorExternalId',author_external_id,'active',active,'membershipRef',membership_ref) FROM (SELECT DISTINCT ON(domain_ref,platform,author_external_id) * FROM linggan_topic_map_own_creator WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,platform,author_external_id,created_at DESC,membership_ref DESC) current").bind(q.domain_ref).fetch_all(&mut **tx).await?;
+    let breakout_rows=sqlx::query("SELECT DISTINCT ON(domain_ref,work_public_ref) domain_ref,work_public_ref,marked FROM linggan_topic_map_breakout WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,work_public_ref,created_at DESC,marking_ref DESC").bind(q.domain_ref).fetch_all(&mut **tx).await?;
     let breakouts: HashSet<Uuid> = breakout_rows
         .iter()
         .filter(|r| r.get::<bool, _>("marked"))
         .map(|r| r.get("work_public_ref"))
         .collect();
     let refs: Vec<_> = roles.keys().copied().collect();
-    let authors=sqlx::query("SELECT c.public_ref,a.author_external_id,p.follower_count FROM linggan_material_content c LEFT JOIN linggan_material_content_author a ON a.content_public_ref=c.public_ref LEFT JOIN LATERAL(SELECT follower_count FROM linggan_material_author_profile p JOIN linggan_runtime_capture_package package USING(package_ref) WHERE p.platform=c.platform AND p.author_external_id=a.author_external_id AND p.follower_count_state='KNOWN' AND package.accepted_at<=$2::timestamptz ORDER BY p.observed_at::timestamptz DESC,p.created_at DESC,p.material_ref DESC LIMIT 1) p ON true WHERE c.public_ref=ANY($1)").bind(&refs).bind(&as_of).fetch_all(database.pool()).await?;
+    let authors=sqlx::query("SELECT c.public_ref,a.author_external_id,p.follower_count FROM linggan_material_content c LEFT JOIN linggan_material_content_author a ON a.content_public_ref=c.public_ref LEFT JOIN LATERAL(SELECT follower_count FROM linggan_material_author_profile p JOIN linggan_runtime_capture_package package USING(package_ref) WHERE p.platform=c.platform AND p.author_external_id=a.author_external_id AND p.follower_count_state='KNOWN' AND package.accepted_at<=$2::timestamptz ORDER BY p.observed_at::timestamptz DESC,p.created_at DESC,p.material_ref DESC LIMIT 1) p ON true WHERE c.public_ref=ANY($1)").bind(&refs).bind(&as_of).fetch_all(&mut **tx).await?;
     let authors: HashMap<Uuid, (Option<String>, Option<i64>)> = authors
         .iter()
         .map(|r| {
@@ -75,18 +89,36 @@ pub async fn read_topic_map(
     let mut core_states = BTreeMap::new();
     let mut material_states = HashMap::new();
     let mut seen = HashSet::new();
+    // A second read connection may accelerate material pages, but it must see
+    // the very same PostgreSQL snapshot as the definitions, research and signature.
+    let imported_snapshot = if let Some(db) = page_database
+        && domain_batches.values().any(|rows| rows.len() > 500)
+    {
+        let snapshot: String = sqlx::query_scalar("SELECT quote_literal(pg_export_snapshot())")
+            .fetch_one(&mut **tx)
+            .await?;
+        Some((db, format!("SET TRANSACTION SNAPSHOT {snapshot}")))
+    } else {
+        None
+    };
     for (domain_ref, references) in domain_batches {
-        // At most two canonical 500-work reads overlap. Each retains its read-only
-        // snapshot and cutoff; ordered concatenation preserves cross-domain ownership.
-        for pair in references.chunks(1000) {
+        let page_size = if imported_snapshot.is_some() { 1000 } else { 500 };
+        for pair in references.chunks(page_size) {
             let (first, second) = pair.split_at(pair.len().min(500));
-            let (first, second) = tokio::try_join!(
-                overview_page(database, domain_ref, first, &as_of),
-                overview_page(database, domain_ref, second, &as_of),
-            )?;
-            let mut resources = first.0;
-            resources.extend(second.0);
-            for (work, state) in first.1.into_iter().chain(second.1) {
+            let (resources, states) = if let Some((db, import_sql)) = &imported_snapshot
+                && !second.is_empty()
+            {
+                let (mut primary, secondary) = tokio::try_join!(
+                    overview_page(tx, domain_ref, first, &as_of),
+                    overview_page_on_snapshot(db, import_sql, domain_ref, second, &as_of),
+                )?;
+                primary.0.extend(secondary.0);
+                primary.1.extend(secondary.1);
+                primary
+            } else {
+                overview_page(tx, domain_ref, first, &as_of).await?
+            };
+            for (work, state) in states {
                 core_states.entry(work).or_insert(state);
             }
             for resource in resources {
@@ -182,13 +214,13 @@ pub async fn read_topic_map(
         .filter(|w| w.readable)
         .map(|w| w.work_ref)
         .collect();
-    let operation_facts = super::operations::read(database, &operation_refs, q.domain_ref).await?;
+    let operation_facts = super::operations::read_in(tx, &operation_refs, q.domain_ref).await?;
     for work in &mut works {
         work.own |= operation_facts.contains_key(&work.work_ref);
         work.own_breakout = work.own && breakouts.contains(&work.work_ref);
     }
-    let rules:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'platform',platform,'likeThreshold',like_threshold,'version',version,'ruleRef',rule_ref) FROM (SELECT DISTINCT ON(domain_ref,platform) * FROM linggan_topic_map_performance_rule WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,platform,version DESC) current").bind(q.domain_ref).fetch_all(database.pool()).await?;
-    let rows=sqlx::query("SELECT t.topic_ref,t.canonical_key,d.definition_ref,d.version,d.display_name,d.definition_text,d.lifecycle_state,b.domain_ref,b.parent_topic_ref,b.version AS binding_version,array(SELECT m.work_public_ref FROM linggan_topic_classification_run r JOIN linggan_topic_material_member m USING(classification_run_ref) WHERE r.definition_ref=d.definition_ref AND r.run_kind='human_adjudicated' ORDER BY m.ordinal) AS members FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition d WHERE d.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_binding b WHERE b.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE ($1::uuid IS NULL OR b.domain_ref=$1) ORDER BY d.display_name").bind(q.domain_ref).fetch_all(database.pool()).await?;
+    let rules:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'platform',platform,'likeThreshold',like_threshold,'version',version,'ruleRef',rule_ref) FROM (SELECT DISTINCT ON(domain_ref,platform) * FROM linggan_topic_map_performance_rule WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,platform,version DESC) current").bind(q.domain_ref).fetch_all(&mut **tx).await?;
+    let rows=sqlx::query("SELECT t.topic_ref,t.canonical_key,d.definition_ref,d.version,d.display_name,d.definition_text,d.lifecycle_state,b.domain_ref,b.parent_topic_ref,b.version AS binding_version,array(SELECT m.work_public_ref FROM linggan_topic_classification_run r JOIN linggan_topic_material_member m USING(classification_run_ref) WHERE r.definition_ref=d.definition_ref AND r.run_kind='human_adjudicated' ORDER BY m.ordinal) AS members FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition d WHERE d.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_binding b WHERE b.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE ($1::uuid IS NULL OR b.domain_ref=$1) ORDER BY d.display_name").bind(q.domain_ref).fetch_all(&mut **tx).await?;
     let mut topics: Vec<TopicMapTopic> = rows
         .iter()
         .map(|r| TopicMapTopic {
@@ -215,12 +247,12 @@ pub async fn read_topic_map(
         .collect();
     let structure_ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_topic_map_structure_source')IS NOT NULL")
-            .fetch_one(database.pool())
+            .fetch_one(&mut **tx)
             .await?;
     if structure_ready {
         let replaced: Vec<Uuid> =
             sqlx::query_scalar("SELECT topic_ref FROM linggan_topic_map_structure_source")
-                .fetch_all(database.pool())
+                .fetch_all(&mut **tx)
                 .await?;
         for topic in &mut topics {
             if replaced.contains(&topic.topic_ref) {
@@ -228,7 +260,7 @@ pub async fn read_topic_map(
             }
         }
     }
-    let candidates = attach_research(database, q, &mut works, &mut topics).await?;
+    let candidates = attach_research(tx, q, &mut works, &mut topics).await?;
     // Accepted, evidenced classifications extend membership without replacing a definition.
     for t in &mut topics {
         for w in &works {
@@ -283,7 +315,7 @@ pub async fn read_topic_map(
             .collect::<Vec<_>>()
     );
     let window_refs: HashSet<Uuid> = if let Some(days) = q.window_days {
-        sqlx::query_scalar("SELECT work_ref FROM jsonb_to_recordset($1) AS input(work_ref uuid,published_at timestamptz) WHERE published_at >= $2::timestamptz-($3::int*interval '1 day') AND published_at<=$2::timestamptz").bind(dates.clone()).bind(&as_of).bind(days).fetch_all(database.pool()).await?.into_iter().collect()
+        sqlx::query_scalar("SELECT work_ref FROM jsonb_to_recordset($1) AS input(work_ref uuid,published_at timestamptz) WHERE published_at >= $2::timestamptz-($3::int*interval '1 day') AND published_at<=$2::timestamptz").bind(dates.clone()).bind(&as_of).bind(days).fetch_all(&mut **tx).await?.into_iter().collect()
     } else {
         works.iter().map(|w| w.work_ref).collect()
     };
@@ -291,7 +323,7 @@ pub async fn read_topic_map(
     let recent: HashSet<Uuid> = if reference_days == 0 {
         works.iter().map(|w| w.work_ref).collect()
     } else {
-        sqlx::query_scalar("SELECT work_ref FROM jsonb_to_recordset($1) AS input(work_ref uuid,published_at timestamptz) WHERE published_at >= $2::timestamptz-($3::int*interval '1 day') AND published_at<=$2::timestamptz").bind(dates).bind(&as_of).bind(reference_days).fetch_all(database.pool()).await?.into_iter().collect()
+        sqlx::query_scalar("SELECT work_ref FROM jsonb_to_recordset($1) AS input(work_ref uuid,published_at timestamptz) WHERE published_at >= $2::timestamptz-($3::int*interval '1 day') AND published_at<=$2::timestamptz").bind(dates).bind(&as_of).bind(reference_days).fetch_all(&mut **tx).await?.into_iter().collect()
     };
     let selected_refs = if let Some(topic) = q.topic_ref {
         Some(
@@ -388,8 +420,8 @@ pub async fn read_topic_map(
     }
     let progress = json!({"totalWorkCount":work_count,"material":material,
         "understanding":understanding,"graph":{"assigned":work_count-pending,"unassigned":pending}});
-    let alternatives = read_alternatives(database, q, &works).await?;
-    let mut changes:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('topicRef',t.topic_ref,'definitionRef',d.definition_ref,'definitionVersion',d.version,'lastViewedDefinitionRef',v.definition_ref,'lastViewedAt',v.created_at::text,'structureChanged',v.definition_ref IS NOT NULL AND v.definition_ref<>d.definition_ref,'notViewed',v.definition_ref IS NULL,'lastViewedWorkRefs',v.observed_work_refs) FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_viewed WHERE topic_ref=t.topic_ref AND ($1::uuid IS NULL OR domain_ref=$1) ORDER BY created_at DESC LIMIT 1)v ON true WHERE t.topic_ref=ANY($2)").bind(q.domain_ref).bind(topics.iter().map(|t|t.topic_ref).collect::<Vec<_>>()).fetch_all(database.pool()).await?;
+    let alternatives = read_alternatives(tx, q, &works).await?;
+    let mut changes:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('topicRef',t.topic_ref,'definitionRef',d.definition_ref,'definitionVersion',d.version,'lastViewedDefinitionRef',v.definition_ref,'lastViewedAt',v.created_at::text,'structureChanged',v.definition_ref IS NOT NULL AND v.definition_ref<>d.definition_ref,'notViewed',v.definition_ref IS NULL,'lastViewedWorkRefs',v.observed_work_refs) FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_viewed WHERE topic_ref=t.topic_ref AND ($1::uuid IS NULL OR domain_ref=$1) ORDER BY created_at DESC LIMIT 1)v ON true WHERE t.topic_ref=ANY($2)").bind(q.domain_ref).bind(topics.iter().map(|t|t.topic_ref).collect::<Vec<_>>()).fetch_all(&mut **tx).await?;
     for change in &mut changes {
         let Some(topic) = topics
             .iter()
@@ -523,17 +555,16 @@ fn sources(works: &[&TopicMapWork], rules: &[Value]) -> Vec<Value> {
     groups.into_iter().map(|((p,a),ws)|json!({"platform":p,"authorExternalId":a,"creatorDisplayName":ws.iter().find_map(|w|w.creator_display_name.as_ref()),"workCount":ws.len(),"workRefs":ws.iter().map(|w|w.work_ref).collect::<Vec<_>>(),"topicRefs":ws.iter().flat_map(|w|w.topic_refs.iter().copied()).collect::<BTreeSet<_>>(),"statistics":statistics(&ws,rules)})).collect()
 }
 async fn read_alternatives(
-    database: &Database,
+    tx: &mut Transaction<'_, Postgres>,
     q: &TopicMapQuery,
     works: &[TopicMapWork],
 ) -> Result<Vec<Value>, TopicMapError> {
-    let rows=sqlx::query("SELECT a.*,a.created_at::text AS time,array(SELECT work_public_ref FROM linggan_topic_map_alternative_evidence WHERE alternative_ref=a.alternative_ref ORDER BY work_public_ref) AS refs,(SELECT jsonb_agg(jsonb_build_object('workRef',work_public_ref,'sourceManifest',source_manifest) ORDER BY work_public_ref) FROM linggan_topic_map_alternative_evidence WHERE alternative_ref=a.alternative_ref) AS manifests FROM linggan_topic_map_alternative a WHERE ($1::uuid IS NULL OR a.domain_ref=$1) AND ($2::uuid IS NULL OR a.topic_ref=$2) ORDER BY created_at DESC").bind(q.domain_ref).bind(q.topic_ref).fetch_all(database.pool()).await?;
+    let rows=sqlx::query("SELECT a.*,a.created_at::text AS time,array(SELECT work_public_ref FROM linggan_topic_map_alternative_evidence WHERE alternative_ref=a.alternative_ref ORDER BY work_public_ref) AS refs,(SELECT jsonb_agg(jsonb_build_object('workRef',work_public_ref,'sourceManifest',source_manifest) ORDER BY work_public_ref) FROM linggan_topic_map_alternative_evidence WHERE alternative_ref=a.alternative_ref) AS manifests FROM linggan_topic_map_alternative a WHERE ($1::uuid IS NULL OR a.domain_ref=$1) AND ($2::uuid IS NULL OR a.topic_ref=$2) ORDER BY created_at DESC").bind(q.domain_ref).bind(q.topic_ref).fetch_all(&mut **tx).await?;
     let mut results = Vec::new();
     for row in rows {
         let alternative: Uuid = row.get("alternative_ref");
         let saved =
-            super::saved::read_saved_alternative(database, row.get("domain_ref"), alternative)
-                .await?;
+            super::saved::read_saved_alternative_in(tx, row.get("domain_ref"), alternative).await?;
         results.push(json!({"alternativeRef":saved.alternative_ref,"domainRef":saved.domain_ref,"topicRef":saved.topic_ref,"definitionRef":saved.definition_ref,"kind":saved.kind,"title":saved.title,"angle":saved.angle,"rationale":saved.rationale,"methodVersion":saved.method_version,"evidenceWorkRefs":row.get::<Vec<Uuid>,_>("refs"),"createdAt":row.get::<String,_>("time"),"sourceState":saved.source_state,"researchManifest":saved.research_manifest,"sourceManifests":saved.source_manifests,"trackingEnabled":false}));
     }
     let _ = works; // Original-version qualification is independent of the overview time window.
@@ -541,14 +572,14 @@ async fn read_alternatives(
 }
 
 async fn attach_research(
-    database: &Database,
+    tx: &mut Transaction<'_, Postgres>,
     q: &TopicMapQuery,
     works: &mut [TopicMapWork],
     topics: &mut [TopicMapTopic],
 ) -> Result<Vec<Value>, TopicMapError> {
     let installed: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_topic_research_result')IS NOT NULL")
-            .fetch_one(database.pool())
+            .fetch_one(&mut **tx)
             .await?;
     let candidates = Vec::new();
     // All annotations, including human entries, lose applicability when cited fragments change.
@@ -556,9 +587,9 @@ async fn attach_research(
         "SELECT domain_ref FROM observation_domain WHERE ($1::uuid IS NULL OR domain_ref=$1)",
     )
     .bind(q.domain_ref)
-    .fetch_all(database.pool())
+    .fetch_all(&mut **tx)
     .await?;
-    let memberships=sqlx::query("SELECT topic_ref,definition_ref,work_public_ref,evidence_citations FROM linggan_topic_map_membership WHERE method_version<>'topic-map.research.v2' AND ($1::uuid IS NULL OR domain_ref=$1)").bind(q.domain_ref).fetch_all(database.pool()).await?;
+    let memberships=sqlx::query("SELECT topic_ref,definition_ref,work_public_ref,evidence_citations FROM linggan_topic_map_membership WHERE method_version<>'topic-map.research.v2' AND ($1::uuid IS NULL OR domain_ref=$1)").bind(q.domain_ref).fetch_all(&mut **tx).await?;
     let referenced: Vec<_> = works
         .iter()
         .filter(|w| w.annotation.is_some())
@@ -577,7 +608,7 @@ async fn attach_research(
             let scope = serde_json::from_value(json!({"domain":d}))
                 .map_err(|e| TopicMapError::Source(e.to_string()))?;
             let data =
-                linggan_evidence::creator_discovery::load_for_works(database, &scope, &referenced)
+                linggan_evidence::creator_discovery::load_for_works_in(tx, &scope, &referenced)
                     .await
                     .map_err(|e| TopicMapError::Source(e.to_string()))?;
             for w in data.works {
@@ -645,40 +676,53 @@ async fn attach_research(
     if !installed {
         return Ok(candidates);
     }
-    super::core_read::attach_windows(database, q, works, topics).await
+    super::core_read::attach_windows(tx, q, works, topics).await
 }
 
-async fn overview_page(
+type OverviewPage = (
+    Vec<linggan_evidence::WorkResource>,
+    BTreeMap<Uuid, &'static str>,
+);
+
+async fn overview_page_on_snapshot(
     database: &Database,
+    import_sql: &str,
     domain: Uuid,
     references: &[Uuid],
     cutoff: &str,
-) -> Result<
-    (
-        Vec<linggan_evidence::WorkResource>,
-        BTreeMap<Uuid, &'static str>,
-    ),
-    TopicMapError,
-> {
-    if references.is_empty() {
-        return Ok((Vec::new(), BTreeMap::new()));
-    }
+) -> Result<OverviewPage, TopicMapError> {
     let mut tx = database.pool().begin().await?;
     sqlx::query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
         .execute(&mut *tx)
         .await?;
-    let page =
-        linggan_evidence::read_work_resource_overviews_in(&mut tx, domain, references, cutoff)
-            .await
-            .map_err(|e| TopicMapError::Source(e.to_string()))?;
+    // PostgreSQL quoted its own exported identifier; no request data enters SQL.
+    sqlx::query(sqlx::AssertSqlSafe(import_sql))
+        .execute(&mut *tx)
+        .await?;
+    let result = overview_page(&mut tx, domain, references, cutoff).await?;
+    tx.commit().await?;
+    Ok(result)
+}
+
+async fn overview_page(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    references: &[Uuid],
+    cutoff: &str,
+) -> Result<OverviewPage, TopicMapError> {
+    if references.is_empty() {
+        return Ok((Vec::new(), BTreeMap::new()));
+    }
+    let page = linggan_evidence::read_work_resource_overviews_in(tx, domain, references, cutoff)
+        .await
+        .map_err(|e| TopicMapError::Source(e.to_string()))?;
     let allowed: Vec<_> = page
         .items
         .iter()
         .map(|item| item.identity.public_ref)
         .collect();
-    let states = coverage_from_dossiers(&mut tx, &allowed, cutoff, page.dossiers)
+    let states = coverage_from_dossiers(tx, &allowed, cutoff, page.dossiers)
         .await
         .map_err(|e| TopicMapError::Source(e.to_string()))?;
-    tx.commit().await?;
     Ok((page.items, states))
 }

@@ -939,6 +939,46 @@ async fn manual_alternative_without_classification_keeps_sources_and_rejects_fal
 
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL pgvector proof harness"]
+async fn page_read_model_returns_a_consistent_snapshot_during_research_writes() {
+    use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
+    use std::{sync::Arc, time::Duration};
+    let db = fixture_database("topic_map_during_research_write").await;
+    let reference = work(&db, 0, "xhs", Some(2), 0).await;
+    // Delay the canonical read after its revision has pinned the snapshot.
+    sqlx::raw_sql("CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE plpgsql VOLATILE AS $$ BEGIN PERFORM pg_advisory_xact_lock(184512::bigint); RETURN clock_timestamp(); END $$")
+        .execute(db.pool()).await.unwrap();
+    let mut writer = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(184512::bigint)")
+        .execute(&mut *writer).await.unwrap();
+    let query = TopicMapQuery { domain_ref: Some(domain()), ..Default::default() };
+    let model = TopicMapReadModel::default();
+    let writing = async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let waiting: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=184512 AND NOT granted)")
+                    .fetch_one(db.pool()).await.unwrap();
+                if waiting { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.unwrap();
+        sqlx::query("INSERT INTO linggan_topic_map_discussion_unit(unit_ref,domain_ref,work_public_ref,unit_key,statement,speaker_role,evidence_role,evidence_refs,method_version) VALUES(gen_random_uuid(),$1,$2,repeat('a',64),'合成并发研究','unknown','context','[{}]','synthetic-proof')")
+            .bind(domain()).bind(reference).execute(&mut *writer).await.unwrap();
+        let topic = Uuid::new_v4();
+        sqlx::query("INSERT INTO linggan_topic_workspace(topic_ref,domain_key,canonical_key) VALUES($1,'domain-synthetic','concurrent-new-topic')")
+            .bind(topic).execute(&mut *writer).await.unwrap();
+        sqlx::query("INSERT INTO linggan_topic_definition(definition_ref,topic_ref,version,display_name,definition_text,lifecycle_state) VALUES(gen_random_uuid(),$1,1,'合成并发主题','合成定义','candidate')")
+            .bind(topic).execute(&mut *writer).await.unwrap();
+        writer.commit().await.unwrap();
+    };
+    let (first, ()) = tokio::join!(model.read(&db, &query), writing);
+    let first = first.unwrap();
+    assert_eq!(first.scope["totalWorkCount"], 1);
+    let refreshed = model.read(&db, &query).await.unwrap();
+    assert!(!Arc::ptr_eq(&first, &refreshed), "the earlier revision was not cached");
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL pgvector proof harness"]
 async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_and_ddl() {
     use linggan_intelligence::topic_map::read_model::{
         TopicMapReadModel, first_page, overview, source_revision,
@@ -1093,6 +1133,11 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
     .unwrap();
     sqlx::query("INSERT INTO plugin_installation(installation_ref,install_key,plugin_version) VALUES($1,'read-model-heartbeat','1')")
         .bind(install).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_comment_research_automation(domain_ref) VALUES($1)")
+        .bind(domain())
+        .execute(db.pool())
+        .await
+        .unwrap();
     let settings = model.read(&db, &query).await.unwrap();
     let before_tick = source_revision(&db).await.unwrap();
     let mut executor = linggan_intelligence::ai_foundation::executor::ExecutorSession::acquire(
@@ -1106,6 +1151,8 @@ async fn page_read_model_reuses_complete_results_and_invalidates_update_delete_a
         .bind(station).execute(db.pool()).await.unwrap();
     sqlx::query("UPDATE plugin_installation SET last_seen_at=now(),selector_health='{}' WHERE installation_ref=$1")
         .bind(install).execute(db.pool()).await.unwrap();
+    sqlx::query("INSERT INTO linggan_comment_research_selection(selection_ref,domain_ref,scheduled_at,generated_at) VALUES($1,$2,now(),now())")
+        .bind(Uuid::new_v4()).bind(domain()).execute(db.pool()).await.unwrap();
     executor.heartbeat().await.unwrap();
     executor.request_drain().await.unwrap();
     executor.complete_drain().await.unwrap();

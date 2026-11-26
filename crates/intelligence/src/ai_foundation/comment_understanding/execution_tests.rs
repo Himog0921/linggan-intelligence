@@ -918,6 +918,21 @@ async fn a_cut_off_response_fails_every_comment_of_its_unit_and_nothing_else() {
     .await
     .unwrap();
     let w = env.work_with_l1("work-one", l1_config).await;
+    super::automation::change(
+        &env.db,
+        &super::automation::Change {
+            domain_ref: support::D,
+            command_ref: Uuid::new_v4(),
+            expected_revision: 0,
+            enabled: true,
+            auto_submit: Some(true),
+            minute_of_day: 540,
+            time_zone: "Asia/Shanghai".into(),
+            selection_limit: 16,
+        },
+    )
+    .await
+    .unwrap();
     let a = env
         .comment("work-one", "c1", "我家孩子每天都要提醒才动笔", "reader-a")
         .await;
@@ -948,6 +963,33 @@ async fn a_cut_off_response_fails_every_comment_of_its_unit_and_nothing_else() {
     .await
     .unwrap();
     assert_eq!(invocation.as_deref(), Some("unit_truncated"));
+    // A pending manual request and previously sent failures must all stay out of the new batch.
+    let active = env
+        .comment(
+            "work-one",
+            "c3",
+            "我们家的孩子也迟迟无法开始写作业",
+            "reader-c",
+        )
+        .await;
+    sqlx::query("UPDATE linggan_comment_research_automation SET next_run_at=scope_001_now() WHERE domain_ref=$1")
+        .bind(support::D).execute(env.db.pool()).await.unwrap();
+    super::automation::generate(&env.db).await.unwrap();
+    env.run(&[selection(w, active)], false).await;
+    super::automation::tick(&env.db).await.unwrap();
+    let status = super::automation::read(&env.db, support::D, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        status["selections"][0]["submissionCounts"]["skipped"], 3,
+        "{status}"
+    );
+    assert_eq!(
+        status["selections"][0]["submissionReasons"],
+        json!(["already_queued", "previous_dispatch"])
+    );
+    assert_eq!(status["selections"][0]["batchRefs"], json!([]));
+
     env.endpoint.finish().await;
 }
 
@@ -1047,6 +1089,7 @@ async fn scheduled_selections_are_ordered_bounded_and_do_not_enqueue_models() {
         domain_ref: domain,
         expected_revision: 0,
         enabled: true,
+        auto_submit: None,
         minute_of_day: 540,
         time_zone: "Asia/Shanghai".into(),
         selection_limit: 1,
@@ -1990,4 +2033,122 @@ async fn preview_allows_unknown_work_author_and_excludes_confirmed_creator_voice
     assert_eq!(result["excludedCounts"]["creatorVoice"], 1);
     assert_eq!(result["waitingL1"]["workRefs"], json!([work_unknown]));
     assert_eq!(result["waitingL1"]["targetCount"], 1);
+}
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL and loopback provider only"]
+async fn scheduled_submission_waits_for_core_respects_pause_and_starts_once() {
+    use super::automation;
+    let env = environment("cu_auto_submit", "normal").await;
+    let db = &env.db;
+    let domain = support::D;
+    let setting = automation::Change {
+        domain_ref: domain,
+        command_ref: Uuid::new_v4(),
+        expected_revision: 0,
+        enabled: true,
+        auto_submit: Some(true),
+        minute_of_day: 540,
+        time_zone: "Asia/Shanghai".into(),
+        selection_limit: 12,
+    };
+    assert_eq!(
+        automation::change(db, &setting).await.unwrap()["autoSubmit"],
+        true
+    );
+    let work = support::work(db, "auto-core", "合成正文：讲孩子做事的习惯。").await;
+    env.comment("auto-core", "c1", "我家孩子每天都要提醒才动笔", "reader-a")
+        .await;
+    sqlx::query("UPDATE linggan_comment_research_automation SET next_run_at=scope_001_now() WHERE domain_ref=$1")
+        .bind(domain).execute(db.pool()).await.unwrap();
+    automation::tick(db).await.unwrap();
+    let status = automation::read(db, domain, None).await.unwrap();
+    assert_eq!(
+        status["selections"][0]["submissionCounts"]["waiting_l1"], 1,
+        "{status}"
+    );
+    let pause = automation::Change {
+        command_ref: Uuid::new_v4(),
+        expected_revision: 1,
+        auto_submit: Some(false),
+        ..setting
+    };
+    automation::change(db, &pause).await.unwrap();
+    let l1: Uuid = sqlx::query_scalar(
+        "SELECT config_ref FROM linggan_model_config ORDER BY created_at LIMIT 1",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    topic_tests::seed_core(db, work, l1, false).await;
+    sqlx::query("UPDATE linggan_comment_research_selection_target SET next_check_at=scope_001_now() WHERE submission_state='waiting_l1'").execute(db.pool()).await.unwrap();
+    automation::tick(db).await.unwrap();
+    assert_eq!(
+        automation::read(db, domain, None).await.unwrap()["selections"][0]["batchRefs"],
+        json!([])
+    );
+    let resume = automation::Change {
+        command_ref: Uuid::new_v4(),
+        expected_revision: 2,
+        auto_submit: Some(true),
+        ..pause
+    };
+    automation::change(db, &resume).await.unwrap();
+    use crate::ai_foundation::control_store::{Actor, ChangeControl, change_control};
+    let scope = ControlScope::Task(TaskKey::CommentUnderstanding);
+    let revision = sqlx::query_scalar("SELECT revision FROM linggan_ai_control WHERE scope_key=$1")
+        .bind(scope.key())
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    change_control(
+        db,
+        &ChangeControl {
+            command_ref: Uuid::new_v4(),
+            scope: scope.clone(),
+            expected_revision: revision,
+            enabled: false,
+            reason: "Isolated submission gate regression".into(),
+        },
+        Actor::Human,
+    )
+    .await
+    .unwrap();
+    automation::tick(db).await.unwrap();
+    let blocked = automation::read(db, domain, None).await.unwrap();
+    assert_eq!(
+        blocked["selections"][0]["submissionCounts"]["admission_blocked"], 1,
+        "{blocked}"
+    );
+    assert_eq!(blocked["selections"][0]["batchRefs"], json!([]));
+    setup::enable(db, scope).await;
+    sqlx::query("UPDATE linggan_comment_research_selection_target SET next_check_at=scope_001_now() WHERE submission_state='admission_blocked'")
+        .execute(db.pool()).await.unwrap();
+    let (first, second) = tokio::join!(automation::tick(db), automation::tick(db));
+    first.unwrap();
+    second.unwrap();
+    let status = automation::read(db, domain, None).await.unwrap();
+    assert_eq!(
+        status["selections"][0]["submissionCounts"]["submitted"], 1,
+        "{status}"
+    );
+    let batches = status["selections"][0]["batchRefs"].as_array().unwrap();
+    assert_eq!(batches.len(), 1);
+    let batch = serde_json::from_value(batches[0].clone()).unwrap();
+    let kind: String = sqlx::query_scalar("SELECT kind FROM linggan_ai_batch WHERE batch_ref=$1")
+        .bind(batch)
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(kind, "automatic");
+    env.settle(batch).await;
+    assert_eq!(env.results().await.len(), 1);
+    automation::tick(db).await.unwrap();
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM linggan_ai_batch WHERE task_key='comment_understanding'",
+    )
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(queued, 1);
 }

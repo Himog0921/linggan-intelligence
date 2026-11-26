@@ -2,8 +2,8 @@
 use super::*;
 use crate::topic_map_research::{self, ResearchInput};
 use linggan_evidence::creator_discovery::Fragment;
-use linggan_storage_postgres::Database;
 use serde_json::json;
+use sqlx::{Postgres, Transaction};
 use std::collections::{BTreeSet, HashMap, HashSet};
 
 #[path = "core_read/load.rs"]
@@ -81,20 +81,20 @@ impl Window {
 }
 
 pub(super) async fn attach_windows(
-    db: &Database,
+    tx: &mut Transaction<'_, Postgres>,
     q: &TopicMapQuery,
     works: &mut [TopicMapWork],
     topics: &mut [TopicMapTopic],
 ) -> Result<Vec<Value>, TopicMapError> {
     let ready: bool =
         sqlx::query_scalar("SELECT to_regclass('linggan_topic_map_concept_rule')IS NOT NULL")
-            .fetch_one(db.pool())
+            .fetch_one(&mut **tx)
             .await?;
     if !ready {
         return Ok(vec![]);
     }
-    let (unavailable, mut windows) = load::load_windows(db, q, works, topics).await?;
-    units::attach_rules(db, q, topics, &unavailable).await?;
+    let (unavailable, mut windows) = load::load_windows(tx, q, works, topics).await?;
+    units::attach_rules(tx, q, topics, &unavailable).await?;
     let mut candidates = Vec::new();
     for work in works {
         units::invalidate_annotation(work, &unavailable);

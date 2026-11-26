@@ -30,6 +30,399 @@ fn without_migration(schema: &str, id: &str, migration: &str) -> String {
 }
 
 #[tokio::test]
+#[ignore = "isolated PostgreSQL replication Skill and model substitute"]
+async fn replication_skill_freezes_author_body_and_validates_substitute_before_review() {
+    use linggan_intelligence::ai_foundation::{TaskKey, prompt};
+    let db = db("replication_skill").await;
+    let work_ref = dossier::work(&db).await;
+    let canonical = linggan_evidence::research_dossier::read(&db, work_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    let source = || ReplicationSource {
+        domain_ref: dossier::DOMAIN,
+        work_ref,
+        material_revision: canonical.material_revision.clone(),
+    };
+    let before = preview_replication(&db, source()).await.unwrap();
+    let task = TaskKey::CreationTemplateReplication;
+    let status: (String, bool, Option<Uuid>) = sqlx::query_as(
+        "SELECT t.lifecycle,control.enabled,cfg.model_config_ref
+         FROM linggan_ai_task t JOIN linggan_ai_control control USING(task_key)
+         JOIN linggan_ai_task_setting s USING(task_key)
+         JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=s.current_config_ref
+         WHERE t.task_key=$1",
+    )
+    .bind(task.as_str())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(status, ("pending".into(), false, None));
+    assert_eq!(
+        preview_replication(&db, source()).await.unwrap().input_hash,
+        before.input_hash
+    );
+    let prompt_receipt = prompt::save(
+        &db,
+        &prompt::SavePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: task,
+            expected_task_revision: 0,
+            system_text: "隔离版本二".into(),
+            instruction_text: "按输入正文分段。".into(),
+        },
+    )
+    .await
+    .unwrap();
+    prompt::activate(
+        &db,
+        &prompt::ActivatePrompt {
+            command_ref: Uuid::new_v4(),
+            task_key: task,
+            expected_task_revision: 0,
+            version_ref: prompt_receipt.version_ref,
+        },
+    )
+    .await
+    .unwrap();
+    let preview = preview_replication(&db, source()).await.unwrap();
+    assert_ne!(before.task_config_ref, preview.task_config_ref);
+    assert_ne!(before.input_hash, preview.input_hash);
+    assert_eq!(before.prompt, preview.prompt);
+    let model_substitute = |system: &str, user: &str, schema: &serde_json::Value| {
+        assert!(system.starts_with("隔离版本二"));
+        assert!(system.contains("# 样板复刻"));
+        assert!(!system.contains("完整正文。"));
+        assert!(user.contains("结尾不能丢失🙂"));
+        assert!(!user.contains("合成底稿验收"));
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(user)
+                .unwrap()
+                .as_object()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(schema["additionalProperties"], false);
+        r#"{"steps":["opening","action"]}"#
+    };
+    let reply = model_substitute(
+        &preview.system,
+        &preview.prompt,
+        &preview.response_schema.schema,
+    );
+    let steps = decode_replication_candidate(reply).unwrap();
+    for invalid in [
+        r#"{"steps":["opening"],"original":"完整正文。"}"#,
+        r#"{"steps":["完整正文。"]}"#,
+        r#"{"steps":[]}"#,
+        r#"{"steps":["opening"],"steps":["action"]}"#,
+    ] {
+        assert!(decode_replication_candidate(invalid).is_err());
+    }
+    let oversize = serde_json::json!({"steps": vec!["opening";13]}).to_string();
+    assert!(decode_replication_candidate(&oversize).is_err());
+    assert!(matches!(
+        preview_replication(
+            &db,
+            ReplicationSource {
+                material_revision: "0".repeat(64),
+                ..source()
+            }
+        )
+        .await,
+        Err(AssetsError::Stale)
+    ));
+    assert!(matches!(
+        preview_replication(
+            &db,
+            ReplicationSource {
+                domain_ref: Uuid::new_v4(),
+                ..source()
+            }
+        )
+        .await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    let count = |sql| sqlx::query_scalar::<_, i64>(sql).fetch_one(db.pool());
+    assert_eq!(
+        count("SELECT count(*) FROM linggan_creation_template")
+            .await
+            .unwrap(),
+        0
+    );
+    let mut tx = db.pool().begin().await.unwrap();
+    let saved = create_evidence_template_in(
+        &mut tx,
+        &CreateEvidenceTemplate {
+            request_id: Uuid::new_v4(),
+            work_ref,
+            domain_ref: dossier::DOMAIN,
+            material_revision: canonical.material_revision,
+            steps,
+        },
+        None,
+    )
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+    assert_eq!(saved.template.status, "review");
+    assert_eq!(
+        saved.template.steps,
+        [StructuralStep::Opening, StructuralStep::Action]
+    );
+    assert_eq!(
+        review_structural_template(
+            &db,
+            &saved.template.code,
+            &ReviewTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                action: TemplateAction::Approve,
+            }
+        )
+        .await
+        .unwrap()
+        .template
+        .status,
+        "ok"
+    );
+    assert_eq!(
+        count("SELECT count(*) FROM linggan_model_invocation")
+            .await
+            .unwrap(),
+        0
+    );
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL evidence template import"]
+async fn evidence_template_is_deduplicated_and_keeps_only_structural_steps() {
+    let db = db("evidence_template_import").await;
+    let work_ref = dossier::work(&db).await;
+    let canonical = linggan_evidence::research_dossier::read(&db, work_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    let command = CreateEvidenceTemplate {
+        request_id: Uuid::new_v4(),
+        work_ref,
+        domain_ref: dossier::DOMAIN,
+        material_revision: canonical.material_revision.clone(),
+        steps: vec![StructuralStep::Opening, StructuralStep::Action],
+    };
+
+    let bad_domain = CreateEvidenceTemplate {
+        request_id: Uuid::new_v4(),
+        domain_ref: Uuid::new_v4(),
+        material_revision: command.material_revision.clone(),
+        steps: command.steps.clone(),
+        ..command
+    };
+    let mut tx = db.pool().begin().await.unwrap();
+    assert!(matches!(
+        create_evidence_template_in(&mut tx, &bad_domain, None).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    tx.rollback().await.unwrap();
+
+    let bad_revision = CreateEvidenceTemplate {
+        request_id: Uuid::new_v4(),
+        material_revision: "0".repeat(64),
+        steps: command.steps.clone(),
+        ..command
+    };
+    let mut tx = db.pool().begin().await.unwrap();
+    assert!(matches!(
+        create_evidence_template_in(&mut tx, &bad_revision, None).await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+    tx.rollback().await.unwrap();
+
+    async fn submit(
+        db: &Database,
+        cmd: &CreateEvidenceTemplate,
+    ) -> Result<TemplateReceipt, AssetsError> {
+        let mut tx = db.pool().begin().await?;
+        let receipt = create_evidence_template_in(&mut tx, cmd, None).await?;
+        tx.commit().await?;
+        Ok(receipt)
+    }
+    let duplicate = CreateEvidenceTemplate {
+        request_id: Uuid::new_v4(),
+        material_revision: command.material_revision.clone(),
+        steps: command.steps.clone(),
+        ..command
+    };
+    let (first, second) = tokio::join!(submit(&db, &command), submit(&db, &duplicate));
+    let (saved, accepted) = match (first, second) {
+        (Ok(saved), Err(AssetsError::TemplateAlreadyImported)) => (saved, &command),
+        (Err(AssetsError::TemplateAlreadyImported), Ok(saved)) => (saved, &duplicate),
+        _ => panic!("exactly one evidence candidate must be saved"),
+    };
+    assert!(!saved.replayed);
+    let code = saved.template.code;
+    assert_eq!(saved.template.status, "review");
+    assert!(saved.template.source_work_id.is_none());
+    assert!(saved.template.labels.is_none());
+    assert_eq!(saved.template.evidence_source.unwrap().work_ref, work_ref);
+    assert_eq!(saved.template.steps, command.steps);
+    assert!(submit(&db, accepted).await.unwrap().replayed);
+    let stored: (serde_json::Value, Option<serde_json::Value>) = sqlx::query_as(
+        "SELECT r.steps,r.labels FROM linggan_creation_template_revision r
+         JOIN linggan_creation_template t USING(template_ref) WHERE t.evidence_work_ref=$1",
+    )
+    .bind(work_ref)
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    assert_eq!(stored.0, serde_json::json!(["opening", "action"]));
+    assert!(stored.1.is_none());
+    assert_eq!(
+        list_structural_templates(&db, dossier::DOMAIN)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(matches!(
+        revise_structural_template(
+            &db,
+            &code,
+            &ReviseTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                steps: command.steps.clone(),
+                labels: Some(TemplateLabels {
+                    name: "试图写入原句".into(),
+                    tags: vec![]
+                }),
+            }
+        )
+        .await,
+        Err(AssetsError::Invalid("evidence_template_labels"))
+    ));
+    let approved = review_structural_template(
+        &db,
+        &code,
+        &ReviewTemplate {
+            request_id: Uuid::new_v4(),
+            expected_revision: 1,
+            action: TemplateAction::Approve,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(approved.template.status, "ok");
+    let external = "dossier-note";
+    dossier::fixture::submit_package(
+        &db,
+        "content_detail",
+        serde_json::json!({"contentExternalId":external}),
+        serde_json::json!({
+            "kind":"content_detail",
+            "sourceObject":{"platform":"xhs","type":"content","externalId":external},
+            "payload":{"title":"合成更新","bodyText":"合成更新后的正文。","authorId":"synthetic-author"}
+        }),
+    ).await;
+    let updated = linggan_evidence::research_dossier::read(&db, work_ref)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_ne!(updated.material_revision, canonical.material_revision);
+    let current = list_structural_templates(&db, dossier::DOMAIN)
+        .await
+        .unwrap();
+    assert!(!current[0].source_available);
+    for action in [TemplateAction::Disable, TemplateAction::Enable] {
+        review_structural_template(
+            &db,
+            &code,
+            &ReviewTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                action,
+            },
+        )
+        .await
+        .unwrap();
+    }
+    assert!(matches!(
+        review_structural_template(
+            &db,
+            &code,
+            &ReviewTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                action: TemplateAction::Approve,
+            }
+        )
+        .await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+
+    assert!(matches!(
+        revise_structural_template(
+            &db,
+            &code,
+            &ReviseTemplate {
+                request_id: Uuid::new_v4(),
+                expected_revision: 1,
+                steps: command.steps,
+                labels: None,
+            }
+        )
+        .await,
+        Err(AssetsError::SourceUnavailable)
+    ));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL template catalog migration"]
+async fn template_labels_migration_keeps_existing_immutable_revision() {
+    let migration = include_str!("../../../database/migrations/0242_creation_template_labels.sql");
+    let before = without_migration(
+        full_schema::FULL_MIGRATIONS,
+        "0242_creation_template_labels",
+        migration,
+    );
+    let url = std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap();
+    let db = linggan_storage_postgres::testing::isolated_proof_schema(
+        &url,
+        "template_labels_upgrade",
+        &before,
+    )
+    .await
+    .unwrap();
+    let work = create(&db, draft(None, &["隔离旧稿"])).await;
+    let template = Uuid::new_v4();
+    sqlx::query(
+        "INSERT INTO linggan_creation_template(template_ref,code,work_ref,revision_ref,request_ref,request_hash)
+         VALUES ($1,'YB-9999',$2,$3,$4,repeat('a',64))",
+    )
+    .bind(template).bind(work.work_id).bind(work.revision.id).bind(Uuid::new_v4())
+    .execute(db.pool()).await.unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_creation_template_revision(template_ref,revision,steps)
+         VALUES ($1,1,'[\"opening\"]')",
+    )
+    .bind(template)
+    .execute(db.pool())
+    .await
+    .unwrap();
+    sqlx::raw_sql(migration).execute(db.pool()).await.unwrap();
+
+    let items = search_structural_templates(&db, fixture::dossier::DOMAIN, "yb-9999")
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].source_revision_id, Some(work.revision.id));
+    assert_eq!(items[0].steps, [StructuralStep::Opening]);
+    assert_eq!(items[0].revision, 1);
+    assert!(items[0].labels.is_none());
+}
+
+#[tokio::test]
 #[ignore = "isolated PostgreSQL historical migration guard"]
 async fn erasure_migration_stops_on_historical_immutable_private_source_use() {
     let migration =
@@ -845,6 +1238,7 @@ async fn opening_drafts_carries_the_approved_template_revision() {
     let template = create_structural_template(
         &db,
         &CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: anchor,
             expected_revision: before.revision.id,
@@ -897,6 +1291,7 @@ async fn opening_drafts_carries_the_approved_template_revision() {
         &db,
         &template.code,
         &ReviseTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             expected_revision: template.revision,
             steps: vec![StructuralStep::Scene, StructuralStep::Ending],
@@ -4690,6 +5085,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
     });
     let work = create(&db, doc).await;
     let command = CreateTemplate {
+        labels: None,
         request_id: Uuid::new_v4(),
         work_id: work.work_id,
         expected_revision: work.revision.id,
@@ -4743,6 +5139,10 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
         "ok"
     );
     let revise = ReviseTemplate {
+        labels: Some(TemplateLabels {
+            name: " 场景后接方法 ".into(),
+            tags: vec!["合成标签".into(), " Method ".into(), "method".into()],
+        }),
         request_id: Uuid::new_v4(),
         expected_revision: 1,
         steps: vec![StructuralStep::Opening, StructuralStep::Action],
@@ -4750,6 +5150,37 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
     let revised = revise_structural_template(&db, &code, &revise)
         .await
         .unwrap();
+    let labels = revised.template.labels.as_ref().unwrap();
+    assert_eq!(labels.name, "场景后接方法");
+    assert_eq!(labels.tags, ["合成标签", "Method"]);
+    for search in ["场景后", "mEtHoD", &code] {
+        let results = search_structural_templates(&db, fixture::dossier::DOMAIN, search)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].code, code);
+    }
+    assert!(
+        search_structural_templates(&db, Uuid::new_v4(), "场景后")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        search_structural_templates(&db, fixture::dossier::DOMAIN, "%")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        structural_template_history(&db, &code)
+            .await
+            .unwrap()
+            .last()
+            .unwrap()
+            .labels
+            .is_none()
+    );
     assert_eq!(
         (revised.template.revision, revised.template.status.as_str()),
         (2, "review")
@@ -4765,6 +5196,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
             &db,
             &code,
             &ReviseTemplate {
+                labels: None,
                 request_id: Uuid::new_v4(),
                 ..revise
             }
@@ -4788,6 +5220,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
             &db,
             &code,
             &ReviseTemplate {
+                labels: None,
                 request_id: Uuid::new_v4(),
                 expected_revision: 2,
                 steps: vec![StructuralStep::Opening]
@@ -4803,6 +5236,12 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
             .iter()
             .all(|v| !v.source_available)
     );
+    assert!(
+        search_structural_templates(&db, fixture::dossier::DOMAIN, "场景后")
+            .await
+            .unwrap()
+            .is_empty()
+    );
     let listed = list_structural_templates(&db, fixture::dossier::DOMAIN)
         .await
         .unwrap();
@@ -4817,6 +5256,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
         create_structural_template(
             &db,
             &CreateTemplate {
+                labels: None,
                 request_id: Uuid::new_v4(),
                 ..command
             }
@@ -4853,6 +5293,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
     let newer = create_structural_template(
         &db,
         &CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: work.work_id,
             expected_revision: saved.revision.id,
@@ -4869,6 +5310,7 @@ async fn structural_template_tracks_source_withdrawal_and_reset() {
     let large_code = create_structural_template(
         &db,
         &CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: work.work_id,
             expected_revision: saved.revision.id,
@@ -4961,6 +5403,7 @@ async fn structural_template_with_detached_history_waits_for_withdrawal() {
     let template = create_structural_template(
         &db,
         &CreateTemplate {
+            labels: None,
             request_id: Uuid::new_v4(),
             work_id: work.work_id,
             expected_revision: saved.revision.id,

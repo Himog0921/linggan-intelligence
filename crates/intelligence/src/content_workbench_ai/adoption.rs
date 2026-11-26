@@ -193,7 +193,7 @@ pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<V
     } else {
         row.get("suggestion")
     };
-    let output: WritingSuggestion =
+    let mut output: WritingSuggestion =
         serde_json::from_value(suggestion).map_err(|_| AiError::Invalid)?;
     let action: String = row.get("action");
     let frozen = original.as_deref().unwrap_or(&revision);
@@ -212,6 +212,17 @@ pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<V
         || page_indices.iter().any(|i| *i >= output.pages.len())
     {
         return Err(AiError::Invalid);
+    }
+    apply_draft_edits(&input.action, r, &indices, &mut output)?;
+    if !super::restricted_draft_materials(&document, &input).is_empty() {
+        let (_, _, _, restricted) = Box::pin(super::inputs_in(&mut tx, &input)).await?;
+        let title = output.title.as_deref().filter(|_| r.adopt_title);
+        super::validate_material_quotes(
+            &restricted,
+            title
+                .into_iter()
+                .chain(indices.iter().map(|&i| output.paragraphs[i].text.as_str())),
+        )?;
     }
     if r.adopt_title {
         if let Some(title) = output.title {
@@ -302,6 +313,31 @@ pub(super) async fn adopt(db: &Database, id: Uuid, r: &AdoptRequest) -> Result<V
     sqlx::query("INSERT INTO linggan_creation_ai_adoption_request(request_ref,suggestion_ref,command_hash,receipt) VALUES($1,$2,$3,$4)").bind(r.request_id).bind(id).bind(command_hash).bind(serde_json::to_value(&stored).map_err(|_|AiError::Invalid)?).execute(&mut *tx).await?;
     tx.commit().await?;
     serde_json::to_value(receipt).map_err(|_| AiError::Invalid)
+}
+
+fn apply_draft_edits(
+    action: &WritingAction,
+    request: &AdoptRequest,
+    indices: &[usize],
+    output: &mut WritingSuggestion,
+) -> Result<(), AiError> {
+    let Some(edits) = &request.draft_edits else {
+        return Ok(());
+    };
+    if *action != WritingAction::Draft || edits.len() > indices.len() {
+        return Err(AiError::Invalid);
+    }
+    let mut seen = std::collections::HashSet::new();
+    for edit in edits {
+        if !indices.contains(&edit.index)
+            || !seen.insert(edit.index)
+            || edit.text.chars().count() > 16000
+        {
+            return Err(AiError::Invalid);
+        }
+        output.paragraphs[edit.index].text.clone_from(&edit.text);
+    }
+    Ok(())
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
