@@ -13,6 +13,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tokio::sync::Mutex;
+use uuid::Uuid;
 
 #[derive(Default)]
 pub struct TopicMapReadModel {
@@ -38,7 +39,32 @@ pub struct SourceRevision {
     reading_authority: BTreeMap<String, String>,
 }
 
+#[derive(Clone, Copy)]
+enum SnapshotReuse {
+    QualifiedPage(Option<Uuid>),
+    Current,
+    Rebuild,
+}
+
 impl Entry {
+    fn can_reuse(&self, revision: &SourceRevision, policy: SnapshotReuse) -> bool {
+        match policy {
+            SnapshotReuse::QualifiedPage(topic) => {
+                self.created.elapsed() < MAX_PAGE_AGE
+                    && self.revision.same_source_authority(revision)
+                    && topic.is_none_or(|topic| {
+                        let topic = topic.to_string();
+                        self.revision.topics.contains_key(&topic)
+                            || !revision.topics.contains_key(&topic)
+                    })
+            }
+            SnapshotReuse::Current => {
+                self.created.elapsed() < REFRESH_AFTER && self.revision == *revision
+            }
+            SnapshotReuse::Rebuild => false,
+        }
+    }
+
     async fn project(&self, q: &TopicMapQuery) -> Result<Arc<TopicMapSnapshot>, TopicMapError> {
         let mut normalized = q.clone();
         normalized.reference_window_days = Some(q.reference_window_days.unwrap_or(30));
@@ -58,11 +84,17 @@ impl Entry {
 }
 
 impl TopicMapReadModel {
-    async fn current(&self, scope: &SourceScope, revision: &SourceRevision) -> Option<Arc<Entry>> {
-        let entries = self.entries.lock().await;
-        entries
+    async fn reusable(
+        &self,
+        scope: &SourceScope,
+        revision: &SourceRevision,
+        policy: SnapshotReuse,
+    ) -> Option<Arc<Entry>> {
+        self.entries
+            .lock()
+            .await
             .get(scope)
-            .filter(|entry| entry.created.elapsed() < REFRESH_AFTER && entry.revision == *revision)
+            .filter(|entry| entry.can_reuse(revision, policy))
             .cloned()
     }
 
@@ -76,22 +108,8 @@ impl TopicMapReadModel {
         validate_query(q)?;
         let scope = SourceScope::from_query(q);
         let revision = source_revision(db).await?;
-        let cached = {
-            let entries = self.entries.lock().await;
-            entries
-                .get(&scope)
-                .filter(|entry| {
-                    entry.created.elapsed() < MAX_PAGE_AGE
-                        && entry.revision.same_source_authority(&revision)
-                        && q.topic_ref.is_none_or(|topic| {
-                            let topic = topic.to_string();
-                            entry.revision.topics.contains_key(&topic)
-                                || !revision.topics.contains_key(&topic)
-                        })
-                })
-                .cloned()
-        };
-        if let Some(entry) = cached {
+        let policy = SnapshotReuse::QualifiedPage(q.topic_ref);
+        if let Some(entry) = self.reusable(&scope, &revision, policy).await {
             if (entry.created.elapsed() >= REFRESH_AFTER || entry.revision != revision)
                 && let Ok(build) = Arc::clone(&self.builds).try_lock_owned()
             {
@@ -99,7 +117,7 @@ impl TopicMapReadModel {
                 let db = db.clone();
                 tokio::spawn(async move {
                     let _build = build;
-                    if let Err(error) = model.build(&db, scope, false).await {
+                    if let Err(error) = model.build(&db, scope, SnapshotReuse::Rebuild).await {
                         eprintln!("topic map background refresh deferred: {error}");
                     }
                 });
@@ -107,7 +125,7 @@ impl TopicMapReadModel {
             return entry.project(q).await;
         }
         let _build = self.builds.lock().await;
-        self.build(db, scope, true).await?.project(q).await
+        self.build(db, scope, policy).await?.project(q).await
     }
 
     /// Current authority is validated before every reuse, including evidence opens.
@@ -119,18 +137,20 @@ impl TopicMapReadModel {
         validate_query(q)?;
         let scope = SourceScope::from_query(q);
         let revision = source_revision(db).await?;
-        if let Some(entry) = self.current(&scope, &revision).await {
+        let policy = SnapshotReuse::Current;
+        if let Some(entry) = self.reusable(&scope, &revision, policy).await {
             return entry.project(q).await;
         }
         let _build = self.builds.lock().await;
-        self.build(db, scope, true).await?.project(q).await
+        self.build(db, scope, policy).await?.project(q).await
     }
 
     /// Refresh atomically; requests may use the previous still-qualified version.
     pub async fn refresh(&self, db: &Database, q: &TopicMapQuery) -> Result<(), TopicMapError> {
         validate_query(q)?;
         let _build = self.builds.lock().await;
-        self.build(db, SourceScope::from_query(q), false).await?;
+        self.build(db, SourceScope::from_query(q), SnapshotReuse::Rebuild)
+            .await?;
         Ok(())
     }
 
@@ -157,7 +177,7 @@ impl TopicMapReadModel {
             })
         };
         if !warm {
-            self.build(db, scope, false).await?;
+            self.build(db, scope, SnapshotReuse::Rebuild).await?;
         }
         Ok(())
     }
@@ -166,7 +186,7 @@ impl TopicMapReadModel {
         &self,
         db: &Database,
         scope: SourceScope,
-        reuse_current: bool,
+        policy: SnapshotReuse,
     ) -> Result<Arc<Entry>, TopicMapError> {
         for _ in 0..2 {
             let mut tx = db.pool().begin().await?;
@@ -174,7 +194,7 @@ impl TopicMapReadModel {
                 .execute(&mut *tx)
                 .await?;
             let revision = source_revision_in(&mut tx).await?;
-            if reuse_current && let Some(entry) = self.current(&scope, &revision).await {
+            if let Some(entry) = self.reusable(&scope, &revision, policy).await {
                 tx.commit().await?;
                 return Ok(entry);
             }
