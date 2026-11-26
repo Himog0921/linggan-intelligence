@@ -399,6 +399,7 @@ const SOURCE_TABLES: &[&str] = &[
     "linggan_material_comment",
     "linggan_material_comment_engagement",
     "linggan_material_comment_platform_time",
+    "linggan_material_comment_restriction",
     "linggan_material_comment_first_admission",
     "linggan_material_domain_usage",
     "linggan_material_lane_observation",
