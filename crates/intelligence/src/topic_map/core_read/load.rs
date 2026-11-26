@@ -15,12 +15,12 @@ const RESULTS: &str = r#"
 
 pub(super) async fn load_windows(
     tx: &mut Transaction<'_, Postgres>,
-    q: &TopicMapQuery,
+    domain: Option<Uuid>,
     works: &[TopicMapWork],
     topics: &[TopicMapTopic],
 ) -> Result<(HashSet<Uuid>, HashMap<Uuid, Vec<Window>>), TopicMapError> {
     let mut rows = sqlx::query(RESULTS)
-        .bind(q.domain_ref)
+        .bind(domain)
         .fetch_all(&mut **tx)
         .await?;
     // A work may have qualified comments while the author's original is unavailable.
@@ -48,7 +48,7 @@ pub(super) async fn load_windows(
             ));
     }
     let (unavailable, inputs) =
-        crate::topic_map_core::qualify_definitions_and_inputs_in(tx, q.domain_ref, &scopes)
+        crate::topic_map_core::qualify_definitions_and_inputs_in(tx, domain, &scopes)
             .await
             .map_err(|e| TopicMapError::Source(e.to_string()))?;
     let mut windows = HashMap::<Uuid, Vec<Window>>::new();

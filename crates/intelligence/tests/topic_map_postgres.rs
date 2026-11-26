@@ -982,6 +982,50 @@ async fn page_read_model_returns_a_consistent_snapshot_during_research_writes() 
 
 #[tokio::test]
 #[ignore = "requires disposable PostgreSQL pgvector proof harness"]
+async fn a_waiting_page_reuses_the_snapshot_after_an_additive_write() {
+    use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
+    use std::{sync::Arc, time::Duration};
+
+    let db = fixture_database("topic_map_waiting_page").await;
+    let reference = work(&db, 0, "xhs", Some(2), 0).await;
+    let boundary = work(&db, 1, "xhs", Some(4), 15).await;
+    let (topic_ref, _) = topic(&db, "waiting-page", "合成并发主题", None, &[reference, boundary]).await;
+    sqlx::raw_sql("CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE plpgsql VOLATILE AS $$ BEGIN PERFORM pg_advisory_xact_lock(184514::bigint); RETURN clock_timestamp(); END $$")
+        .execute(db.pool()).await.unwrap();
+    let mut writer = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(184514::bigint)")
+        .execute(&mut *writer).await.unwrap();
+
+    let model = Arc::new(TopicMapReadModel::default());
+    let home = TopicMapQuery { domain_ref: Some(domain()), ..Default::default() };
+    let detail = TopicMapQuery { topic_ref: Some(topic_ref), window_days: Some(7), ..home.clone() };
+    let waiting_for_first = async {
+        tokio::time::timeout(Duration::from_secs(10), async {
+            loop {
+                let waiting: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND classid=0 AND objid=184514 AND NOT granted)")
+                    .fetch_one(db.pool()).await.unwrap();
+                if waiting { break; }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }).await.unwrap();
+        let queued = model.read_page(&db, &detail);
+        tokio::pin!(queued);
+        tokio::select! {
+            _ = &mut queued => panic!("the topic must wait for the initial source snapshot"),
+            _ = tokio::time::sleep(Duration::from_millis(250)) => {}
+        }
+        sqlx::query("INSERT INTO linggan_topic_map_discussion_unit(unit_ref,domain_ref,work_public_ref,unit_key,statement,speaker_role,evidence_role,evidence_refs,method_version) VALUES(gen_random_uuid(),$1,$2,repeat('b',64),'合成并发研究','unknown','context','[{}]','synthetic-proof')")
+            .bind(domain()).bind(reference).execute(&mut *writer).await.unwrap();
+        writer.commit().await.unwrap();
+        queued.await.unwrap()
+    };
+    let (overview, view) = tokio::join!(model.read_page(&db, &home), waiting_for_first);
+    assert_eq!(view.scope["asOf"], overview.unwrap().scope["asOf"]);
+    assert_eq!(view.works[0].work_ref, reference);
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL pgvector proof harness"]
 async fn page_refreshes_after_appended_collection_facts_without_blocking_reads() {
     use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
     use std::sync::Arc;
@@ -1020,6 +1064,56 @@ async fn page_refreshes_after_appended_collection_facts_without_blocking_reads()
         .bind(domain()).execute(db.pool()).await.unwrap();
     let restricted = model.read_page(&db, &query).await.unwrap();
     assert!(restricted.domains.iter().any(|row| row["description"] == "已更改的合成领域说明"));
+}
+
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL pgvector proof harness"]
+async fn first_topic_view_reuses_the_qualified_domain_snapshot() {
+    use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
+    use std::{sync::Arc, time::Duration};
+
+    let db = fixture_database("topic_map_first_topic_view").await;
+    let first = work(&db, 0, "xhs", Some(2), 0).await;
+    let boundary = work(&db, 1, "xhs", Some(4), 15).await;
+    work(&db, 2, "xhs", Some(6), 1).await;
+    let (topic_ref, _) = topic(&db, "shared-snapshot", "合成主题", None, &[first, boundary]).await;
+    sqlx::raw_sql("CREATE OR REPLACE FUNCTION scope_001_now() RETURNS timestamptz LANGUAGE plpgsql VOLATILE AS $$ BEGIN PERFORM pg_advisory_xact_lock(184513::bigint); RETURN clock_timestamp(); END $$")
+        .execute(db.pool()).await.unwrap();
+
+    let model = Arc::new(TopicMapReadModel::default());
+    let query = TopicMapQuery { domain_ref: Some(domain()), ..Default::default() };
+    model.warm_default_domain(&db, domain()).await.unwrap();
+    let mut block_qualification = db.pool().begin().await.unwrap();
+    sqlx::query("SELECT pg_advisory_xact_lock(184513::bigint)")
+        .execute(&mut *block_qualification).await.unwrap();
+    let overview = tokio::time::timeout(Duration::from_secs(3), model.read_page(&db, &query))
+        .await.expect("the first overview must use the warmed snapshot").unwrap();
+    assert_eq!(overview.scope["totalWorkCount"], 3);
+
+    let detail = TopicMapQuery {
+        topic_ref: Some(topic_ref),
+        window_days: Some(7),
+        reference_window_days: Some(90),
+        ..query.clone()
+    };
+    let view = tokio::time::timeout(Duration::from_secs(3), model.read_page(&db, &detail))
+        .await.expect("the first topic request must not run canonical qualification")
+        .unwrap();
+    assert_eq!(view.scope["asOf"], overview.scope["asOf"]);
+    assert_eq!(view.scope["totalWorkCount"], 1);
+    assert_eq!(view.scope["referenceWindowDays"], 90);
+    assert_eq!(view.scope["progress"]["graph"]["assigned"], 1);
+    assert_eq!(view.works[0].work_ref, first);
+    assert_eq!(view.works[0].topic_refs, [topic_ref]);
+
+    let other_scope = TopicMapQuery { platform: Some("douyin".into()), ..query.clone() };
+    block_qualification.rollback().await.unwrap();
+    let other = model.read_page(&db, &other_scope).await.unwrap();
+    assert!(other.works.is_empty(), "source scopes do not share qualifications");
+
+    let (new_topic, _) = topic(&db, "new-topic", "合成新主题", None, &[first, boundary]).await;
+    let view = model.read_page(&db, &TopicMapQuery { topic_ref: Some(new_topic), ..query }).await.unwrap();
+    assert!(view.works[0].topic_refs.contains(&new_topic), "a newly published topic can open before background refresh");
 }
 
 #[tokio::test]

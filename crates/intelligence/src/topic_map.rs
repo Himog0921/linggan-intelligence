@@ -1,9 +1,9 @@
 //! Canonical Topic Map projection and explicit, versioned human decisions.
 #[path = "topic_map/core_read.rs"]
 mod core_read;
+mod operations;
 #[path = "topic_map/read.rs"]
 mod read;
-mod operations;
 #[path = "topic_map/saved.rs"]
 mod saved;
 #[path = "topic_map/store.rs"]
@@ -60,7 +60,7 @@ pub struct TopicMapSnapshot {
     pub method_version: &'static str,
     pub source_boundary: &'static str,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicMapTopic {
     pub topic_ref: Uuid,
@@ -79,7 +79,7 @@ pub struct TopicMapTopic {
     pub journey: Value,
     pub core: Value,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicMapWork {
     pub work_ref: Uuid,

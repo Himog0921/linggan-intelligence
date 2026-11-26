@@ -27,17 +27,24 @@ pub(super) fn routes(
     if let Some(db) = _database {
         let model = Arc::clone(&model);
         tokio::spawn(async move {
-            if let Ok(Some(domain)) = sqlx::query_scalar::<_, Uuid>(
-                "SELECT domain_ref FROM observation_domain ORDER BY name LIMIT 1",
-            )
-            .fetch_optional(db.pool())
-            .await
-            {
-                let query = TopicMapQuery {
-                    domain_ref: Some(domain),
-                    ..Default::default()
-                };
-                let _ = model.read(&db, &query).await;
+            let mut ticks = tokio::time::interval(std::time::Duration::from_secs(60));
+            ticks.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+            loop {
+                ticks.tick().await;
+                match sqlx::query_scalar::<_, Uuid>(
+                    "SELECT domain_ref FROM observation_domain ORDER BY name LIMIT 1",
+                )
+                .fetch_optional(db.pool())
+                .await
+                {
+                    Ok(Some(domain)) => {
+                        if let Err(error) = model.warm_default_domain(&db, domain).await {
+                            eprintln!("topic map default domain warm-up deferred: {error}");
+                        }
+                    }
+                    Ok(None) => {}
+                    Err(error) => eprintln!("topic map default domain lookup deferred: {error}"),
+                }
             }
         });
     }

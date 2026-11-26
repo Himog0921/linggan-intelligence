@@ -23,6 +23,13 @@ pub(super) async fn read_topic_map_in(
     q: &TopicMapQuery,
     page_database: Option<&Database>,
 ) -> Result<TopicMapSnapshot, TopicMapError> {
+    validate_query(q)?;
+    qualify_in(tx, &SourceScope::from_query(q), page_database)
+        .await?
+        .project(q)
+}
+
+pub(super) fn validate_query(q: &TopicMapQuery) -> Result<(), TopicMapError> {
     if q.platform
         .as_deref()
         .is_some_and(|p| !matches!(p, "xhs" | "douyin"))
@@ -36,18 +43,59 @@ pub(super) async fn read_topic_map_in(
     {
         return Err(TopicMapError::Invalid("invalid scope"));
     }
+    Ok(())
+}
+
+#[derive(Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub(super) struct SourceScope {
+    domain_ref: Option<uuid::Uuid>,
+    platform: Option<String>,
+    include_reference: bool,
+}
+
+impl SourceScope {
+    pub(super) fn from_query(q: &TopicMapQuery) -> Self {
+        Self {
+            domain_ref: q.domain_ref,
+            platform: q.platform.clone(),
+            include_reference: q.include_reference,
+        }
+    }
+}
+
+pub(super) struct QualifiedTopicMap {
+    as_of: String,
+    domains: Vec<Value>,
+    topics: Vec<TopicMapTopic>,
+    works: Vec<TopicMapWork>,
+    core_states: BTreeMap<Uuid, &'static str>,
+    material_states: HashMap<Uuid, Option<linggan_evidence::research_dossier::MaterialState>>,
+    operation_facts: BTreeMap<Uuid, Vec<Value>>,
+    rules: Vec<Value>,
+    candidates: Vec<Value>,
+    alternatives: Vec<Value>,
+    changes: Vec<Value>,
+    own_creators: Vec<Value>,
+    windows: HashMap<i32, HashSet<Uuid>>,
+}
+
+pub(super) async fn qualify_in(
+    tx: &mut Transaction<'_, Postgres>,
+    scope: &SourceScope,
+    page_database: Option<&Database>,
+) -> Result<QualifiedTopicMap, TopicMapError> {
     let as_of: String = sqlx::query_scalar("SELECT scope_001_now()::text")
         .fetch_one(&mut **tx)
         .await?;
     let domains:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'name',name,'status',status,'description',description,'researchGoal',research_goal) FROM observation_domain ORDER BY name").fetch_all(&mut **tx).await?;
-    if q.domain_ref.is_some_and(|d| {
+    if scope.domain_ref.is_some_and(|d| {
         !domains
             .iter()
             .any(|v| v["domainRef"].as_str() == Some(&d.to_string()))
     }) {
         return Err(TopicMapError::NotFound);
     }
-    let scope_rows=sqlx::query("SELECT u.content_public_ref,u.domain_ref,array_agg(DISTINCT u.role) AS roles FROM linggan_material_domain_usage u JOIN linggan_material_content c ON c.public_ref=u.content_public_ref WHERE ($1::uuid IS NULL OR u.domain_ref=$1) AND ($2::text IS NULL OR c.platform=$2) AND ($3::bool OR u.role='primary') AND u.use_kind='domain_research' GROUP BY u.content_public_ref,u.domain_ref ORDER BY u.domain_ref,u.content_public_ref").bind(q.domain_ref).bind(&q.platform).bind(q.include_reference).fetch_all(&mut **tx).await?;
+    let scope_rows=sqlx::query("SELECT u.content_public_ref,u.domain_ref,array_agg(DISTINCT u.role) AS roles FROM linggan_material_domain_usage u JOIN linggan_material_content c ON c.public_ref=u.content_public_ref WHERE ($1::uuid IS NULL OR u.domain_ref=$1) AND ($2::text IS NULL OR c.platform=$2) AND ($3::bool OR u.role='primary') AND u.use_kind='domain_research' GROUP BY u.content_public_ref,u.domain_ref ORDER BY u.domain_ref,u.content_public_ref").bind(scope.domain_ref).bind(&scope.platform).bind(scope.include_reference).fetch_all(&mut **tx).await?;
     let mut roles: HashMap<Uuid, BTreeSet<String>> = HashMap::new();
     let mut domain_batches: BTreeMap<Uuid, Vec<Uuid>> = BTreeMap::new();
     for r in &scope_rows {
@@ -62,13 +110,13 @@ pub(super) async fn read_topic_map_in(
             .or_default()
             .extend(r.get::<Vec<String>, _>("roles"));
     }
-    let annotation_rows=sqlx::query("SELECT DISTINCT ON(work_public_ref) work_public_ref,to_jsonb(a)-'receipt_ref' AS value FROM linggan_topic_map_work_annotation a WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY work_public_ref,created_at DESC,annotation_ref DESC").bind(q.domain_ref).fetch_all(&mut **tx).await?;
+    let annotation_rows=sqlx::query("SELECT DISTINCT ON(work_public_ref) work_public_ref,to_jsonb(a)-'receipt_ref' AS value FROM linggan_topic_map_work_annotation a WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY work_public_ref,created_at DESC,annotation_ref DESC").bind(scope.domain_ref).fetch_all(&mut **tx).await?;
     let annotations: HashMap<Uuid, Value> = annotation_rows
         .iter()
         .map(|r| (r.get("work_public_ref"), r.get("value")))
         .collect();
-    let own_creators:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'platform',platform,'authorExternalId',author_external_id,'active',active,'membershipRef',membership_ref) FROM (SELECT DISTINCT ON(domain_ref,platform,author_external_id) * FROM linggan_topic_map_own_creator WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,platform,author_external_id,created_at DESC,membership_ref DESC) current").bind(q.domain_ref).fetch_all(&mut **tx).await?;
-    let breakout_rows=sqlx::query("SELECT DISTINCT ON(domain_ref,work_public_ref) domain_ref,work_public_ref,marked FROM linggan_topic_map_breakout WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,work_public_ref,created_at DESC,marking_ref DESC").bind(q.domain_ref).fetch_all(&mut **tx).await?;
+    let own_creators:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'platform',platform,'authorExternalId',author_external_id,'active',active,'membershipRef',membership_ref) FROM (SELECT DISTINCT ON(domain_ref,platform,author_external_id) * FROM linggan_topic_map_own_creator WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,platform,author_external_id,created_at DESC,membership_ref DESC) current").bind(scope.domain_ref).fetch_all(&mut **tx).await?;
+    let breakout_rows=sqlx::query("SELECT DISTINCT ON(domain_ref,work_public_ref) domain_ref,work_public_ref,marked FROM linggan_topic_map_breakout WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,work_public_ref,created_at DESC,marking_ref DESC").bind(scope.domain_ref).fetch_all(&mut **tx).await?;
     let breakouts: HashSet<Uuid> = breakout_rows
         .iter()
         .filter(|r| r.get::<bool, _>("marked"))
@@ -102,7 +150,11 @@ pub(super) async fn read_topic_map_in(
         None
     };
     for (domain_ref, references) in domain_batches {
-        let page_size = if imported_snapshot.is_some() { 1000 } else { 500 };
+        let page_size = if imported_snapshot.is_some() {
+            1000
+        } else {
+            500
+        };
         for pair in references.chunks(page_size) {
             let (first, second) = pair.split_at(pair.len().min(500));
             let (resources, states) = if let Some((db, import_sql)) = &imported_snapshot
@@ -143,7 +195,8 @@ pub(super) async fn read_topic_map_in(
                     })
                 });
                 let mut annotation = annotations.get(&reference).cloned();
-                let readable = resource.evidence_fragment.is_some() || resource.display.title.is_some();
+                let readable =
+                    resource.evidence_fragment.is_some() || resource.display.title.is_some();
                 if !readable {
                     annotation = None;
                 }
@@ -216,13 +269,13 @@ pub(super) async fn read_topic_map_in(
         .filter(|w| w.readable)
         .map(|w| w.work_ref)
         .collect();
-    let operation_facts = super::operations::read_in(tx, &operation_refs, q.domain_ref).await?;
+    let operation_facts = super::operations::read_in(tx, &operation_refs, scope.domain_ref).await?;
     for work in &mut works {
         work.own |= operation_facts.contains_key(&work.work_ref);
         work.own_breakout = work.own && breakouts.contains(&work.work_ref);
     }
-    let rules:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'platform',platform,'likeThreshold',like_threshold,'version',version,'ruleRef',rule_ref) FROM (SELECT DISTINCT ON(domain_ref,platform) * FROM linggan_topic_map_performance_rule WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,platform,version DESC) current").bind(q.domain_ref).fetch_all(&mut **tx).await?;
-    let rows=sqlx::query("SELECT t.topic_ref,t.canonical_key,d.definition_ref,d.version,d.display_name,d.definition_text,d.lifecycle_state,b.domain_ref,b.parent_topic_ref,b.version AS binding_version,array(SELECT m.work_public_ref FROM linggan_topic_classification_run r JOIN linggan_topic_material_member m USING(classification_run_ref) WHERE r.definition_ref=d.definition_ref AND r.run_kind='human_adjudicated' ORDER BY m.ordinal) AS members FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition d WHERE d.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_binding b WHERE b.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE ($1::uuid IS NULL OR b.domain_ref=$1) ORDER BY d.display_name").bind(q.domain_ref).fetch_all(&mut **tx).await?;
+    let rules:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('domainRef',domain_ref,'platform',platform,'likeThreshold',like_threshold,'version',version,'ruleRef',rule_ref) FROM (SELECT DISTINCT ON(domain_ref,platform) * FROM linggan_topic_map_performance_rule WHERE ($1::uuid IS NULL OR domain_ref=$1) ORDER BY domain_ref,platform,version DESC) current").bind(scope.domain_ref).fetch_all(&mut **tx).await?;
+    let rows=sqlx::query("SELECT t.topic_ref,t.canonical_key,d.definition_ref,d.version,d.display_name,d.definition_text,d.lifecycle_state,b.domain_ref,b.parent_topic_ref,b.version AS binding_version,array(SELECT m.work_public_ref FROM linggan_topic_classification_run r JOIN linggan_topic_material_member m USING(classification_run_ref) WHERE r.definition_ref=d.definition_ref AND r.run_kind='human_adjudicated' ORDER BY m.ordinal) AS members FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition d WHERE d.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_binding b WHERE b.topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)b ON true WHERE ($1::uuid IS NULL OR b.domain_ref=$1) ORDER BY d.display_name").bind(scope.domain_ref).fetch_all(&mut **tx).await?;
     let mut topics: Vec<TopicMapTopic> = rows
         .iter()
         .map(|r| TopicMapTopic {
@@ -262,7 +315,7 @@ pub(super) async fn read_topic_map_in(
             }
         }
     }
-    let candidates = attach_research(tx, q, &mut works, &mut topics).await?;
+    let candidates = attach_research(tx, scope.domain_ref, &mut works, &mut topics).await?;
     // Accepted, evidenced classifications extend membership without replacing a definition.
     for t in &mut topics {
         for w in &works {
@@ -303,194 +356,247 @@ pub(super) async fn read_topic_map_in(
             .map(|t| t.topic_ref)
             .collect();
     }
-    let all_history_own: Vec<_> = works.iter().filter(|w| w.own).collect();
-    let history_own_published = all_history_own
-        .iter()
-        .filter(|w| w.published_at.is_some() || w.published_at_source_text.is_some())
-        .count();
-    let history_own_unknown = all_history_own.len() - history_own_published;
-    let history_own_refs: Vec<_> = all_history_own.iter().map(|w| w.work_ref).collect();
     let dates: Value = json!(
         works
             .iter()
             .map(|w| json!({"work_ref":w.work_ref,"published_at":w.published_at}))
             .collect::<Vec<_>>()
     );
-    let window_refs: HashSet<Uuid> = if let Some(days) = q.window_days {
-        sqlx::query_scalar("SELECT work_ref FROM jsonb_to_recordset($1) AS input(work_ref uuid,published_at timestamptz) WHERE published_at >= $2::timestamptz-($3::int*interval '1 day') AND published_at<=$2::timestamptz").bind(dates.clone()).bind(&as_of).bind(days).fetch_all(&mut **tx).await?.into_iter().collect()
-    } else {
-        works.iter().map(|w| w.work_ref).collect()
-    };
-    let reference_days = q.reference_window_days.unwrap_or(30);
-    let recent: HashSet<Uuid> = if reference_days == 0 {
-        works.iter().map(|w| w.work_ref).collect()
-    } else {
-        sqlx::query_scalar("SELECT work_ref FROM jsonb_to_recordset($1) AS input(work_ref uuid,published_at timestamptz) WHERE published_at >= $2::timestamptz-($3::int*interval '1 day') AND published_at<=$2::timestamptz").bind(dates).bind(&as_of).bind(reference_days).fetch_all(&mut **tx).await?.into_iter().collect()
-    };
-    let selected_refs = if let Some(topic) = q.topic_ref {
-        Some(
-            topics
-                .iter()
-                .find(|t| t.topic_ref == topic)
-                .ok_or(TopicMapError::NotFound)?
-                .work_refs
-                .iter()
-                .copied()
-                .collect::<HashSet<_>>(),
-        )
-    } else {
-        None
-    };
-    let included = |w: &&TopicMapWork| {
-        window_refs.contains(&w.work_ref)
-            && q.overlay.as_ref().is_none_or(|p| w.overlays.contains(p))
-            && q.path
-                .as_ref()
-                .is_none_or(|p| &w.path == p || w.path == "both")
-    };
-    for t in &mut topics {
-        let tw: Vec<_> = works
+    let windows = sqlx::query_as::<_, (i32, Uuid)>(
+        "SELECT days,work_ref
+         FROM jsonb_to_recordset($1) AS input(work_ref uuid,published_at timestamptz)
+         CROSS JOIN (VALUES (7),(30),(90)) AS windows(days)
+         WHERE published_at >= $2::timestamptz-(days*interval '1 day')
+           AND published_at <= $2::timestamptz",
+    )
+    .bind(dates)
+    .bind(&as_of)
+    .fetch_all(&mut **tx)
+    .await?
+    .into_iter()
+    .fold(
+        HashMap::<_, HashSet<_>>::new(),
+        |mut windows, (days, work)| {
+            windows.entry(days).or_default().insert(work);
+            windows
+        },
+    );
+    let alternatives = read_alternatives(tx, scope.domain_ref).await?;
+    let changes:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('topicRef',t.topic_ref,'definitionRef',d.definition_ref,'definitionVersion',d.version,'lastViewedDefinitionRef',v.definition_ref,'lastViewedAt',v.created_at::text,'structureChanged',v.definition_ref IS NOT NULL AND v.definition_ref<>d.definition_ref,'notViewed',v.definition_ref IS NULL,'lastViewedWorkRefs',v.observed_work_refs) FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_viewed WHERE topic_ref=t.topic_ref AND ($1::uuid IS NULL OR domain_ref=$1) ORDER BY created_at DESC LIMIT 1)v ON true WHERE t.topic_ref=ANY($2)").bind(scope.domain_ref).bind(topics.iter().map(|t|t.topic_ref).collect::<Vec<_>>()).fetch_all(&mut **tx).await?;
+    Ok(QualifiedTopicMap {
+        as_of,
+        domains,
+        topics,
+        works,
+        core_states,
+        material_states,
+        operation_facts,
+        rules,
+        candidates,
+        alternatives,
+        changes,
+        own_creators,
+        windows,
+    })
+}
+
+impl QualifiedTopicMap {
+    /// Topic, journey and date filters operate on one qualified source revision.
+    pub(super) fn project(&self, q: &TopicMapQuery) -> Result<TopicMapSnapshot, TopicMapError> {
+        let works = &self.works;
+        let mut topics = self.topics.clone();
+        let rules = &self.rules;
+        let operation_facts = &self.operation_facts;
+        let all_history_own: Vec<_> = works.iter().filter(|w| w.own).collect();
+        let history_own_published = all_history_own
             .iter()
-            .filter(|w| t.work_refs.contains(&w.work_ref))
-            .filter(included)
-            .collect();
-        t.statistics = statistics(&tw, &rules);
-        t.statistics["operations"] = super::operations::summarize(&operation_facts, &tw);
-        let history: Vec<_> = works
-            .iter()
-            .filter(|w| t.work_refs.contains(&w.work_ref) && w.own)
-            .collect();
-        t.statistics["ownHistoryPublishedCount"] = json!(
-            history
-                .iter()
-                .filter(|w| w.published_at.is_some() || w.published_at_source_text.is_some())
-                .count()
-        );
-        t.statistics["ownHistoryPublicationUnknownCount"] = json!(
-            history
-                .iter()
-                .filter(|w| w.published_at.is_none() && w.published_at_source_text.is_none())
-                .count()
-        );
-        t.statistics["ownHistoryBreakoutCount"] =
-            json!(history.iter().filter(|w| w.own_breakout).count());
-        t.statistics["ownHistoricalWorkRefs"] =
-            json!(history.iter().map(|w| w.work_ref).collect::<Vec<_>>());
-        t.statistics["recentLowFollowerHighLikeCount"] = json!(
-            works
-                .iter()
-                .filter(|w| t.work_refs.contains(&w.work_ref)
-                    && recent.contains(&w.work_ref)
-                    && !w.own
-                    && w.follower_count.is_some_and(|f| f <= 1000)
-                    && w.likes.is_some_and(|l| l >= 500))
-                .count()
-        );
-        t.journey = journey(&tw);
-        t.work_refs = tw.iter().map(|w| w.work_ref).collect();
-    }
-    let selected: Vec<_> = works
-        .iter()
-        .filter(included)
-        .filter(|w| {
-            selected_refs
-                .as_ref()
-                .is_none_or(|s| s.contains(&w.work_ref))
-        })
-        .collect();
-    let mut stats = statistics(&selected, &rules);
-    let operations = super::operations::summarize(&operation_facts, &selected);
-    stats["operations"] = operations.clone();
-    let journeys = journey(&selected);
-    let sources = sources(&selected, &rules);
-    let work_count = selected.len();
-    let readable = selected.iter().filter(|w| w.readable).count();
-    // Topic membership and the author's journey stage are independent: an
-    // automatically assigned work may legitimately have no identified stage.
-    let pending = selected.iter().filter(|w| w.topic_refs.is_empty()).count();
-    let understanding = count_coverage(selected.iter().map(|work| &work.work_ref), &core_states);
-    let mut material = json!({"ready":0,"preparing":0,"blocked":0,"unknown":0});
-    for work in &selected {
-        use linggan_evidence::research_dossier::MaterialState;
-        let state = match material_states.get(&work.work_ref).copied().flatten() {
-            Some(MaterialState::Ready) => "ready",
-            Some(MaterialState::Preparing) => "preparing",
-            Some(MaterialState::Blocked) => "blocked",
-            None => "unknown",
+            .filter(|w| w.published_at.is_some() || w.published_at_source_text.is_some())
+            .count();
+        let history_own_unknown = all_history_own.len() - history_own_published;
+        let history_own_refs: Vec<_> = all_history_own.iter().map(|w| w.work_ref).collect();
+        let empty = HashSet::new();
+        let window_refs = q
+            .window_days
+            .map(|days| self.windows.get(&days).unwrap_or(&empty));
+        let reference_days = q.reference_window_days.unwrap_or(30);
+        let recent: HashSet<Uuid> = if reference_days == 0 {
+            works.iter().map(|work| work.work_ref).collect()
+        } else {
+            self.windows
+                .get(&reference_days)
+                .cloned()
+                .unwrap_or_default()
         };
-        material[state] = json!(material[state].as_u64().unwrap_or(0) + 1);
-    }
-    let progress = json!({"totalWorkCount":work_count,"material":material,
-        "understanding":understanding,"graph":{"assigned":work_count-pending,"unassigned":pending}});
-    let alternatives = read_alternatives(tx, q, &works).await?;
-    let mut changes:Vec<Value>=sqlx::query_scalar("SELECT jsonb_build_object('topicRef',t.topic_ref,'definitionRef',d.definition_ref,'definitionVersion',d.version,'lastViewedDefinitionRef',v.definition_ref,'lastViewedAt',v.created_at::text,'structureChanged',v.definition_ref IS NOT NULL AND v.definition_ref<>d.definition_ref,'notViewed',v.definition_ref IS NULL,'lastViewedWorkRefs',v.observed_work_refs) FROM linggan_topic_workspace t JOIN LATERAL(SELECT * FROM linggan_topic_definition WHERE topic_ref=t.topic_ref ORDER BY version DESC LIMIT 1)d ON true LEFT JOIN LATERAL(SELECT * FROM linggan_topic_map_viewed WHERE topic_ref=t.topic_ref AND ($1::uuid IS NULL OR domain_ref=$1) ORDER BY created_at DESC LIMIT 1)v ON true WHERE t.topic_ref=ANY($2)").bind(q.domain_ref).bind(topics.iter().map(|t|t.topic_ref).collect::<Vec<_>>()).fetch_all(&mut **tx).await?;
-    for change in &mut changes {
-        let Some(topic) = topics
-            .iter()
-            .find(|t| change["topicRef"].as_str() == Some(&t.topic_ref.to_string()))
-        else {
-            continue;
+        let selected_refs = if let Some(topic) = q.topic_ref {
+            Some(
+                topics
+                    .iter()
+                    .find(|t| t.topic_ref == topic)
+                    .ok_or(TopicMapError::NotFound)?
+                    .work_refs
+                    .iter()
+                    .copied()
+                    .collect::<HashSet<_>>(),
+            )
+        } else {
+            None
         };
-        let viewed: HashSet<Uuid> = change["lastViewedWorkRefs"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|v| v.as_str().and_then(|v| v.parse().ok()))
-            .collect();
-        let unseen: Vec<_> = topic
-            .work_refs
-            .iter()
-            .copied()
-            .filter(|r| !viewed.contains(r))
-            .collect();
-        change["workSetDifferenceKnown"] = json!(change["lastViewedAt"].is_string());
-        change["unviewedWorkRefs"] = json!(unseen);
-        change["differenceKind"] = json!("material_or_classification_change_not_market_trend");
-    }
-    let mut scoped_works: Vec<_> = works
-        .into_iter()
-        .filter(|w| {
-            window_refs.contains(&w.work_ref)
-                && selected_refs
-                    .as_ref()
-                    .is_none_or(|s| s.contains(&w.work_ref))
+        let included = |w: &&TopicMapWork| {
+            window_refs.is_none_or(|refs| refs.contains(&w.work_ref))
                 && q.overlay.as_ref().is_none_or(|p| w.overlays.contains(p))
                 && q.path
                     .as_ref()
                     .is_none_or(|p| &w.path == p || w.path == "both")
+        };
+        for t in &mut topics {
+            let tw: Vec<_> = works
+                .iter()
+                .filter(|w| t.work_refs.contains(&w.work_ref))
+                .filter(included)
+                .collect();
+            t.statistics = statistics(&tw, rules);
+            t.statistics["operations"] = super::operations::summarize(operation_facts, &tw);
+            let history: Vec<_> = works
+                .iter()
+                .filter(|w| t.work_refs.contains(&w.work_ref) && w.own)
+                .collect();
+            t.statistics["ownHistoryPublishedCount"] = json!(
+                history
+                    .iter()
+                    .filter(|w| w.published_at.is_some() || w.published_at_source_text.is_some())
+                    .count()
+            );
+            t.statistics["ownHistoryPublicationUnknownCount"] = json!(
+                history
+                    .iter()
+                    .filter(|w| w.published_at.is_none() && w.published_at_source_text.is_none())
+                    .count()
+            );
+            t.statistics["ownHistoryBreakoutCount"] =
+                json!(history.iter().filter(|w| w.own_breakout).count());
+            t.statistics["ownHistoricalWorkRefs"] =
+                json!(history.iter().map(|w| w.work_ref).collect::<Vec<_>>());
+            t.statistics["recentLowFollowerHighLikeCount"] = json!(
+                works
+                    .iter()
+                    .filter(|w| t.work_refs.contains(&w.work_ref)
+                        && recent.contains(&w.work_ref)
+                        && !w.own
+                        && w.follower_count.is_some_and(|f| f <= 1000)
+                        && w.likes.is_some_and(|l| l >= 500))
+                    .count()
+            );
+            t.journey = journey(&tw);
+            t.work_refs = tw.iter().map(|w| w.work_ref).collect();
+        }
+        let selected: Vec<_> = works
+            .iter()
+            .filter(included)
+            .filter(|w| {
+                selected_refs
+                    .as_ref()
+                    .is_none_or(|s| s.contains(&w.work_ref))
+            })
+            .collect();
+        let mut stats = statistics(&selected, rules);
+        let operations = super::operations::summarize(operation_facts, &selected);
+        stats["operations"] = operations.clone();
+        let journeys = journey(&selected);
+        let sources = sources(&selected, rules);
+        let work_count = selected.len();
+        let readable = selected.iter().filter(|w| w.readable).count();
+        // Topic membership and the author's journey stage are independent: an
+        // automatically assigned work may legitimately have no identified stage.
+        let pending = selected.iter().filter(|w| w.topic_refs.is_empty()).count();
+        let understanding = count_coverage(
+            selected.iter().map(|work| &work.work_ref),
+            &self.core_states,
+        );
+        let mut material = json!({"ready":0,"preparing":0,"blocked":0,"unknown":0});
+        for work in &selected {
+            use linggan_evidence::research_dossier::MaterialState;
+            let state = match self.material_states.get(&work.work_ref).copied().flatten() {
+                Some(MaterialState::Ready) => "ready",
+                Some(MaterialState::Preparing) => "preparing",
+                Some(MaterialState::Blocked) => "blocked",
+                None => "unknown",
+            };
+            material[state] = json!(material[state].as_u64().unwrap_or(0) + 1);
+        }
+        let progress = json!({"totalWorkCount":work_count,"material":material,
+        "understanding":understanding,"graph":{"assigned":work_count-pending,"unassigned":pending}});
+        let alternatives = self
+            .alternatives
+            .iter()
+            .filter(|a| {
+                q.topic_ref.is_none_or(|topic| {
+                    a["topicRef"]
+                        .as_str()
+                        .and_then(|reference| reference.parse().ok())
+                        == Some(topic)
+                })
+            })
+            .cloned()
+            .collect();
+        let mut changes = self.changes.clone();
+        for change in &mut changes {
+            let Some(topic) = topics
+                .iter()
+                .find(|t| change["topicRef"].as_str() == Some(&t.topic_ref.to_string()))
+            else {
+                continue;
+            };
+            let viewed: HashSet<Uuid> = change["lastViewedWorkRefs"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|v| v.as_str().and_then(|v| v.parse().ok()))
+                .collect();
+            let unseen: Vec<_> = topic
+                .work_refs
+                .iter()
+                .copied()
+                .filter(|r| !viewed.contains(r))
+                .collect();
+            change["workSetDifferenceKnown"] = json!(change["lastViewedAt"].is_string());
+            change["unviewedWorkRefs"] = json!(unseen);
+            change["differenceKind"] = json!("material_or_classification_change_not_market_trend");
+        }
+        let mut scoped_works: Vec<_> = selected.into_iter().cloned().collect();
+        scoped_works.sort_by(|a, b| {
+            b.published_at
+                .cmp(&a.published_at)
+                .then_with(|| a.work_ref.cmp(&b.work_ref))
+        });
+        super::core_read::summarize_scope(&scoped_works, &mut topics);
+        let scoped_refs: HashSet<_> = scoped_works.iter().map(|w| w.work_ref).collect();
+        let candidates = self
+            .candidates
+            .iter()
+            .filter(|candidate| {
+                candidate["workRef"]
+                    .as_str()
+                    .and_then(|s| s.parse::<Uuid>().ok())
+                    .is_some_and(|work| scoped_refs.contains(&work))
+            })
+            .cloned()
+            .collect();
+        Ok(TopicMapSnapshot {
+            domains: self.domains.clone(),
+            scope: json!({"operations":operations,"progress":progress,"domainRef":q.domain_ref,"topicRef":q.topic_ref,"platform":q.platform,"windowDays":q.window_days,"referenceWindowDays":reference_days,"asOf":self.as_of,"totalWorkCount":work_count,"loadedWorkCount":scoped_works.len(),"canonicalWorkCount":works.len(),"readableWorkCount":readable,"unclassifiedWorkCount":pending,"readLimit":null,"ownIdentityState":if !operation_facts.is_empty() || self.own_creators.iter().any(|v|v["active"]==true){"partial_observed"}else{"unknown"},"includeReference":q.include_reference,"ownHistoricalWorkRefs":history_own_refs,"ownHistoryPublishedCount":history_own_published,"ownHistoryPublicationUnknownCount":history_own_unknown,"recentReferenceWorkRefs":recent}),
+            topics,
+            works: scoped_works,
+            statistics: stats,
+            journey: journeys,
+            sources,
+            candidates,
+            changes,
+            alternatives,
+            own_creators: self.own_creators.clone(),
+            method_version: METHOD_VERSION,
+            source_boundary: "已接纳且当前可读的独立作品样本；领域用途去重，非平台或市场总体。我方覆盖仅限明确身份的已观察发布历史。",
         })
-        .collect();
-    scoped_works.sort_by(|a, b| {
-        b.published_at
-            .cmp(&a.published_at)
-            .then_with(|| a.work_ref.cmp(&b.work_ref))
-    });
-    super::core_read::summarize_scope(&scoped_works, &mut topics);
-    let scoped_refs: HashSet<_> = scoped_works.iter().map(|w| w.work_ref).collect();
-    let candidates = candidates
-        .into_iter()
-        .filter(|candidate| {
-            candidate["workRef"]
-                .as_str()
-                .and_then(|s| s.parse::<Uuid>().ok())
-                .is_some_and(|work| scoped_refs.contains(&work))
-        })
-        .collect();
-    Ok(TopicMapSnapshot {
-        domains,
-        scope: json!({"operations":operations,"progress":progress,"domainRef":q.domain_ref,"topicRef":q.topic_ref,"platform":q.platform,"windowDays":q.window_days,"referenceWindowDays":reference_days,"asOf":as_of,"totalWorkCount":work_count,"loadedWorkCount":scoped_works.len(),"canonicalWorkCount":seen.len(),"readableWorkCount":readable,"unclassifiedWorkCount":pending,"readLimit":null,"ownIdentityState":if !operation_facts.is_empty() || own_creators.iter().any(|v|v["active"]==true){"partial_observed"}else{"unknown"},"includeReference":q.include_reference,"ownHistoricalWorkRefs":history_own_refs,"ownHistoryPublishedCount":history_own_published,"ownHistoryPublicationUnknownCount":history_own_unknown,"recentReferenceWorkRefs":recent}),
-        topics,
-        works: scoped_works,
-        statistics: stats,
-        journey: journeys,
-        sources,
-        candidates,
-        changes,
-        alternatives,
-        own_creators,
-        method_version: METHOD_VERSION,
-        source_boundary: "已接纳且当前可读的独立作品样本；领域用途去重，非平台或市场总体。我方覆盖仅限明确身份的已观察发布历史。",
-    })
+    }
 }
 
 pub(crate) fn statistics(works: &[&TopicMapWork], rules: &[Value]) -> Value {
@@ -558,10 +664,12 @@ fn sources(works: &[&TopicMapWork], rules: &[Value]) -> Vec<Value> {
 }
 async fn read_alternatives(
     tx: &mut Transaction<'_, Postgres>,
-    q: &TopicMapQuery,
-    works: &[TopicMapWork],
+    domain: Option<Uuid>,
 ) -> Result<Vec<Value>, TopicMapError> {
-    let rows=sqlx::query("SELECT a.*,a.created_at::text AS time,array(SELECT work_public_ref FROM linggan_topic_map_alternative_evidence WHERE alternative_ref=a.alternative_ref ORDER BY work_public_ref) AS refs,(SELECT jsonb_agg(jsonb_build_object('workRef',work_public_ref,'sourceManifest',source_manifest) ORDER BY work_public_ref) FROM linggan_topic_map_alternative_evidence WHERE alternative_ref=a.alternative_ref) AS manifests FROM linggan_topic_map_alternative a WHERE ($1::uuid IS NULL OR a.domain_ref=$1) AND ($2::uuid IS NULL OR a.topic_ref=$2) ORDER BY created_at DESC").bind(q.domain_ref).bind(q.topic_ref).fetch_all(&mut **tx).await?;
+    let rows = sqlx::query("SELECT a.alternative_ref,a.domain_ref,a.created_at::text AS time,
+        array(SELECT work_public_ref FROM linggan_topic_map_alternative_evidence WHERE alternative_ref=a.alternative_ref ORDER BY work_public_ref) AS refs
+        FROM linggan_topic_map_alternative a WHERE ($1::uuid IS NULL OR a.domain_ref=$1) ORDER BY created_at DESC")
+        .bind(domain).fetch_all(&mut **tx).await?;
     let mut results = Vec::new();
     for row in rows {
         let alternative: Uuid = row.get("alternative_ref");
@@ -569,13 +677,12 @@ async fn read_alternatives(
             super::saved::read_saved_alternative_in(tx, row.get("domain_ref"), alternative).await?;
         results.push(json!({"alternativeRef":saved.alternative_ref,"domainRef":saved.domain_ref,"topicRef":saved.topic_ref,"definitionRef":saved.definition_ref,"kind":saved.kind,"title":saved.title,"angle":saved.angle,"rationale":saved.rationale,"methodVersion":saved.method_version,"evidenceWorkRefs":row.get::<Vec<Uuid>,_>("refs"),"createdAt":row.get::<String,_>("time"),"sourceState":saved.source_state,"researchManifest":saved.research_manifest,"sourceManifests":saved.source_manifests,"trackingEnabled":false}));
     }
-    let _ = works; // Original-version qualification is independent of the overview time window.
     Ok(results)
 }
 
 async fn attach_research(
     tx: &mut Transaction<'_, Postgres>,
-    q: &TopicMapQuery,
+    domain: Option<Uuid>,
     works: &mut [TopicMapWork],
     topics: &mut [TopicMapTopic],
 ) -> Result<Vec<Value>, TopicMapError> {
@@ -588,10 +695,10 @@ async fn attach_research(
     let domains: Vec<Uuid> = sqlx::query_scalar(
         "SELECT domain_ref FROM observation_domain WHERE ($1::uuid IS NULL OR domain_ref=$1)",
     )
-    .bind(q.domain_ref)
+    .bind(domain)
     .fetch_all(&mut **tx)
     .await?;
-    let memberships=sqlx::query("SELECT topic_ref,definition_ref,work_public_ref,evidence_citations FROM linggan_topic_map_membership WHERE method_version<>'topic-map.research.v2' AND ($1::uuid IS NULL OR domain_ref=$1)").bind(q.domain_ref).fetch_all(&mut **tx).await?;
+    let memberships=sqlx::query("SELECT topic_ref,definition_ref,work_public_ref,evidence_citations FROM linggan_topic_map_membership WHERE method_version<>'topic-map.research.v2' AND ($1::uuid IS NULL OR domain_ref=$1)").bind(domain).fetch_all(&mut **tx).await?;
     let referenced: Vec<_> = works
         .iter()
         .filter(|w| w.annotation.is_some())
@@ -678,7 +785,7 @@ async fn attach_research(
     if !installed {
         return Ok(candidates);
     }
-    super::core_read::attach_windows(tx, q, works, topics).await
+    super::core_read::attach_windows(tx, domain, works, topics).await
 }
 
 type OverviewPage = (

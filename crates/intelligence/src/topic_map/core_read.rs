@@ -82,7 +82,7 @@ impl Window {
 
 pub(super) async fn attach_windows(
     tx: &mut Transaction<'_, Postgres>,
-    q: &TopicMapQuery,
+    domain: Option<Uuid>,
     works: &mut [TopicMapWork],
     topics: &mut [TopicMapTopic],
 ) -> Result<Vec<Value>, TopicMapError> {
@@ -93,8 +93,8 @@ pub(super) async fn attach_windows(
     if !ready {
         return Ok(vec![]);
     }
-    let (unavailable, mut windows) = load::load_windows(tx, q, works, topics).await?;
-    units::attach_rules(tx, q, topics, &unavailable).await?;
+    let (unavailable, mut windows) = load::load_windows(tx, domain, works, topics).await?;
+    units::attach_rules(tx, domain, topics, &unavailable).await?;
     let mut candidates = Vec::new();
     for work in works {
         units::invalidate_annotation(work, &unavailable);
