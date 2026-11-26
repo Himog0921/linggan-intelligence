@@ -102,6 +102,60 @@ async fn pending_image_update_keeps_the_same_partial_core_available() {
 
 #[tokio::test]
 #[ignore = "owned isolated PostgreSQL, synthetic saved Core; no provider"]
+async fn topic_pages_keep_qualified_snapshot_during_l1_and_unselected_ocr_writes() {
+    use crate::topic_map::{TopicMapQuery, read_model::TopicMapReadModel};
+    use std::sync::Arc;
+
+    let (db, model_config) = support::setup("topic_map_live_ai_writes").await;
+    let work = support::work(&db, "dossier-note", "合成正文，用于快照并发回归。").await;
+    let (_, version, _) =
+        support::dossier_fixture::acquired_image_source_with_bytes(&db, Some(vec![b'a'; 12])).await;
+    configure_tasks_for_test(&db, model_config).await;
+
+    let mut tx = db.pool().begin().await.unwrap();
+    let unit: Uuid = sqlx::query_scalar(
+        "INSERT INTO linggan_material_unit(unit_ref,content_public_ref,unit_key,kind,slot_key,page_ordinal,source_version,source_state)
+         SELECT gen_random_uuid(),$1,'image:'||slot_key,'image',slot_key,1,$2,'present'
+         FROM linggan_media_slot WHERE content_external_id='dossier-note' AND role='image' LIMIT 1 RETURNING unit_ref",
+    ).bind(work).bind(version.to_string()).fetch_one(&mut *tx).await.unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_reading_selection(selection_ref,unit_ref,revision,event,source_version,source_state,page_ordinal,adoption,verification)
+         VALUES(gen_random_uuid(),$1,0,'initialization',$2,'present',1,'automatic','unchecked')",
+    ).bind(unit).bind(version.to_string()).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+
+    let model = Arc::new(TopicMapReadModel::default());
+    let query = TopicMapQuery { domain_ref: Some(support::D), ..Default::default() };
+    let before = model.read_page(&db, &query).await.unwrap();
+    assert_eq!(before.scope["progress"]["understanding"]["missing"], 1);
+
+    seed_core(&db, work, model_config, false).await;
+    let reading: Uuid = sqlx::query_scalar(
+        "INSERT INTO linggan_material_reading(reading_ref,unit_ref,content_public_ref,source_version,source_state,page_ordinal,
+             producer_kind,rule_version,blocks,issues,source_location,publication)
+         VALUES(gen_random_uuid(),$1,$2,$3,'present',1,'cloud_vision','synthetic','[]','[]','{}','automatic') RETURNING reading_ref",
+    ).bind(unit).bind(work).bind(version.to_string()).fetch_one(db.pool()).await.unwrap();
+
+    let while_refreshing = model.read_page(&db, &query).await.unwrap();
+    assert!(Arc::ptr_eq(&before, &while_refreshing), "appended Core and unselected OCR preserve the prior page");
+    let refreshed = model.read(&db, &query).await.unwrap();
+    assert!(!Arc::ptr_eq(&before, &refreshed), "strict reads requalify the new source revision");
+    assert_eq!(refreshed.scope["progress"]["understanding"]["available"], 1);
+
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::query("UPDATE linggan_material_unit SET current_reading_ref=$2,revision=1 WHERE unit_ref=$1")
+        .bind(unit).bind(reading).execute(&mut *tx).await.unwrap();
+    sqlx::query(
+        "INSERT INTO linggan_material_reading_selection(selection_ref,unit_ref,revision,event,source_version,source_state,reading_ref,page_ordinal,adoption,verification)
+         VALUES(gen_random_uuid(),$1,1,'automatic',$2,'present',$3,1,'automatic','unchecked')",
+    ).bind(unit).bind(version.to_string()).bind(reading).execute(&mut *tx).await.unwrap();
+    tx.commit().await.unwrap();
+    let adopted = model.read_page(&db, &query).await.unwrap();
+    assert!(!Arc::ptr_eq(&refreshed, &adopted), "selecting a reading invalidates the old source authority");
+}
+
+#[tokio::test]
+#[ignore = "owned isolated PostgreSQL, synthetic saved Core; no provider"]
 async fn saved_core_drives_topic_queue_and_persisted_membership() {
     roundtrip(false).await;
     roundtrip(true).await;

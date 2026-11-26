@@ -35,7 +35,7 @@ pub struct SourceRevision {
     schema: String,
     tables: BTreeMap<String, String>,
     topics: BTreeMap<String, String>,
-    capture_rows: BTreeMap<String, BTreeSet<String>>,
+    append_only_rows: BTreeMap<String, BTreeSet<String>>,
     reading_authority: BTreeMap<String, String>,
 }
 
@@ -261,24 +261,24 @@ impl SourceRevision {
                 .tables
                 .iter()
                 .filter(|(table, _)| {
-                    carries_authority(table) && !self.capture_rows.contains_key(*table)
+                    carries_authority(table) && !self.append_only_rows.contains_key(*table)
                 })
                 .eq(newer.tables.iter().filter(|(table, _)| {
-                    carries_authority(table) && !newer.capture_rows.contains_key(*table)
+                    carries_authority(table) && !newer.append_only_rows.contains_key(*table)
                 }))
-            && self.capture_rows.iter().all(|(table, old)| {
+            && self.append_only_rows.iter().all(|(table, old)| {
                 newer
-                    .capture_rows
+                    .append_only_rows
                     .get(table)
                     .is_some_and(|new| old.is_subset(new))
             })
     }
 }
 
-/// Accepted capture facts can extend a projection. An update or deletion of
-/// any observed row still invalidates it. Restriction and access policy tables
-/// are deliberately absent from this list.
-fn additive_capture(table: &str) -> bool {
+/// Ordinary collection and L1 completion append facts. A dated page can keep
+/// serving them at its original cutoff while the next version is built.
+/// Updates, deletes, and policy or revision-control changes invalidate it.
+fn additive_facts(table: &str) -> bool {
     matches!(
         table,
         "linggan_material_content"
@@ -302,8 +302,22 @@ fn additive_capture(table: &str) -> bool {
             | "collection_work_order_domain_usage"
             | "collection_acquisition_request"
             | "collection_admission_decision"
+            | "linggan_content_understanding_request"
+            | "linggan_content_understanding_result"
     )
 }
+
+// Cloud OCR may append a historical reading without replacing the selected
+// current source. Once selected, it again participates in strict authority.
+const ADDITIVE_READING: &str = "
+    r.publication='automatic' AND r.source_state<>'restricted' AND (
+        r.producer_kind='platform' OR (
+            r.producer_kind='cloud_vision' AND NOT EXISTS (
+                SELECT 1 FROM linggan_material_reading_selection s
+                WHERE s.unit_ref=r.unit_ref AND s.reading_ref=r.reading_ref
+            )
+        )
+    )";
 
 // The automatic selection ledger certifies the native body pointer. As long
 // as the text status stays the same, a newly captured platform reading can
@@ -408,13 +422,11 @@ async fn source_revision_in(
         };
         let automatic_reading = match relation.as_str() {
             "linggan_material_unit" => Some(NATIVE_BODY_POINTER),
-            "linggan_material_reading" => Some(
-                "r.producer_kind='platform' AND r.publication='automatic' AND r.source_state<>'restricted'",
-            ),
+            "linggan_material_reading" => Some(ADDITIVE_READING),
             "linggan_material_reading_selection" => Some(ADDITIVE_SELECTION),
             _ => None,
         };
-        let include_rows = additive_capture(&relation)
+        let include_rows = additive_facts(&relation)
             || automatic_reading.is_some()
             || matches!(
                 relation.as_str(),
@@ -441,15 +453,15 @@ async fn source_revision_in(
             "NULL::text[]".into()
         };
         parts.push(match content {
-            Some(content) => format!("SELECT '{id}' AS id, '{id}:{file}:' || count(*)::text || ':' || md5(COALESCE(string_agg({content},',' ORDER BY {content}),'')) AS signature, {rows} AS capture_rows, {authority} AS reading_authority FROM {name} r"),
-            None => format!("SELECT '{id}' AS id, '{id}:{file}:' || count(*)::text || ':' || md5(COALESCE(string_agg(xmin::text || ':' || ctid::text,',' ORDER BY ctid),'')) AS signature, {rows} AS capture_rows, {authority} AS reading_authority FROM {name} r"),
+            Some(content) => format!("SELECT '{id}' AS id, '{id}:{file}:' || count(*)::text || ':' || md5(COALESCE(string_agg({content},',' ORDER BY {content}),'')) AS signature, {rows} AS append_only_rows, {authority} AS reading_authority FROM {name} r"),
+            None => format!("SELECT '{id}' AS id, '{id}:{file}:' || count(*)::text || ':' || md5(COALESCE(string_agg(xmin::text || ':' || ctid::text,',' ORDER BY ctid),'')) AS signature, {rows} AS append_only_rows, {authority} AS reading_authority FROM {name} r"),
         });
     }
     // Definitions/columns/functions affect qualification even without a row change.
     let schema: String = sqlx::query_scalar("SELECT current_database()||':'||current_user||':'||current_schema()||':'||md5(COALESCE(string_agg(signature,',' ORDER BY signature),'')) FROM (SELECT 'c:'||c.oid::text||':'||c.relname||':'||c.relkind::text||':'||c.relfilenode::text||':'||c.relrowsecurity::text||':'||c.relforcerowsecurity::text||':'||COALESCE(c.relacl::text,'')||':'||COALESCE(c.reloptions::text,'') AS signature FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() UNION ALL SELECT 'v:'||r.oid::text||':'||r.xmin::text FROM pg_rewrite r JOIN pg_class c ON c.oid=r.ev_class JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() UNION ALL SELECT 's:'||n.oid::text||':'||COALESCE(n.nspacl::text,'') FROM pg_namespace n WHERE n.nspname=current_schema() UNION ALL SELECT 'r:'||p.oid::text||':'||p.xmin::text FROM pg_policy p JOIN pg_class c ON c.oid=p.polrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema() UNION ALL SELECT 'p:'||p.oid::text||':'||p.xmin::text FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=current_schema() UNION ALL SELECT 'a:'||a.attrelid::text||':'||a.attnum::text||':'||a.xmin::text FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname=current_schema()) definitions")
         .fetch_one(&mut **tx).await?;
     let mut revisions = BTreeMap::new();
-    let mut capture_rows = BTreeMap::new();
+    let mut append_only_rows = BTreeMap::new();
     let mut reading_authority = BTreeMap::new();
     if !parts.is_empty() {
         // All identifiers were quoted by PostgreSQL format('%I.%I'); literal
@@ -460,8 +472,8 @@ async fn source_revision_in(
         for row in rows {
             let id: String = row.get("id");
             let name = names.remove(&id).unwrap();
-            if let Some(rows) = row.get::<Option<Vec<String>>, _>("capture_rows") {
-                capture_rows.insert(name.clone(), rows.into_iter().collect());
+            if let Some(rows) = row.get::<Option<Vec<String>>, _>("append_only_rows") {
+                append_only_rows.insert(name.clone(), rows.into_iter().collect());
             }
             if let Some(authority) = row.get::<Option<String>, _>("reading_authority") {
                 reading_authority.insert(name.clone(), authority);
@@ -490,7 +502,7 @@ async fn source_revision_in(
         schema,
         tables: revisions,
         topics,
-        capture_rows,
+        append_only_rows,
         reading_authority,
     })
 }
