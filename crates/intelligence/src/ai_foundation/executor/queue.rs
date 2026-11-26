@@ -1,7 +1,8 @@
 //! Claims carry both instance and item generations. A claim is not dispatch admission.
 use super::{ExecutorError, ExecutorFence};
-use crate::ai_foundation::{TaskKey, batch_store::InputRef, rounds};
+use crate::ai_foundation::{TaskKey, batch_store::InputRef, rounds, selected_collection_scope};
 use linggan_contracts::ai_limits::AI_LIMITS;
+use linggan_evidence::selected_collection_run;
 use linggan_storage_postgres::Database;
 use serde_json::json;
 use sqlx::Row;
@@ -36,6 +37,34 @@ impl ClaimedItem {
         }
         rounds::evaluate_in(&mut tx, self.batch_ref).await?;
         tx.commit().await?;
+        Ok(())
+    }
+    pub(crate) async fn check_selected_collection_in(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        material_class: &str,
+    ) -> Result<(), ExecutorError> {
+        let selected_item = matches!(
+            self.input,
+            InputRef::ContentUnderstanding {
+                collection_run_ref: Some(_),
+                ..
+            } | InputRef::TopicResearch {
+                collection_run_ref: Some(_),
+                ..
+            }
+        );
+        if !selected_item && !selected_collection_run::configured() {
+            return Ok(());
+        }
+        let Some(selected) = selected_collection_scope::lock_filter_in(tx).await? else {
+            return Err(selected_collection_scope::scope_denied().into());
+        };
+        if material_class != "note_material"
+            || !selected_item_allowed_in(tx, self.item_ref, &selected).await?
+        {
+            return Err(selected_collection_scope::scope_denied().into());
+        }
         Ok(())
     }
     pub(crate) async fn lock_in(
@@ -89,6 +118,18 @@ pub async fn claim_next(
 
 pub(super) async fn claim_with_lens(db:&Database,owner:ExecutorFence,lens_enabled:bool)->Result<Option<ClaimedItem>,ExecutorError>{
     let mut tx = owner.begin(db, true).await?;
+    let Some(selected) = selected_collection_scope::filter_in(&mut tx).await? else {
+        return Ok(None);
+    };
+    claim_in(tx, owner, lens_enabled, &selected).await
+}
+
+async fn claim_in(
+    mut tx: sqlx::Transaction<'_, sqlx::Postgres>,
+    owner: ExecutorFence,
+    lens_enabled: bool,
+    selected: &selected_collection_scope::Filter,
+) -> Result<Option<ClaimedItem>, ExecutorError> {
     sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1,4540139))")
         .bind(owner.instance_ref().to_string())
         .execute(&mut *tx)
@@ -97,7 +138,7 @@ pub(super) async fn claim_with_lens(db:&Database,owner:ExecutorFence,lens_enable
     if !capacity {
         return Ok(None);
     }
-    let claim_sql = concat!(
+    const CLAIM_BASE: &str = concat!(
         "SELECT item.item_ref,item.batch_ref,item.position,item.input_ref,b.task_key,b.task_config_ref,b.kind,c.lease_generation FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item item USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_control bc USING(batch_ref) JOIN linggan_ai_task t ON t.task_key=b.task_key JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=b.task_config_ref WHERE c.state='pending' AND c.next_attempt_at<=clock_timestamp() AND bc.state='open' AND NOT bc.cancel_requested AND t.lifecycle='active' AND t.task_key IN ('content_understanding','content_understanding_deep','model_probe','writing_legacy','creation_title','ocr_recognition','work_comparison','creator_research','comment_understanding','comment_problem_consolidation','ops_title_label','creator_account_research','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review') AND (b.task_key<>'ops_title_label' OR $3) AND cfg.execution_contract=t.handler_contract AND c.attempt_count<$1 AND item.position<(bc.last_round_no+1)*$2 AND NOT EXISTS(SELECT 1 FROM linggan_ai_control switch WHERE switch.scope_key IN ('global','executor','task:'||b.task_key) AND NOT switch.enabled) AND (b.task_key<>'ocr_recognition' OR NOT EXISTS(SELECT 1 FROM linggan_ai_batch_item previous JOIN linggan_ai_batch_item_control previous_control USING(item_ref) WHERE previous.batch_ref=b.batch_ref AND previous.position<item.position AND (previous_control.state NOT IN('succeeded','failed','skipped','cancelled') OR previous_control.failure_code='ai_dispatch_unknown'))) AND NOT EXISTS(SELECT 1 FROM linggan_topic_research_stage current_stage JOIN linggan_topic_research_stage prior ON prior.window_ref=current_stage.window_ref AND prior.stage_number<current_stage.stage_number JOIN linggan_ai_batch_item_control pc ON pc.item_ref=prior.item_ref WHERE current_stage.item_ref=item.item_ref AND pc.state NOT IN('succeeded','failed','skipped','cancelled'))",
         " AND NOT EXISTS(SELECT 1 FROM linggan_model_config mc
           JOIN linggan_model_entry me ON me.model_ref=mc.model_ref
@@ -105,14 +146,30 @@ pub(super) async fn claim_with_lens(db:&Database,owner:ExecutorFence,lens_enable
           WHERE mc.config_ref=cfg.model_config_ref AND linggan_ai_billing_paused(mv.connection_ref))",
         include_str!("topic_resolution_order.sql"),
         include_str!("comment_understanding_order.sql"),
-        " ORDER BY b.created_at,b.batch_ref,item.position FOR UPDATE OF c SKIP LOCKED LIMIT 1"
     );
-    let row = sqlx::query(claim_sql)
+    const CLAIM_ORDER: &str = " ORDER BY b.created_at,b.batch_ref,item.position FOR UPDATE OF c SKIP LOCKED LIMIT 1";
+    let scoped = selected.collection_run_ref.is_some();
+    let sql = if scoped {
+        format!(
+            "WITH selected_collection AS (SELECT $4::uuid AS run_ref,$5::uuid AS domain_ref,$6::uuid[] AS work_refs) {CLAIM_BASE}{}{}",
+            include_str!("selected_collection_item.sql"), CLAIM_ORDER
+        )
+    } else {
+        format!("{CLAIM_BASE} AND NOT (item.input_ref ? 'collectionRunRef'){CLAIM_ORDER}")
+    };
+    let query = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(AI_LIMITS.max_attempts as i32)
         .bind(AI_LIMITS.round_size as i32)
-        .bind(lens_enabled)
-        .fetch_optional(&mut *tx)
-        .await?;
+        .bind(lens_enabled);
+    let query = if scoped {
+        query
+            .bind(selected.collection_run_ref)
+            .bind(selected.domain)
+            .bind(selected.works.as_deref())
+    } else {
+        query
+    };
+    let row = query.fetch_optional(&mut *tx).await?;
     let Some(row) = row else { return Ok(None) };
     let lease_token = Uuid::new_v4();
     let generation = row
@@ -138,6 +195,29 @@ pub(super) async fn claim_with_lens(db:&Database,owner:ExecutorFence,lens_enable
     tx.commit().await?;
     Ok(Some(item))
 }
+async fn selected_item_allowed_in(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    item_ref: Uuid,
+    selected: &selected_collection_scope::Filter,
+) -> Result<bool, sqlx::Error> {
+    if selected.collection_run_ref.is_none() {
+        return Ok(false);
+    }
+    sqlx::query_scalar(concat!(
+        "WITH selected_collection AS (SELECT $2::uuid AS run_ref,$3::uuid AS domain_ref,$4::uuid[] AS work_refs)
+         SELECT EXISTS(SELECT 1 FROM linggan_ai_batch_item item JOIN linggan_ai_batch b USING(batch_ref)
+         WHERE item.item_ref=$1",
+        include_str!("selected_collection_item.sql"),
+        ")"
+    ))
+    .bind(item_ref)
+    .bind(selected.collection_run_ref)
+    .bind(selected.domain)
+    .bind(selected.works.as_deref())
+    .fetch_one(&mut **tx)
+    .await
+}
+
 /// Attempted leases settle as unknown; recovery never blindly sends another provider request.
 pub async fn recover_expired(db: &Database, owner: ExecutorFence) -> Result<u64, ExecutorError> {
     let mut tx = owner.begin_mode(db, false, true).await?;
@@ -169,3 +249,7 @@ pub async fn recover_expired(db: &Database, owner: ExecutorFence) -> Result<u64,
     tx.commit().await?;
     Ok(rows.len() as u64)
 }
+
+#[cfg(test)]
+#[path = "selected_collection_tests.rs"]
+mod selected_collection_tests;

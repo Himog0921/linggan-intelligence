@@ -464,6 +464,7 @@ pub(crate) async fn seed_core(
     let inputs = vec![BatchInput {
         item_key: reference.to_string(),
         input: InputRef::ContentUnderstanding {
+            collection_run_ref: None,
             request_ref: reference,
         },
     }];

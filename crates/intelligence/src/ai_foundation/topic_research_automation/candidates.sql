@@ -9,11 +9,12 @@ JOIN LATERAL (
  ORDER BY r.created_at DESC,r.request_ref DESC LIMIT 1
 ) core ON true
 WHERE a.enabled AND d.status='active' AND usage.use_kind='domain_research'
+ AND ($4::uuid IS NULL OR (a.domain_ref=$4 AND core.work_ref=ANY($5::uuid[])))
  AND ($1::uuid IS NULL OR (a.domain_ref,core.request_ref)>($1::uuid,$2::uuid))
  AND NOT EXISTS(SELECT 1 FROM linggan_ai_control c WHERE c.scope_key IN('global','executor','task:topic_research') AND NOT c.enabled)
  AND NOT EXISTS(SELECT 1 FROM linggan_ai_task_setting s JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=s.current_config_ref WHERE s.task_key IN('topic_research') AND cfg.budget_mode='unconfigured')
  AND NOT EXISTS(SELECT 1 FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) WHERE r.domain_ref=a.domain_ref AND w.input_refs#>>'{coverage,coreRef}'=core.request_ref::text AND w.input_refs->>'methodVersion'=$3)
  AND NOT EXISTS(SELECT 1 FROM linggan_ai_command c WHERE c.command_ref=md5('topic-auto:'||a.domain_ref::text||':'||core.request_ref::text||':'||$3)::uuid)
- AND (SELECT count(DISTINCT w.window_ref) FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=a.domain_ref AND b.kind='automatic' AND c.state IN('pending','running'))<8
+ AND (SELECT count(DISTINCT w.window_ref) FROM linggan_topic_research_run r JOIN linggan_topic_research_window w USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item i USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=a.domain_ref AND b.kind='automatic' AND c.state IN('pending','running') AND i.input_ref->>'collectionRunRef' IS NOT DISTINCT FROM $6::uuid::text)<8
 ORDER BY a.domain_ref,core.request_ref
 LIMIT 8

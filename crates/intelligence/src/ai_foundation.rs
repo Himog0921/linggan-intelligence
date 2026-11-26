@@ -18,6 +18,7 @@ mod number;
 pub mod prompt;
 pub mod provider_store;
 pub mod rounds;
+mod selected_collection_scope;
 pub mod settings_inputs;
 pub mod settings_read;
 pub mod skill_binding;

@@ -7,6 +7,7 @@ use crate::collection_control::{
     collection_control_schema_is_ready, validate_installation_credential_in,
 };
 use crate::producer_runtime::ProducerRuntimeError;
+use crate::selected_collection_run::{self, ExecutionScope};
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use sqlx::{Postgres, Row, Transaction};
@@ -304,6 +305,30 @@ pub async fn claim_media_acquisition(
         return Err(MediaAcquisitionError::SchemaUnavailable);
     }
     let mut tx = database.pool().begin().await?;
+    let allowed_observations: Option<Vec<Uuid>> =
+        match selected_collection_run::load_in(&mut tx).await? {
+            ExecutionScope::Unrestricted => None,
+            ExecutionScope::Blocked => {
+                return Ok(MediaAcquisitionDecision::NothingWaiting {
+                    next_poll_after_seconds: 30,
+                });
+            }
+            ExecutionScope::Selected(scope) => {
+                let Some(scope) =
+                    crate::collection_run_dispatch::lock_selected_run_in(&mut tx, scope.run_ref)
+                        .await?
+                else {
+                    return Ok(MediaAcquisitionDecision::NothingWaiting {
+                        next_poll_after_seconds: 30,
+                    });
+                };
+                Some(sqlx::query_scalar(
+                "SELECT DISTINCT origin.observation_ref FROM linggan_material_media_origin origin
+                 JOIN collection_run_package delivered USING(package_ref)
+                 WHERE delivered.run_ref=$1 AND origin.content_public_ref=ANY($2)"
+            ).bind(scope.run_ref).bind(&scope.work_refs).fetch_all(&mut *tx).await?)
+            }
+        };
     let installation = sqlx::query(
         "SELECT installation.installation_ref,installation.capabilities \
          FROM plugin_installation installation \
@@ -347,9 +372,11 @@ pub async fn claim_media_acquisition(
            state=CASE WHEN attempt_count >= $1 THEN 'terminal' ELSE 'retry_wait' END, \
            claimed_by_installation_ref=NULL,lease_expires_at=NULL,next_attempt_at=scope_001_now(), \
            last_error='lease_expired',updated_at=scope_001_now() \
-         WHERE state='leased' AND lease_expires_at <= scope_001_now()",
+         WHERE state='leased' AND lease_expires_at <= scope_001_now()
+           AND ($2::uuid[] IS NULL OR observation_ref=ANY($2))",
     )
     .bind(MAX_ATTEMPTS)
+    .bind(allowed_observations.as_deref())
     .execute(&mut *tx)
     .await?;
     let replay = sqlx::query(
@@ -357,10 +384,12 @@ pub async fn claim_media_acquisition(
          FROM linggan_media_acquisition_work \
          WHERE state='leased' AND claimed_by_installation_ref=$1 \
            AND lease_expires_at > scope_001_now() \
+           AND ($2::uuid[] IS NULL OR observation_ref=ANY($2)) \
            AND NOT EXISTS(SELECT 1 FROM linggan_material_media_origin live WHERE live.observation_ref=linggan_media_acquisition_work.observation_ref AND live.purpose='live_photo' AND linggan_media_acquisition_work.component_kind<>'still') \
          ORDER BY updated_at LIMIT 1 FOR UPDATE",
     )
     .bind(installation_ref)
+    .bind(allowed_observations.as_deref())
     .fetch_optional(&mut *tx)
     .await?;
     let work = if let Some(row) = replay {
@@ -370,10 +399,12 @@ pub async fn claim_media_acquisition(
             "SELECT work_ref FROM linggan_media_acquisition_work \
              WHERE state IN ('pending','retry_wait') AND attempt_count < $1 \
                AND next_attempt_at <= scope_001_now() \
+               AND ($2::uuid[] IS NULL OR observation_ref=ANY($2)) \
                AND NOT EXISTS(SELECT 1 FROM linggan_material_media_origin live WHERE live.observation_ref=linggan_media_acquisition_work.observation_ref AND live.purpose='live_photo' AND linggan_media_acquisition_work.component_kind<>'still') \
              ORDER BY next_attempt_at,created_at LIMIT 1 FOR UPDATE SKIP LOCKED",
         )
         .bind(MAX_ATTEMPTS)
+        .bind(allowed_observations.as_deref())
         .fetch_optional(&mut *tx)
         .await?;
         let Some(candidate) = candidate else {

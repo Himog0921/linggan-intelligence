@@ -116,13 +116,8 @@ fn check(
                 && has_referenceable_text(m)
         });
         if !transcript_available {
-            let (state, message) = video_transcript_gap(video);
-            result.gap(
-                "video_transcript_required",
-                state,
-                message,
-                video["slotKey"].as_str(),
-            );
+            let (code, state, message) = video_transcript_gap(video);
+            result.gap(code, state, message, video["slotKey"].as_str());
         }
     }
     if require_transcript && source_is_video && !has_video {
@@ -149,10 +144,11 @@ fn check(
     result
 }
 
-fn video_transcript_gap(video: &Value) -> (MaterialState, &'static str) {
+fn video_transcript_gap(video: &Value) -> (&'static str, MaterialState, &'static str) {
     use MaterialState::{Blocked, Preparing};
+    const REQUIRED: &str = "video_transcript_required";
     if video["sourceState"] == "restricted" {
-        return (Blocked, "视频来源受限，不能用于内容理解。");
+        return (REQUIRED, Blocked, "视频来源受限，不能用于内容理解。");
     }
     let asr = &video["processing"]["asr"];
     let audio = &video["processing"]["audio_extract"];
@@ -160,23 +156,45 @@ fn video_transcript_gap(video: &Value) -> (MaterialState, &'static str) {
         asr["reason"].as_str().or(audio["reason"].as_str()),
         Some("no_speech_observed" | "no_audio_stream_observed")
     ) {
-        return (Blocked, "处理已结束，未取得可用口播，不能启动 L1。");
+        return (
+            "video_transcript_unavailable",
+            Blocked,
+            "处理已结束，未取得可用口播，不能启动 L1。",
+        );
     }
     if [asr, audio].iter().any(|job| {
-        matches!(job["queueState"].as_str(), Some("pending" | "leased" | "retry_wait"))
-            || (job["queueState"].is_null()
-                && matches!(job["state"].as_str(), Some("pending" | "running")))
+        matches!(
+            job["queueState"].as_str(),
+            Some("pending" | "leased" | "retry_wait")
+        ) || (job["queueState"].is_null()
+            && matches!(job["state"].as_str(), Some("pending" | "running")))
     }) {
-        return (Preparing, "音频提取或转录任务正在队列中，生成有效转录后会自动重新检查。");
+        return (
+            REQUIRED,
+            Preparing,
+            "音频提取或转录任务正在队列中，生成有效转录后会自动重新检查。",
+        );
     }
     match video["download"]["state"].as_str() {
-        Some("running") => (Preparing, "视频正在下载，取得原件后将进入媒体处理。"),
+        Some("running") => (
+            REQUIRED,
+            Preparing,
+            "视频正在下载，取得原件后将进入媒体处理。",
+        ),
         Some("expired_url" | "mime_mismatch" | "size_limit" | "network_error")
             if video["sourceState"] == "not_acquired" =>
         {
-            (Blocked, "视频下载未取得合格原件，请查看下载记录中的失败原因。")
+            (
+                REQUIRED,
+                Blocked,
+                "视频下载未取得合格原件，请查看下载记录中的失败原因。",
+            )
         }
-        _ => (Blocked, "视频口播尚未取得有效转录，完成转录后才能进行内容理解。"),
+        _ => (
+            REQUIRED,
+            Blocked,
+            "视频口播尚未取得有效转录，完成转录后才能进行内容理解。",
+        ),
     }
 }
 
@@ -227,10 +245,17 @@ mod tests {
             "processing":{"asr":{"state":"failed","queueState":"retry_wait","reason":"process_timeout"}}});
         let readiness = check(&[], &[video.clone()], true, true);
         assert_eq!(readiness.state, MaterialState::Preparing);
-        assert!(readiness.gaps.iter().all(|gap| gap.state == MaterialState::Preparing));
-        video["processing"]["asr"] = json!({"state":"completed","queueState":"completed","reason":"no_speech_observed"});
+        assert!(
+            readiness
+                .gaps
+                .iter()
+                .all(|gap| gap.state == MaterialState::Preparing)
+        );
+        video["processing"]["asr"] =
+            json!({"state":"completed","queueState":"completed","reason":"no_speech_observed"});
         let readiness = check(&[text()], &[video], true, true);
         assert_eq!(readiness.state, MaterialState::Blocked);
+        assert_eq!(readiness.gaps[0].code, "video_transcript_unavailable");
         assert!(readiness.gaps[0].message.contains("处理已结束"));
     }
     #[test]

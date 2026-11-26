@@ -159,7 +159,7 @@ async fn topic_resolution_concurrent_claims_take_only_one_domain_assignment() {
             sqlx::query("INSERT INTO linggan_ai_batch(batch_ref,task_key,task_config_ref,kind,inputs_sha256,item_count,command_ref) SELECT $1,task_key,current_config_ref,'interactive',repeat('0',64),1,$3 FROM linggan_ai_task_setting WHERE task_key=$2")
                 .bind(batch).bind(task).bind(command).execute(&mut *tx).await.unwrap();
             sqlx::query("INSERT INTO linggan_ai_batch_item(item_ref,batch_ref,position,item_key,input_ref) VALUES($1,$2,0,'synthetic',$3)")
-                .bind(item).bind(batch).bind(serde_json::to_value(InputRef::TopicResearch{window_ref:window,stage_number:stage}).unwrap()).execute(&mut *tx).await.unwrap();
+                .bind(item).bind(batch).bind(serde_json::to_value(InputRef::TopicResearch{window_ref:window,stage_number:stage,collection_run_ref:None}).unwrap()).execute(&mut *tx).await.unwrap();
             sqlx::query("INSERT INTO linggan_topic_research_stage(item_ref,window_ref,stage_number) VALUES($1,$2,$3)")
                 .bind(item).bind(window).bind(stage as i32).execute(&mut *tx).await.unwrap();
         }

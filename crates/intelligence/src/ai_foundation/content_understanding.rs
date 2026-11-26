@@ -19,6 +19,7 @@ mod source;
 use super::{
     TaskKey, admission,
     batch_store::{self, BatchInput, BatchKind, InputRef},
+    selected_collection_scope,
     store::{Command, FoundationError},
     task_config::lock_setting,
 };
@@ -88,6 +89,7 @@ async fn reasons(
             config,
             &InputRef::ContentUnderstanding {
                 request_ref: Uuid::nil(),
+                collection_run_ref: None,
             },
         )
         .await,
@@ -256,6 +258,11 @@ pub(crate) async fn start_with_kind(
             return Err(FoundationError::AdmissionDenied(vec!["l1_automation_disabled".into()]));
         }
     }
+    let collection_run_ref = if kind == BatchKind::Automatic {
+        selected_collection_scope::queue_automatic_in(&mut c.tx, r.domain_ref, r.work_ref).await?
+    } else {
+        None
+    };
     let config = lock_setting(&mut c.tx, TASK, r.task_revision).await?;
     if config != r.task_config_ref {
         return Err(FoundationError::Conflict);
@@ -302,6 +309,7 @@ pub(crate) async fn start_with_kind(
         }
         // lock_setting serializes automatic admissions across domains.
         let waiting: i64 = sqlx::query_scalar(automation::AUTOMATIC_WAITING)
+            .bind(collection_run_ref)
             .fetch_one(&mut *c.tx).await?;
         if waiting >= automation::QUEUE_LIMIT {
             return Err(FoundationError::AdmissionDenied(vec!["automatic_l1_queue_full".into()]));
@@ -316,6 +324,7 @@ pub(crate) async fn start_with_kind(
         item_key: request.to_string(),
         input: InputRef::ContentUnderstanding {
             request_ref: request,
+            collection_run_ref,
         },
     }];
     let hash = batch_store::input_hash(TASK, &inputs, false)?;
@@ -543,6 +552,35 @@ pub(crate) async fn core_cards_at(
     let cards = core_cards_in(&mut tx, domain, work, cutoff).await?;
     tx.commit().await?;
     Ok(cards)
+}
+
+/// A scoped author-video packet must consume a Core that includes a transcript.
+/// Ordinary historical readback can still show a qualified older analysis.
+pub(super) async fn check_selected_video_core_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+    work: Uuid,
+    core: Uuid,
+    cutoff: &str,
+) -> Result<(), FoundationError> {
+    let current = source::load(tx, domain, work, cutoff).await?;
+    if current.coverage["materialReadiness"]["kind"] != "video" {
+        return Ok(());
+    }
+    let manifest: Option<Value> = sqlx::query_scalar(
+        "SELECT input_manifest FROM linggan_content_understanding_request WHERE request_ref=$1 AND work_ref=$2",
+    )
+    .bind(core)
+    .bind(work)
+    .fetch_optional(&mut **tx)
+    .await?;
+    let saved = manifest.and_then(|value| serde_json::from_value::<Packet>(value).ok());
+    if current.coverage["materialReadiness"]["state"] != "ready"
+        || !saved.is_some_and(|saved| source::video_transcripts_included(&saved, &current))
+    {
+        return Err(FoundationError::AdmissionDenied(vec!["ai_source_unavailable".into()]));
+    }
+    Ok(())
 }
 
 pub(crate) async fn core_cards_in(

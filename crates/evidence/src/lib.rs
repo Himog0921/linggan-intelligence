@@ -82,6 +82,7 @@ mod receipt;
 mod runtime_capacity;
 mod runtime_event;
 mod runtime_readiness;
+pub mod selected_collection_run;
 mod scheduler_tick;
 mod selector_health;
 mod station_read;

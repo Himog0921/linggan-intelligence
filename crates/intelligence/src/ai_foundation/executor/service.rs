@@ -5,6 +5,7 @@ use crate::{
     pi_adapter::PiAdapter,
 };
 use linggan_contracts::ai_limits::AI_LIMITS;
+use linggan_evidence::selected_collection_run;
 use linggan_storage_postgres::Database;
 use serde::Serialize;
 use std::{sync::Arc, time::Duration};
@@ -45,7 +46,9 @@ pub async fn run(
     let mut session = ExecutorSession::acquire(&db, source_revision, concurrency).await?;
     let fence = session.fence();
     let (work_db, work_drain) = (db.clone(), drain.clone());
-    let opportunity_sync = opportunity_sync::OpportunitySync::from_environment();
+    let opportunity_sync = (!selected_collection_run::configured())
+        .then(opportunity_sync::OpportunitySync::from_environment)
+        .flatten();
     let mut work = JoinSet::new();
     work.spawn(async move {
         work_loop(
@@ -114,7 +117,8 @@ async fn work_loop(
     poll.set_missed_tick_behavior(MissedTickBehavior::Delay);
     let mut recovery = Instant::now();
     let mut automation_scan = Instant::now();
-    let lens_enabled = crate::ops_content_lens::enabled_from_env();
+    let scoped = selected_collection_run::configured();
+    let lens_enabled = !scoped && crate::ops_content_lens::enabled_from_env();
     loop {
         if drain.is_requested() && tasks.is_empty() {
             corpus_jobs.shutdown().await;
@@ -151,7 +155,7 @@ async fn work_loop(
             },
             _=poll.tick()=>{
                 if drain.is_requested(){continue;}
-                if Instant::now() >= automation_scan {
+                if !scoped && Instant::now() >= automation_scan {
                     if opportunity_jobs.is_empty() && let Some(sync) = &opportunity_sync {
                         let sync = sync.clone();
                         let db = db.clone();

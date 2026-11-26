@@ -1918,3 +1918,254 @@ async fn control_probe_waits_for_serialization_and_rechecks_authority_after_wait
         }
     }
 }
+
+/// The same disposable ledger is opened in fresh processes so no test mutates
+/// process-global scope state while another task can read it.
+#[tokio::test]
+#[ignore = "requires disposable PostgreSQL harness"]
+async fn selected_collection_run_reobserves_exact_work_across_restart() {
+    const SCHEMA: &str = "single_run_selected_scope";
+    const NOTE: &str = "selected_fixture";
+    const CONTROL: &str = "SELECTED_COLLECTION_PROOF_CHILD";
+    if let Ok(phase) = std::env::var(CONTROL) {
+        let db = linggan_storage_postgres::Database::connect_within_schema(
+            &std::env::var("LOCAL_001_PROOF_DATABASE_URL").unwrap(),
+            SCHEMA,
+        )
+        .await
+        .unwrap();
+        let install: Uuid = std::env::var("SELECTED_COLLECTION_PROOF_INSTALL")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let credential = std::env::var("SELECTED_COLLECTION_PROOF_CREDENTIAL").unwrap();
+        let run: Uuid = std::env::var("SELECTED_COLLECTION_PROOF_RUN")
+            .unwrap()
+            .parse()
+            .unwrap();
+        let unrelated: Uuid = std::env::var("SELECTED_COLLECTION_PROOF_UNRELATED")
+            .unwrap()
+            .parse()
+            .unwrap();
+        if phase == "expired" {
+            assert_eq!(
+                linggan_evidence::collection_run_progress::advance_runs(&db)
+                    .await
+                    .unwrap(),
+                0
+            );
+            assert!(
+                matches!(decide_dispatch(&db, &install.to_string(), &credential).await.unwrap(),
+                DispatchDecision::ControlBlocked { reason_code } if reason_code == "selected_collection_run_unavailable")
+            );
+            assert!(matches!(
+                linggan_evidence::claim_media_acquisition(&db, &install.to_string(), &credential)
+                    .await
+                    .unwrap(),
+                linggan_evidence::MediaAcquisitionDecision::NothingWaiting { .. }
+            ));
+            return;
+        }
+        assert_eq!(
+            linggan_evidence::collection_run_progress::advance_runs(&db)
+                .await
+                .unwrap(),
+            1
+        );
+        assert!(
+            matches!(linggan_evidence::issue_work_order_lease(&db, unrelated, 30).await,
+            Err(linggan_evidence::LeaseError::ControlBlocked { reason_code }) if reason_code == "outside_selected_collection_run")
+        );
+        let collection = decide_dispatch(&db, &install.to_string(), &credential)
+            .await
+            .unwrap();
+        let DispatchDecision::Dispatch {
+            task_id,
+            task_spec,
+            lease_ref,
+            execution_source_url: Some(locator),
+            page_session_plan: Some(plan),
+        } = collection
+        else {
+            panic!("selected detail expected: {collection:?}")
+        };
+        assert_eq!(task_spec["target"]["contentExternalId"], NOTE);
+        assert_eq!(plan["lanes"], json!(["content_detail", "media_slots"]));
+        assert_eq!(plan["commentLimit"], 0);
+        assert_eq!(plan["replyExpandLimit"], 0);
+        let scope: (Uuid, bool, Option<Uuid>) = sqlx::query_as(
+            "SELECT o.run_ref,m.allow_asr,member.reused_detail_package_ref
+             FROM collection_work_order_lease l
+             JOIN collection_run_order o USING(work_order_ref)
+             JOIN collection_work_order_material_target m USING(work_order_ref)
+             JOIN collection_run_work member ON member.run_ref=o.run_ref AND member.content_public_ref=o.content_public_ref
+             WHERE l.lease_ref=$1"
+        ).bind(lease_ref).fetch_one(db.pool()).await.unwrap();
+        assert_eq!(scope, (run, true, None));
+        // A deterministic request ID makes the grant the same on both process invocations.
+        let grant = linggan_evidence::grant_detail_page_session_with_lane_deliveries(
+            &db,
+            &install.to_string(),
+            &credential,
+            task_id,
+            task_id,
+            &locator,
+        )
+        .await
+        .unwrap();
+        if phase == "claim" {
+            assert!(matches!(
+                grant,
+                linggan_evidence::DetailPageSessionGrant::Authorized { .. }
+            ));
+            return;
+        }
+        assert!(matches!(
+            grant,
+            linggan_evidence::DetailPageSessionGrant::Replay { .. }
+        ));
+        deliver(&db, install, &task_spec, "content_detail", vec![json!({
+            "kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":NOTE},
+            "payload":{"noteId":NOTE,"title":"定向刷新回执","bodyText":"合成更新正文"}
+        })], json!({"basis":"known_set","contentExternalId":NOTE})).await;
+        let slots = next(&db, install, &credential).await;
+        assert_eq!(slots["capabilitiesRequested"], json!(["media_slots"]));
+        let observation = Uuid::new_v4();
+        deliver(&db, install, &slots, "media_slots", vec![json!({
+            "kind":"media_slot","slotKey":format!("xhs:{NOTE}:video:1"),"observationRef":observation,
+            "slot":{"role":"video","ordinal":1},
+            "observation":{"externalUri":"https://sns-video-bd.xhscdn.com/selected-refresh.mp4","candidateUris":["https://sns-video-bd.xhscdn.com/selected-refresh.mp4"]},
+            "sourceObject":{"platform":"xhs","type":"content","externalId":NOTE}
+        })], json!({"basis":"known_set","contentExternalId":NOTE})).await;
+        linggan_evidence::collection_run_progress::advance_runs(&db)
+            .await
+            .unwrap();
+        for _ in 0..2 {
+            assert!(
+                matches!(linggan_evidence::claim_media_acquisition(&db, &install.to_string(), &credential).await.unwrap(),
+                linggan_evidence::MediaAcquisitionDecision::Acquired { observation_ref, .. } if observation_ref == observation)
+            );
+        }
+        return;
+    }
+
+    let db = proof_current_collection_database(SCHEMA).await;
+    let domain_ref = domain(&db).await;
+    let (install, credential) = station(&db).await;
+    let keyword = |query: &str| CreateRun {
+        idempotency_key: Uuid::new_v4(),
+        domain_ref,
+        source: RunSource::TemporaryKeyword {
+            query: query.into(),
+        },
+        ranking: Some("comprehensive".into()),
+        work_limit: 1,
+        comment_mode: CommentMode::None,
+        comment_target: None,
+    };
+    let seed = create_run(&db, &keyword("旧详情")).await.unwrap();
+    let seed: Uuid = serde_json::from_value(seed["runRef"].clone()).unwrap();
+    let search = next(&db, install, &credential).await;
+    deliver(&db, install, &search, "discovery_search", vec![json!({
+        "kind":"discovery_card","resultPosition":1,"sourceObject":{"platform":"xhs","type":"content","externalId":NOTE},
+        "payload":{"noteId":NOTE,"url":format!("https://www.xiaohongshu.com/explore/{NOTE}?xsec_token=SYNTHETIC_FIXTURE&xsec_source=pc_user"),
+        "title":"合成目录","coverUrl":"https://sns-webpic-qc.xhscdn.com/historical-cover.jpg"}
+    })], json!({"basis":"maximum_quota","maximumQuota":1,"query":"旧详情"})).await;
+    linggan_evidence::collection_run_progress::advance_runs(&db)
+        .await
+        .unwrap();
+    let detail = next(&db, install, &credential).await;
+    deliver(&db, install, &detail, "content_detail", vec![json!({
+        "kind":"content_detail","sourceObject":{"platform":"xhs","type":"content","externalId":NOTE},
+        "payload":{"noteId":NOTE,"title":"旧详情","bodyText":"合成旧正文"}
+    })], json!({"basis":"known_set","contentExternalId":NOTE})).await;
+    linggan_evidence::collection_run_progress::advance_runs(&db)
+        .await
+        .unwrap();
+    let work: Uuid =
+        sqlx::query_scalar("SELECT content_public_ref FROM collection_run_work WHERE run_ref=$1")
+            .bind(seed)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let old_media: Uuid = sqlx::query_scalar(
+        "SELECT observation_ref FROM linggan_media_acquisition_work JOIN linggan_material_media_origin USING(observation_ref)
+         WHERE content_public_ref=$1 AND purpose='cover'"
+    ).bind(work).fetch_one(db.pool()).await.unwrap();
+    let old_run: Uuid = serde_json::from_value(
+        create_run(&db, &keyword("历史队列")).await.unwrap()["runRef"].clone(),
+    )
+    .unwrap();
+    let unrelated: Uuid =
+        sqlx::query_scalar("SELECT work_order_ref FROM collection_run_order WHERE run_ref=$1")
+            .bind(old_run)
+            .fetch_one(db.pool())
+            .await
+            .unwrap();
+    let run: Uuid = serde_json::from_value(
+        create_run(
+            &db,
+            &CreateRun {
+                idempotency_key: Uuid::new_v4(),
+                domain_ref,
+                source: RunSource::SelectedWorks {
+                    work_refs: vec![work],
+                },
+                ranking: None,
+                work_limit: 1,
+                comment_mode: CommentMode::None,
+                comment_target: None,
+            },
+        )
+        .await
+        .unwrap()["runRef"]
+            .clone(),
+    )
+    .unwrap();
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    for (phase, expiry) in [
+        ("claim", now + 600),
+        ("restart", now + 600),
+        ("expired", now - 1),
+    ] {
+        let child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "selected_collection_run_reobserves_exact_work_across_restart",
+                "--ignored",
+                "--nocapture",
+            ])
+            .env(CONTROL, phase)
+            .env("LINGGAN_SELECTED_COLLECTION_RUN", format!("{run}@{expiry}"))
+            .env(
+                "LINGGAN_COLLECTION_UPGRADE_PHASE",
+                if phase == "expired" {
+                    "governance"
+                } else {
+                    "recovery"
+                },
+            )
+            .env("SELECTED_COLLECTION_PROOF_INSTALL", install.to_string())
+            .env("SELECTED_COLLECTION_PROOF_CREDENTIAL", &credential)
+            .env("SELECTED_COLLECTION_PROOF_RUN", run.to_string())
+            .env("SELECTED_COLLECTION_PROOF_UNRELATED", unrelated.to_string())
+            .output()
+            .unwrap();
+        assert!(
+            child.status.success(),
+            "{phase}: {}\n{}",
+            String::from_utf8_lossy(&child.stdout),
+            String::from_utf8_lossy(&child.stderr)
+        );
+    }
+    let unchanged: (String, i64, String, i32) = sqlx::query_as(
+        "SELECT w.queue_state,(SELECT count(*) FROM collection_work_order_lease WHERE work_order_ref=w.work_order_ref),m.state,m.attempt_count
+         FROM collection_work_order w CROSS JOIN linggan_media_acquisition_work m
+         WHERE w.work_order_ref=$1 AND m.observation_ref=$2"
+    ).bind(unrelated).bind(old_media).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(unchanged, ("queued".into(), 0, "pending".into(), 0));
+}
