@@ -1379,6 +1379,61 @@ async fn standard_audio_silence_absence_and_failure_are_distinct_without_fake_te
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL proof"]
+async fn completed_asr_after_cleanup_is_closed_in_dossier_readiness() {
+    let db = fixture::proof_database("cleaned_asr_readiness").await;
+    let work = standard::scenario(&db, "asr-cleaned-empty", None, 1, true, false, true).await;
+    ensure_media_processing_work(&db).await.unwrap();
+    let worker = Uuid::new_v4();
+    let MediaProcessingClaimOutcome::Claimed(claim) =
+        claim_media_processing_work(&db, worker, &["asr".into()])
+            .await
+            .unwrap()
+    else {
+        panic!("asr claim")
+    };
+    assert_eq!(claim.content_public_ref, work);
+    let running = dossier::read(&db, work).await.unwrap().unwrap();
+    assert!(
+        dossier::l1_material_readiness(&running)
+            .gaps
+            .iter()
+            .any(|gap| gap.code == "video_transcript_pending")
+    );
+    let artifact = "以下是普通话的句子。";
+    complete_media_processing_text(
+        &db,
+        &claim,
+        worker,
+        "asr_text",
+        &"a".repeat(64),
+        artifact.len() as i64,
+        "derivatives/asr/synthetic.txt",
+        artifact,
+        artifact,
+        Some("zh-Hans"),
+        material_reading::producers::ReadingContent {
+            blocks: vec![json!({"kind":"paragraph","text":artifact,"speaker":"unconfirmed"})],
+            issues: vec![],
+            source_state: "present".into(),
+            source_location: json!({}),
+        },
+    )
+    .await
+    .unwrap();
+    let read = dossier::read(&db, work).await.unwrap().unwrap();
+    let audio = material(&read, "audio");
+    assert_eq!(audio["processing"]["state"], "completed");
+    assert_eq!(audio["processing"]["reason"], Value::Null);
+    assert_eq!(audio["blocks"], json!([]));
+    let readiness = dossier::l1_material_readiness(&read);
+    assert!(!readiness.can_start());
+    assert!(readiness.gaps.iter().any(|gap| {
+        gap.code == "video_transcript_unavailable" && gap.message == "无可用口播，已结案"
+    }));
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL proof"]
 async fn unknown_page_order_preserves_observed_ordinals_beyond_nine() {
     let db = fixture::proof_database("dossier_observed_order").await;
     let work = detail(&db, "observed-order", json!({"bodyText":"已有正文仍可读"})).await;
