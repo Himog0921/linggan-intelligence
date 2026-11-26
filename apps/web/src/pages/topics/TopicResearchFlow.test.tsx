@@ -180,16 +180,18 @@ it('keeps selections across search and pages and submits only those selections',
 it('disables blocked works and preserves the receipt when one selected work loses eligibility', async () => {
   stubFetch(async (_path, options) => options.method === 'POST'
     ? json({ runRef: 'run', skippedWorks: [{ workRef: 'changed', reason: 'content_understanding_required' }] })
-    : json({ runs: [] }), { blocked: 'video_transcript_required', silent: 'video_transcript_unavailable' });
+    : json({ runs: [] }), { blocked: 'video_transcript_required', queued: 'video_transcript_pending', silent: 'video_transcript_unavailable' });
   render(<MemoryRouter><TopicResearchFlow domain="one" works={[
     { workRef: 'good', title: '可用作品' },
     { workRef: 'changed', title: '变化前可用' },
     { workRef: 'blocked', title: '缺转录作品' },
+    { workRef: 'queued', title: '转录排队作品' },
     { workRef: 'silent', title: '口播未取得作品' },
   ]} /></MemoryRouter>);
   await settle();
-  expect(screen.getByRole('checkbox', { name: /缺转录作品.*等待视频转录/ })).toBeDisabled();
-  expect(screen.getByRole('checkbox', { name: /口播未取得作品.*处理结束，未取得可用口播/ })).toBeDisabled();
+  expect(screen.getByRole('checkbox', { name: /缺转录作品.*缺少可用转录/ })).toBeDisabled();
+  expect(screen.getByRole('checkbox', { name: /转录排队作品.*等待视频转录/ })).toBeDisabled();
+  expect(screen.getByRole('checkbox', { name: /口播未取得作品.*无可用口播，已结案/ })).toBeDisabled();
   fireEvent.click(screen.getByRole('checkbox', { name: '可用作品' }));
   fireEvent.click(screen.getByRole('checkbox', { name: '变化前可用' }));
   fireEvent.click(screen.getByRole('button', { name: '开始研究' }));

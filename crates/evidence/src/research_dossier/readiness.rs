@@ -102,12 +102,14 @@ fn check(
         .iter()
         .filter(|s| require_transcript && s["purpose"] == "video" && s["component"] == "motion")
     {
-        let transcript_available = materials.iter().any(|m| {
+        let current_audio = materials.iter().filter(|m| {
             m["kind"] == "audio"
                 && m["slotKey"] == video["slotKey"]
-                && video["sourceState"] != "restricted"
                 && m["sourceState"] == "present"
                 && m["currentRevisionRef"].is_string()
+        });
+        let transcript_available = current_audio.clone().any(|m| {
+            video["sourceState"] != "restricted"
                 && m["sourceRef"]
                     .as_str()
                     .and_then(|value| value.parse::<uuid::Uuid>().ok())
@@ -116,7 +118,14 @@ fn check(
                 && has_referenceable_text(m)
         });
         if !transcript_available {
-            let (code, state, message) = video_transcript_gap(video);
+            let cleaned_empty = current_audio.clone().any(|m| {
+                m["issues"].as_array().is_some_and(|issues| {
+                    issues
+                        .iter()
+                        .any(|issue| issue["code"] == "recognition_empty")
+                })
+            }) && !current_audio.clone().any(has_text);
+            let (code, state, message) = video_transcript_gap(video, cleaned_empty);
             result.gap(code, state, message, video["slotKey"].as_str());
         }
     }
@@ -144,7 +153,10 @@ fn check(
     result
 }
 
-fn video_transcript_gap(video: &Value) -> (&'static str, MaterialState, &'static str) {
+fn video_transcript_gap(
+    video: &Value,
+    cleaned_empty: bool,
+) -> (&'static str, MaterialState, &'static str) {
     use MaterialState::{Blocked, Preparing};
     const REQUIRED: &str = "video_transcript_required";
     if video["sourceState"] == "restricted" {
@@ -152,27 +164,34 @@ fn video_transcript_gap(video: &Value) -> (&'static str, MaterialState, &'static
     }
     let asr = &video["processing"]["asr"];
     let audio = &video["processing"]["audio_extract"];
-    if matches!(
-        asr["reason"].as_str().or(audio["reason"].as_str()),
-        Some("no_speech_observed" | "no_audio_stream_observed")
-    ) {
+    if [asr, audio].iter().any(|job| {
+        job["reason"] != "provider_not_enabled"
+            && (matches!(
+                job["queueState"].as_str(),
+                Some("pending" | "leased" | "retry_wait")
+            ) || (job["queueState"].is_null()
+                && (job["state"] == "running"
+                    || (job["state"] == "pending"
+                        && job["reason"] == "queued_for_local_processor"))))
+    }) {
+        return (
+            "video_transcript_pending",
+            Preparing,
+            "音频提取或转录任务正在队列中，生成有效转录后会自动重新检查。",
+        );
+    }
+    if (asr["state"] == "completed" && cleaned_empty)
+        || [asr, audio].iter().any(|job| {
+            matches!(
+                job["reason"].as_str(),
+                Some("no_speech_observed" | "no_audio_stream_observed")
+            )
+        })
+    {
         return (
             "video_transcript_unavailable",
             Blocked,
-            "处理已结束，未取得可用口播，不能启动 L1。",
-        );
-    }
-    if [asr, audio].iter().any(|job| {
-        matches!(
-            job["queueState"].as_str(),
-            Some("pending" | "leased" | "retry_wait")
-        ) || (job["queueState"].is_null()
-            && matches!(job["state"].as_str(), Some("pending" | "running")))
-    }) {
-        return (
-            REQUIRED,
-            Preparing,
-            "音频提取或转录任务正在队列中，生成有效转录后会自动重新检查。",
+            "无可用口播，已结案",
         );
     }
     match video["download"]["state"].as_str() {
@@ -245,6 +264,7 @@ mod tests {
             "processing":{"asr":{"state":"failed","queueState":"retry_wait","reason":"process_timeout"}}});
         let readiness = check(&[], &[video.clone()], true, true);
         assert_eq!(readiness.state, MaterialState::Preparing);
+        assert_eq!(readiness.gaps[0].code, "video_transcript_pending");
         assert!(
             readiness
                 .gaps
@@ -256,8 +276,42 @@ mod tests {
         let readiness = check(&[text()], &[video], true, true);
         assert_eq!(readiness.state, MaterialState::Blocked);
         assert_eq!(readiness.gaps[0].code, "video_transcript_unavailable");
-        assert!(readiness.gaps[0].message.contains("处理已结束"));
+        assert_eq!(readiness.gaps[0].message, "无可用口播，已结案");
     }
+    #[test]
+    fn completed_asr_with_cleaned_empty_current_reading_is_closed() {
+        let mut video = json!({"slotKey":"video:1","component":"motion","purpose":"video","sourceState":"present",
+            "processing":{"asr":{"state":"completed","queueState":"completed","reason":null}}});
+        let cleaned = json!({"kind":"audio","slotKey":"video:1","sourceState":"present","currentRevisionRef":"reading",
+            "blocks":[],"issues":[{"code":"recognition_empty"}]});
+        let gap = |video: &Value, audio: &Value| {
+            check(
+                std::slice::from_ref(audio),
+                std::slice::from_ref(video),
+                true,
+                true,
+            )
+            .gaps
+            .remove(0)
+            .code
+        };
+        assert_eq!(gap(&video, &cleaned), "video_transcript_unavailable");
+        let mut unrelated = cleaned.clone();
+        unrelated["slotKey"] = json!("video:2");
+        assert_eq!(gap(&video, &unrelated), "video_transcript_required");
+        let mut unsettled = cleaned.clone();
+        unsettled["currentRevisionRef"] = Value::Null;
+        assert_eq!(gap(&video, &unsettled), "video_transcript_required");
+        video["processing"]["asr"] = json!({"state":"failed","queueState":"retry_wait"});
+        assert_eq!(gap(&video, &cleaned), "video_transcript_pending");
+        video["processing"]["asr"] = json!({"state":"pending","reason":"provider_not_enabled"});
+        assert_eq!(gap(&video, &cleaned), "video_transcript_required");
+        video["processing"]["asr"] = json!({"state":"failed","queueState":"terminal"});
+        assert_eq!(gap(&video, &cleaned), "video_transcript_required");
+        video["sourceState"] = json!("restricted");
+        assert_eq!(gap(&video, &cleaned), "video_transcript_required");
+    }
+
     #[test]
     fn existing_text_or_image_is_usable_without_complete_inventory() {
         assert!(check(&[text()], &[], false, true).can_start());

@@ -104,14 +104,17 @@ pub(super) async fn qualify(
                         readiness
                             .gaps
                             .into_iter()
-                            .filter(|gap| {
-                                matches!(
-                                    gap.code.as_str(),
-                                    "video_transcript_required" | "video_transcript_unavailable"
-                                )
+                            .filter_map(|gap| {
+                                let priority = match gap.code.as_str() {
+                                    "video_transcript_required" => 3,
+                                    "video_transcript_pending" => 2,
+                                    "video_transcript_unavailable" => 1,
+                                    _ => return None,
+                                };
+                                Some((priority, gap.code))
                             })
-                            .max_by_key(|gap| gap.code == "video_transcript_unavailable")
-                            .map(|gap| gap.code)
+                            .max_by_key(|(priority, _)| *priority)
+                            .map(|(_, code)| code)
                     })
                     .unwrap_or_else(|| "content_understanding_required".into())
             } else {
