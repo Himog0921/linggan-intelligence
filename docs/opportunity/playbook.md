@@ -1282,7 +1282,7 @@ interface CreatorDensity {
 - **前置**：T1.2、T1.3
 - **目标**：构建 `opportunity_card.payload`，结构严格符合 §6.7。
 - **要求**：
-  - 上游变化时发出“问题已变更”事件；在 `card_rebuild_debounce_seconds` 窗口内合并后再重建。
+  - 上游变化时发出“问题已变更”事件；从首次待更新起，在 `card_rebuild_debounce_seconds` 窗口内合并变更；窗口到期后可重建，持续新增事件仍按原窗口推进。
   - 提供全量重建命令。
   - 阶段 1 中供给栏固定为 `state = "not_evaluated"`、`judgment_status = null`，**不得填入假数据**。
   - `sample_voices` 只从可研究来源中选取，撤回的不出现（R10）。
