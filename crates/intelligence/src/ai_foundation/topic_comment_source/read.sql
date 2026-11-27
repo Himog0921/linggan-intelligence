@@ -9,12 +9,13 @@ WITH latest AS (
 )
 SELECT semantic.*,w.window_ref,result.core_json,dispatch.context,
  (result.result_ref IS NULL
- AND EXISTS(SELECT 1 FROM linggan_topic_research_stage s JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE s.window_ref=w.window_ref AND c.state='failed')
- AND NOT EXISTS(SELECT 1 FROM linggan_topic_research_stage s JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE s.window_ref=w.window_ref AND (c.state IN('pending','running') OR c.failure_code='ai_dispatch_unknown'))) AS retryable,
+ AND EXISTS(SELECT 1 FROM linggan_topic_research_stage s JOIN linggan_ai_research_item_outcome c USING(item_ref) WHERE s.window_ref=w.window_ref AND c.state='failed')
+ AND NOT EXISTS(SELECT 1 FROM linggan_topic_research_stage s JOIN linggan_ai_research_item_outcome c USING(item_ref) WHERE s.window_ref=w.window_ref AND (c.state IN('pending','running') OR c.failure_code='ai_dispatch_unknown'))) AS retryable,
 
- CASE WHEN result.result_ref IS NOT NULL THEN 'complete'
+ CASE WHEN jsonb_array_length(result.core_json->'rejectedUnits')>0 THEN 'partial'
+ WHEN result.result_ref IS NOT NULL THEN 'complete'
  WHEN w.window_ref IS NULL THEN 'not_analyzed'
- WHEN EXISTS(SELECT 1 FROM linggan_topic_research_stage s JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE s.window_ref=w.window_ref AND c.state IN('pending','running')) THEN 'pending'
+ WHEN EXISTS(SELECT 1 FROM linggan_topic_research_stage s JOIN linggan_ai_research_item_outcome c USING(item_ref) WHERE s.window_ref=w.window_ref AND c.state IN('pending','running')) THEN 'pending'
  ELSE 'failed' END AS assignment_state
 FROM latest semantic
 LEFT JOIN LATERAL (

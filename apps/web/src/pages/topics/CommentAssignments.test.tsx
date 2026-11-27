@@ -132,3 +132,14 @@ it('accepts a stored two-stage retry receipt replay without sending another requ
   await expect(retryCommentAssignment({ commandRef: 'same-command', domainRef: 'domain', windowRef: 'old-window' })).resolves.toBe('historical-retry-run');
   expect(fetch).toHaveBeenCalledTimes(1);
 });
+
+it('shows the matched topic and individual rejection together in a partially accepted comment', async () => {
+  const partial = {...item('partial'), signals:[signal('complete','matched'),{
+    ...signal('rejected'),signalOrdinal:1,rejectionReason:'comment_topic_creation_forbidden',
+  }]};
+  vi.stubGlobal('fetch', vi.fn(async()=>response({domainRef:'domain',items:[partial]})));
+  render(<CommentAssignments domain="domain" work="work" />);
+  expect(await screen.findByText('部分接纳')).toBeVisible();
+  expect(screen.getByText('已有提醒主题')).toBeVisible();
+  expect(screen.getByText('评论仅可匹配已有主题')).toBeVisible();
+});

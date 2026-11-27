@@ -226,6 +226,8 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     assert_eq!(partial["rejectedUnits"][0]["reason"], "comment_topic_creation_forbidden");
     assert_eq!(partial["resolution"]["decisions"].as_array().unwrap().len(), 1);
     assert_eq!(partial["resolution"]["decisions"][0]["status"], "matched");
+    assert_eq!(parsed["resolution"]["decisions"][1]["status"],"uncertain");
+    let parsed=partial;
     let inv = invocation(&db, model_config).await;
     sqlx::query("INSERT INTO linggan_topic_research_dispatch(item_ref,invocation_ref,context) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=0").bind(window).bind(inv).bind(&proposed.context).execute(&mut *tx).await.unwrap();
     sqlx::query("INSERT INTO linggan_topic_research_stage_result(item_ref,invocation_ref,output) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=0").bind(window).bind(inv).bind(&parsed).execute(&mut *tx).await.unwrap();
@@ -247,10 +249,10 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
         result["items"][0]["signals"][0]["assignment"]["matches"][0]["topicRef"],
         json!(topic)
     );
-    assert_eq!(
-        result["items"][0]["signals"][1]["assignment"]["status"],
-        "uncertain"
-    );
+    assert_eq!(result["items"][0]["assignmentState"],"partial");
+    assert_eq!(result["items"][0]["signals"][0]["assignmentState"],"complete");
+    assert_eq!(result["items"][0]["signals"][1]["assignmentState"],"rejected");
+    assert_eq!(result["items"][0]["signals"][1]["rejectionReason"],"comment_topic_creation_forbidden");
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM linggan_topic_workspace")
             .fetch_one(db.pool())
