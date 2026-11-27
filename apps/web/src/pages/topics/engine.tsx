@@ -58,6 +58,9 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
   const researchRequests = new Map<string, ResearchRequestState>();
   const readControllers = new Set<AbortController>();
   let bootstrapDomain = "";
+  /** Topic-tree FIND text: a navigation aid only, never part of the URL or the statistics scope. */
+  let treeQuery = "";
+  let findFocusRequest: string | null = null;
   const listeners = new Set<() => void>(),
     controllers = new Set<AbortController>();
   let root: HTMLDivElement | null = null,
@@ -389,6 +392,33 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
         render();
       };
     },
+    get setFilter() {
+      return applyFilter;
+    },
+    get setQuery() {
+      return (value: string) => {
+        state.query = value.trim();
+        state.tab = "content";
+        persist();
+        render();
+      };
+    },
+    get setMaterialMode() {
+      return (mode: string) => {
+        state.materialMode = mode;
+        persist();
+        render();
+      };
+    },
+    get treeQuery() {
+      return treeQuery;
+    },
+    get setTreeQuery() {
+      return (value: string) => {
+        treeQuery = value;
+        render();
+      };
+    },
   });
   const topicDialogs = createTopicDialogs({
     get researchProgress() { return snapshot?.scope.progress; },
@@ -711,6 +741,12 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     mainScrollRequest = resetMainScroll
       ? 0
       : root?.querySelector("[data-topic-main]")?.scrollTop || 0;
+    // A main render remounts the content tree; a FIND that was being typed in must keep the caret.
+    const active = document.activeElement;
+    findFocusRequest =
+      active instanceof HTMLInputElement && root?.contains(active) && active.closest("[data-find]")
+        ? active.getAttribute("aria-label")
+        : null;
     mainRevision++;
     notify();
   }
@@ -1863,6 +1899,14 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
       await load();
       return;
     }
+    if (action === "collapse-all") {
+      const topics = list(snapshot?.topics).filter((t) => t.lifecycleState !== "superseded");
+      const parents = topics.filter((t) => topics.some((c) => c.parentTopicRef === t.topicRef)).map((t) => t.topicRef);
+      state.collapsed = list(state.collapsed).length ? [] : parents;
+      persist();
+      render();
+      return;
+    }
     if (action === "collapse") {
       const values = new Set(list(state.collapsed));
       if (values.has(id)) values.delete(id);
@@ -2422,30 +2466,27 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
       render();
       return;
     }
-    if (target.dataset.filter === "plotPlatform") {
-      state.plotPlatform = target.value;
+    if (target.dataset.filter) applyFilter(target.dataset.filter, target.value);
+  }
+  /** One write path for scope filters: native selects (journey, dialogs) and the C17 scope bar both land here. */
+  function applyFilter(key: string, value: string) {
+    if (key === "plotPlatform") {
+      state.plotPlatform = value;
       persist();
       render();
       return;
     }
-    if (
-      target.dataset.filter &&
-      urlKeys.includes(target.dataset.filter as T.TextStateKey)
-    ) {
-      state[target.dataset.filter as T.TextStateKey] = target.value;
-      if (target.dataset.filter === "windowDays")
+    if (urlKeys.includes(key as T.TextStateKey)) {
+      state[key as T.TextStateKey] = value;
+      if (key === "windowDays")
         state[
           state.view === "journey" ? "journeyWindowDays" : "overviewWindowDays"
-        ] = target.value;
-      if (
-        ["topicRef", "platform", "windowDays", "path", "overlay"].includes(
-          target.dataset.filter,
-        )
-      ) {
+        ] = value;
+      if (["topicRef", "platform", "windowDays", "path", "overlay"].includes(key)) {
         state.stage = "";
         resetMainScroll = true;
       }
-      if (target.dataset.filter === "domainRef") {
+      if (key === "domainRef") {
         state.topicRef = "";
         state.compare = [];
       }
@@ -2485,6 +2526,11 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     getMainVersion: () => mainRevision,
     getNotice: () => notice,
     isMutationBusy: () => pending || mutations.busy,
+    consumeFindFocus() {
+      const value = findFocusRequest;
+      findFocusRequest = null;
+      return value;
+    },
     consumeMainScroll() {
       const value = mainScrollRequest;
       mainScrollRequest = null;

@@ -971,3 +971,22 @@ Mog 指出写稿屏的视觉、布局细节和下拉都没有按设计来。用�
 - **Token**：`lids_tokens.css` 手写段新增 `--lgi-badge-mark/gap/size/weight`（紧随五轴语义色）与 `--lgi-scope-height/frame/divider/pad/label/value/open/tail`（紧随 V8 动作族），全部引用既有 Token，无新色值；由 `scripts/sync-lids-runtime.py` 镜像到 tokens.md。范围下拉条是 C17 的组合用法（多只触发器共用一条墨色外框、段间墨色竖线、M2 纹理尾只在末端出现一次），C17 组件本身未改。
 - **未在本次范围**：现存页面里的实心状态标签按新规则属于「页面偏离既有标准」，需按 implementation_fix 逐页迁移；尚无 `TruthTag` 等正式标签组件，也未新增范围下拉条的共享 React 组件。
 - **验证**：`python3 scripts/sync-lids-runtime.py --check`、`node scripts/lids.mjs check` 通过；`lids:build` 需要 vite，本机未安装依赖，未运行。
+
+## 2026-11-27 · 主题图谱真实页面按 Topic map redesign 对齐稿实现（新增 10 个 `--lgi-tm-*`）
+
+来源：Mog 2026-11-27「完整的按照 Topic map redesign……1:1 的创建一个 PR……真实的在我的项目上实现这个效果」。对齐稿见 `apps/web/design-reference/topic-map-redesign.html`。
+
+- **Token（page 级）**：`lids_tokens.css` 手写段在生成段之前新增 `--lgi-tm-tree-width/tree-indent/tree-count/peek-max/cover-w/cover-h/stat-col/action-col/bars-height/bar-max`。它们只固定主题树、材料台账和紧凑分布这几处的尺寸，并且都引用既有 Token 或使用 px 尺寸，没有新增色值。
+- **implementation_fix（页面向既有标准对齐）**：
+  - 主题页的材料搜索和主题树搜索改用 C16 `FindField`；
+  - 平台、时间、经历、状态统一放进一条 `--lgi-scope-*` 范围下拉条，每段都是 C17 `SelectField`；
+  - 材料筛选改用 C26 `ViewSwitch`；
+  - 主题页的徽章按「色字 + 前置方块」规则重写，并补齐语义：新方向候选用 warning，来源可用用 success，待复核用 warning，待归方向用 unknown；
+  - 页面不再使用浅色分隔线，只保留 2px 墨线和斑马行。
+- **page 结构**：
+  - 删除离线预演入口、与 Tab 重复的小节标题，以及页头的「更新于」元信息行；
+  - 材料改为单行台账：标题、事实、摘要，加四列对齐的互动数；
+  - 主题树改为单行名称和三列网格，支持树内查找、全部展开/收起、截断名的浮签和方向键移动；
+  - 旅程视图收为阶段条，隐藏等距插画，站点按钮、数量和占比都保留，满足手册 7.5 的「等价列表」要求。
+- **未在本次范围**：其它页面的实心徽章迁移；范围下拉条尚未抽成共享 React 组件，目前由页面组合 C17 实现。
+- **验证**：本机已通过 `python3 scripts/sync-lids-runtime.py --check` 和 `node scripts/lids.mjs check`。lint、单测、构建和真实浏览器链路交给 PR CI。

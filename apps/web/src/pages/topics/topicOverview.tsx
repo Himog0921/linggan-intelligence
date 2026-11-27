@@ -1,11 +1,13 @@
 import { TopicProgress } from './TopicProgress';
 import { OperationsCoverage, OperationsWorkBadge } from './OperationsCoverage';
 import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
-import type { JSX, ReactNode } from "react";
+import { Fragment, type ButtonHTMLAttributes, type JSX, type ReactNode } from "react";
 import { TopicPatterns } from "./TopicPatterns";
 import { OverviewReadouts } from "./OverviewReadouts";
 import { OverviewDistribution } from "./OverviewDistribution";
 import { ViewSwitch } from "../../shared/ViewSwitch";
+import { SelectField } from "../../shared/SelectField";
+import { FindField } from "../../shared/FindField";
 import { attributes, inlineStyle } from "./elementProps";
 import {
   comparisonScopeNote,
@@ -44,6 +46,7 @@ import {
   title,
 } from "./topicModel";
 import type * as T from "./types";
+type ButtonAttrs = ButtonHTMLAttributes<HTMLButtonElement>;
 
 /** Read-only page projection inputs; commands stay in the controller. */
 export interface TopicOverviewContext {
@@ -67,6 +70,11 @@ export interface TopicOverviewContext {
   readonly topicName: (ref: string) => string;
   readonly changeView: (view: string) => void;
   readonly setMapMode: (mode: string) => void;
+  readonly setFilter: (key: string, value: string) => void;
+  readonly setQuery: (value: string) => void;
+  readonly setMaterialMode: (mode: string) => void;
+  readonly treeQuery: string;
+  readonly setTreeQuery: (value: string) => void;
 }
 export function createTopicOverview(context: TopicOverviewContext) {
   const select = (
@@ -201,12 +209,35 @@ export function createTopicOverview(context: TopicOverviewContext) {
       </>
     );
   }
+  /** Same rule as the 「高表现」 filter: the platform's saved like threshold; unknown likes are never high. */
+  function isHighWork(w: T.Work) {
+    const threshold = platformStats(context.snapshot?.statistics).find((p) => p.platform === w.platform)?.highPerformanceThreshold;
+    return known(threshold) && known(w.likes) && w.likes >= threshold;
+  }
+  function stat(value: number | null | undefined, high = false) {
+    return known(value) ? (
+      <span className={cls("lgi-tm-stat " + (high ? "is-high" : ""))}>{number(value)}</span>
+    ) : (
+      <span className={cls("lgi-tm-stat is-unknown")} title={"未获取到该互动数据，不等于 0"}>{"—"}</span>
+    );
+  }
+  /** Ledger rows: one line of title, one of facts, one of excerpt; the four interaction columns align across rows. */
   function materialRows(ns: T.Work[]) {
     return (
       <>
         <div className={cls("lgi-tm-evidence-list")}>
+          <div className={cls("lgi-tm-evidence-head")} aria-hidden={"true"}>
+            <span></span>
+            <span>{"材料"}</span>
+            <span>{"赞"}</span>
+            <span>{"藏"}</span>
+            <span>{"评"}</span>
+            <span>{"分享"}</span>
+            <span>{"操作"}</span>
+          </div>
           {ns.map((w) => {
             const cover = coverUrl(w);
+            const high = isHighWork(w);
             return (
               <>
                 <article className={cls("lgi-tm-evidence-row")}>
@@ -232,7 +263,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                     )}
                   </button>
                   <div className={cls("lgi-tm-evidence-copy")}>
-                    <h3>
+                    <h3 title={esc(title(w))}>
                       {btn(
                         esc(title(w)),
                         "reader",
@@ -241,29 +272,25 @@ export function createTopicOverview(context: TopicOverviewContext) {
                       )}
                     </h3>
                     <div className={cls("lgi-tm-material-meta")}>
-                      <span>{esc(platformName(w.platform))}</span>
                       <span
-                        className={cls("lgi-tm-material-author")}
-                        title={esc(w.creatorDisplayName || "作者未知")}
+                        className={cls("lgi-tm-material-source")}
+                        title={[platformName(w.platform), w.creatorDisplayName || "作者未知", publishedTime(w)].join(" · ")}
                       >
-                        {esc(w.creatorDisplayName || "作者未知")}
-                      </span>
-                      <span
-                        className={cls("lgi-tm-material-date")}
-                        title={esc(publishedTime(w))}
-                      >
-                        {esc(publishedTime(w))}
+                        {esc(platformName(w.platform))}
+                        {" · "}
+                        <span className={cls("lgi-tm-material-author")}>{esc(w.creatorDisplayName || "作者未知")}</span>
+                        {" · "}
+                        <span className={cls("lgi-tm-material-date")}>{esc(publishedTime(w))}</span>
                       </span>
                       {w.own
                         ? badge(
                             w.ownBreakout ? "我方手动爆款" : "我方作品",
-                            w.ownBreakout,
+                            w.ownBreakout ? "signal" : "category",
                           )
                         : ""}
                       <OperationsWorkBadge coverage={context.snapshot?.scope.operations} workRef={w.workRef} />
-                      {badge(
-                        list(w.topicRefs).length ? "已有方向依据" : "待归方向",
-                      )}
+                      {list(w.topicRefs).length ? badge("已有方向依据", "category") : badge("待归方向", "unknown")}
+                      {high ? badge("高表现", "signal") : ""}
                     </div>
                     <p className={cls("lgi-tm-excerpt")}>
                       {esc(
@@ -277,43 +304,27 @@ export function createTopicOverview(context: TopicOverviewContext) {
                       )}
                     </p>
                     {materialSourceNote(w)}
-                    <div className={cls("lgi-tm-material-footer")}>
-                      <div className={cls("lgi-tm-material-numbers")}>
-                        <span>
-                          {"赞 "}
-                          <b>{number(w.likes)}</b>
-                        </span>
-                        <span>
-                          {"藏 "}
-                          <b>{number(w.collects)}</b>
-                        </span>
-                        <span>
-                          {"评 "}
-                          <b>{number(w.comments)}</b>
-                        </span>
-                        <span>
-                          {"分享 "}
-                          <b>{number(w.shares)}</b>
-                        </span>
-                      </div>
-                      <div className={cls("lgi-tm-row")}>
-                        {btn(
-                          readLabel(w, "阅读原文与讨论"),
-                          "reader",
-                          w.workRef,
-                          "lgi-tm-quiet",
-                        )}
-                        {btn(
-                          "人工保留备选",
-                          "manual-save",
-                          w.workRef,
-                          "",
-                          w.readable
-                            ? ""
-                            : 'disabled title="当前作者来源不足，已有评论仍可阅读"',
-                        )}
-                      </div>
-                    </div>
+                  </div>
+                  {stat(w.likes, high)}
+                  {stat(w.collects)}
+                  {stat(w.comments)}
+                  {stat(w.shares)}
+                  <div className={cls("lgi-tm-evidence-actions")}>
+                    {btn(
+                      <>{readLabel(w, "原文与讨论")}<IntelligenceIcon name="external" size={14}/></>,
+                      "reader",
+                      w.workRef,
+                      "lgi-tm-text-action",
+                    )}
+                    {btn(
+                      "保留备选",
+                      "manual-save",
+                      w.workRef,
+                      "lgi-tm-small",
+                      w.readable
+                        ? ""
+                        : 'disabled title="当前作者来源不足，已有评论仍可阅读"',
+                    )}
                   </div>
                 </article>
               </>
@@ -340,32 +351,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
           className={cls("lgi-tm-workspace-content")}
           aria-label={"匹配材料"}
         >
-          <div className={cls("lgi-tm-section-head")}>
-            <div>
-              <h3>{"材料与讨论"}</h3>
-            <p>
-              <strong>{[ns.length, " 篇当前匹配"].join("")}</strong>
-              {context.snapshot?.scope?.totalWorkCount !== ns.length
-                ? ` · ${number(context.snapshot?.scope?.totalWorkCount)} 篇服务端范围`
-                : ""}
-            </p>
-            </div>
-            <div className={cls("lgi-tm-row")}>
-              {materialSearch()}
-              {[
-                ["latest", "最新作品"],
-                ["high", "高表现"],
-                ["ordinary", "常规作品"],
-              ].map(([id, name]) =>
-                tab(
-                  name,
-                  "material-mode",
-                  id,
-                  context.state.materialMode === id,
-                ),
-              )}
-            </div>
-          </div>
           {scopeChips()}
           {context.state.query ? (
             <>
@@ -452,6 +437,25 @@ export function createTopicOverview(context: TopicOverviewContext) {
           data-loaded={!busy}
           aria-label={"主题图谱导航"}
         >
+          <div className={cls("lgi-tm-sidebar-head")}>
+            <div className={cls("lgi-tm-kicker")}>
+              <strong>{"TOPIC MAP"}</strong>
+              <span>
+                {"主题结构 · " +
+                  number(list(context.snapshot?.topics).filter((t) => t.lifecycleState !== "superseded").length) +
+                  " 个"}
+              </span>
+            </div>
+            <FindField
+              className={cls("lgi-tm-find lgi-tm-tree-find")}
+              label={"查找主题"}
+              placeholder={"主题名称"}
+              trigger={"debounce_250"}
+              value={context.treeQuery}
+              onCommit={context.setTreeQuery}
+              disabled={busy}
+            />
+          </div>
           <div
             id={"topic-map-navigation"}
             className={cls(
@@ -486,21 +490,21 @@ export function createTopicOverview(context: TopicOverviewContext) {
               <><IntelligenceIcon name="grid" size={16}/>我方矩阵</>,
               "identity",
               "",
-              "lgi-tm-quiet",
+              "lgi-tm-tree-tool",
               busy ? "disabled" : "",
             )}
             {btn(
               <><IntelligenceIcon name="info" size={16}/>计数与统计口径</>,
               "method",
               "",
-              "lgi-tm-quiet",
+              "lgi-tm-tree-tool",
               busy ? "disabled" : "",
             )}
             {btn(
               <><IntelligenceIcon name="edit" size={16}/>调整归属</>,
               "move-topic",
               "",
-              "lgi-tm-quiet",
+              "lgi-tm-tree-tool",
               busy ? "disabled" : "",
             )}
           </div>
@@ -523,88 +527,82 @@ export function createTopicOverview(context: TopicOverviewContext) {
       (p) => p && typeof p.platform === "string" && p.workCount !== 0,
     );
   }
-  function platformControl() {
+  /** LIDS scope bar (--lgi-scope-*): C17 SelectField triggers sharing one ink frame. Each segment writes through setFilter. */
+  function scopeBar() {
+    type ScopeKey = "platform" | "windowDays" | "path" | "overlay";
     const ids = [...new Set(observedPlatforms().map((p) => p.platform))];
     if (context.state.platform && !ids.includes(context.state.platform))
       ids.push(context.state.platform);
-    if (ids.length < 2 && !context.state.platform)
-      return ids.length ? (
-        <>
-          <span className={cls("lgi-tm-platform-context")}>
-            {esc(platformName(ids[0]))}
-          </span>
-        </>
-      ) : (
-        ""
-      );
-    return select("platform", "平台", [
-      ["", "全部平台"],
-      ...ids.map((id) => [id, platformName(id)] as const),
-    ]);
-  }
-  function controls() {
+    const segments: { key: ScopeKey; name: string; label: string; options: (readonly [string, string])[] }[] = [];
+    if (ids.length >= 2 || context.state.platform)
+      segments.push({ key: "platform", name: "平台", label: "统计平台", options: [["", "全部平台"], ...ids.map((id) => [id, platformName(id)] as const)] });
+    const journey = context.state.view === "journey";
+    segments.push({
+      key: "windowDays",
+      name: "时间",
+      label: journey ? "笔记时间" : "发布时间",
+      options: [["", "全部时间"], ["7", "近7天"], ["30", "近30天"], ["90", "近90天"]],
+    });
+    if (journey) {
+      segments.push({ key: "path", name: "经历", label: "经历路径", options: [["", "全部经历"], ["family", "家庭支持"], ["adult", "成年自我管理"]] });
+      segments.push({ key: "overlay", name: "状态", label: "跨阶段状态", options: [["", "全部状态"], ["obstruction_recurrence", "受阻与反复"], ["transition_handoff", "环境转换与支持交接"]] });
+    }
     return (
-      <>
-        <div className={cls("lgi-tm-toolbar")} aria-label={"当前统计范围"}>
-          {platformControl()}
-          {select(
-            "windowDays",
-            context.state.view === "journey" ? "笔记时间" : "发布时间",
-            [
-              ["", "全部时间"],
-              ["7", "近7天"],
-              ["30", "近30天"],
-              ["90", "近90天"],
-            ],
-          )}
-          {context.state.view === "journey" ? (
-            <>
-              {select("path", "经历", [
-                ["", "全部经历"],
-                ["family", "家庭支持"],
-                ["adult", "成年自我管理"],
-              ])}
-              {select("overlay", "跨阶段状态", [
-                ["", "全部状态"],
-                ["obstruction_recurrence", "受阻与反复"],
-                ["transition_handoff", "环境转换与支持交接"],
-              ])}
-            </>
-          ) : (
-            ""
-          )}
-        </div>
-      </>
+      <div className={cls("lgi-tm-scope-bar")} role={"group"} aria-label={"统计范围"}>
+        {ids.length === 1 && !context.state.platform ? (
+          <span className={cls("lgi-tm-scope-segment is-static")}>
+            <span>{"平台"}</span>
+            <b>{esc(platformName(ids[0]))}</b>
+          </span>
+        ) : null}
+        {segments.map((segment) => (
+          <label className={cls("lgi-tm-scope-segment")} key={segment.key}>
+            <span>{segment.name}</span>
+            <SelectField
+              compact
+              label={segment.label}
+              value={String(context.state[segment.key] ?? "")}
+              options={segment.options.map(([value, label]) => ({ value, label }))}
+              onChange={(value) => context.setFilter(segment.key, value)}
+            />
+          </label>
+        ))}
+      </div>
     );
   }
+  /** C16 FIND: commits after 250ms; keywords filter the returned materials only, never the server statistics. */
   function materialSearch() {
     return (
-      <>
-        <form className={cls("lgi-tm-search")} data-form={"search"}>
-          <label className={cls("v7-sr-only")} htmlFor={"topic-map-search"}>
-            {"查找材料与方向"}
-          </label>
-          <div className={cls("lgi-tm-row")}>
-            <input
-              id={"topic-map-search"}
-              name={"query"}
-              defaultValue={esc(context.state.query)}
-              placeholder={"查找材料与方向"}
-            />
-            <button className={cls("lgi-tm-button")} type={"submit"}>
-              {"查找"}
-            </button>
-          </div>
-        </form>
-      </>
+      <FindField
+        className={cls("lgi-tm-find")}
+        label={"查找材料与方向"}
+        placeholder={"标题、作者或正文"}
+        trigger={"debounce_250"}
+        value={context.state.query}
+        onCommit={context.setQuery}
+        inputId={"topic-map-search"}
+        name={"query"}
+        shortcut
+      />
+    );
+  }
+  function materialModeSwitch() {
+    return (
+      <ViewSwitch
+        className={cls("lgi-tm-mode-switch")}
+        label={"材料筛选"}
+        value={context.state.materialMode}
+        options={[
+          { key: "latest", label: "最新作品" },
+          { key: "high", label: "高表现" },
+          { key: "ordinary", label: "常规作品" },
+        ]}
+        onChange={context.setMaterialMode}
+      />
     );
   }
   function summary() {
     const activeSnapshot = context.requireSnapshot();
-    const asOf = new Date(activeSnapshot.scope.asOf);
-    const observedThrough = Number.isFinite(asOf.getTime())
-      ? new Intl.DateTimeFormat("zh-CN", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(asOf)
-      : null;
     const selected = context.topic(context.state.topicRef),
       parents = [],
       visited = new Set();
@@ -622,50 +620,31 @@ export function createTopicOverview(context: TopicOverviewContext) {
         >
           <div className={cls("lgi-tm-summary-heading")}>
             <div className={cls("lgi-tm-summary-identity")}>
-
-            <nav aria-label={"当前主题路径"}>
-              {btn("全部方向", "topic", "", "lgi-tm-quiet")}
-              {parents.map((t) => (
-                <>
+              {selected ? (
+                <nav className={cls("lgi-tm-path")} aria-label={"当前主题路径"}>
+                  {btn("全部方向", "topic", "", "lgi-tm-path-link")}
+                  {parents.slice(0, -1).map((t) => (
+                    <Fragment key={t.topicRef}>
+                      <span aria-hidden={"true"}>{"/"}</span>
+                      {btn(esc(t.displayName), "topic", t.topicRef, "lgi-tm-path-link", { title: t.displayName })}
+                    </Fragment>
+                  ))}
                   <span aria-hidden={"true"}>{"/"}</span>
-                  {btn(
-                    esc(t.displayName),
-                    "topic",
-                    t.topicRef,
-                    "lgi-tm-quiet",
-                    {
-                      title: t.displayName,
-                      "aria-current": t === selected ? "page" : undefined,
-                    },
-                  )}
-                </>
-              ))}
-            </nav>
-            {context.state.view === "overview" ? (
-              <span className={cls("lgi-tm-scope-subtitle")}>
-                {selected ? "当前主题的已观察材料" : "当前领域的已观察材料"}
-                {observedThrough && <time dateTime={asOf.toISOString()}> · 更新于 {observedThrough}</time>}
-              </span>
-            ) : null}
+                  <span>{selected.parentTopicRef ? "子主题" : "主题"}</span>
+                </nav>
+              ) : null}
+              <h2 className={cls("lgi-tm-page-title")} title={selected?.displayName || "全部方向"}>
+                {selected ? esc(selected.displayName) : "全部方向"}
+              </h2>
             </div>
-            <div className={cls("lgi-tm-row")}>
+            <div className={cls("lgi-tm-summary-actions")}>
               {selected ? (
                 <>
-                  {btn(
-                    "定义与依据",
-                    "definition",
-                    selected.topicRef,
-                    "lgi-tm-quiet",
-                  )}
-                  {btn("判断这个方向", "judge", selected.topicRef)}
+                  {btn("定义与依据", "definition", selected.topicRef, "lgi-tm-text-action")}
+                  {btn("判断这个方向", "judge", selected.topicRef, "lgi-tm-small")}
                 </>
-              ) : (
-                ""
-              )}
-              <details className={cls("lgi-tm-scope-filter")}>
-                <summary aria-label="选择统计平台与发布时间" title="调整统计平台与发布时间"><IntelligenceIcon name="filter" size={16}/>筛选</summary>
-                <div className={cls("lgi-tm-scope-filter-panel")}>{controls()}</div>
-              </details>
+              ) : null}
+              {scopeBar()}
               <ViewSwitch
                 className={cls("lgi-tm-view-switch")}
                 label={"主题图谱视图"}
@@ -678,7 +657,11 @@ export function createTopicOverview(context: TopicOverviewContext) {
               />
             </div>
           </div>
-          <div className={cls("lgi-tm-overview-band")} aria-label="主题概览与样本表现">
+          <div
+            className={cls("lgi-tm-overview-band")}
+            aria-label="主题概览与样本表现"
+            data-readouts={2 + 2 * platformStats(selected?.statistics || activeSnapshot.statistics).filter((p) => p.workCount !== 0).length}
+          >
             <OverviewReadouts
               statistics={selected?.statistics || activeSnapshot.statistics}
               scope={activeSnapshot.scope}
@@ -717,6 +700,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
       </>
     );
   }
+  /** Topic tree: single-line names on one grid (toggle · name · count); a level indents by one toggle width. */
   function tree() {
     const topics = list(context.snapshot?.topics).filter(
         (t) => t.lifecycleState !== "superseded",
@@ -726,32 +710,52 @@ export function createTopicOverview(context: TopicOverviewContext) {
           !t.parentTopicRef ||
           !topics.some((x) => x.topicRef === t.parentTopicRef),
       );
-    function branch(t: T.Topic, trail = new Set<string>()): ReactNode {
-      if (trail.has(t.topicRef)) return "";
+    const q = normalizeSearch(context.treeQuery);
+    const hit = (t: T.Topic) => !q || normalizeSearch(t.displayName).includes(q);
+    const subtreeHit = (t: T.Topic, trail = new Set<string>()): boolean => {
+      if (trail.has(t.topicRef)) return false;
+      const next = new Set(trail).add(t.topicRef);
+      return hit(t) || topics.some((c) => c.parentTopicRef === t.topicRef && subtreeHit(c, next));
+    };
+    const highlight = (name: string): ReactNode => {
+      if (!q) return esc(name);
+      const i = normalizeSearch(name).indexOf(q);
+      if (i < 0 || normalizeSearch(name).length !== name.length) return esc(name);
+      return <>{esc(name.slice(0, i))}<mark>{esc(name.slice(i, i + q.length))}</mark>{esc(name.slice(i + q.length))}</>;
+    };
+    function branch(t: T.Topic, level: number, trail = new Set<string>()): ReactNode {
+      if (trail.has(t.topicRef) || (q && !subtreeHit(t))) return "";
       const next = new Set(trail);
       next.add(t.topicRef);
       const children = topics.filter((c) => c.parentTopicRef === t.topicRef),
-        expanded = !list(context.state.collapsed).includes(t.topicRef);
+        expanded = Boolean(q) || !list(context.state.collapsed).includes(t.topicRef),
+        parent = context.topic(t.parentTopicRef);
+      const peek = [
+        number(t.statistics?.workCount) + " 篇作品",
+        children.length ? children.length + " 个子主题" : "",
+        parent ? "属于「" + parent.displayName + "」" : "",
+      ].filter(Boolean).join(" · ");
       return (
         <>
-          <li>
+          <li key={t.topicRef}>
             <div
               className={cls(
                 "lgi-tm-tree-row " +
-                  String(
-                    context.state.topicRef === t.topicRef ? "is-active" : "",
-                  ),
+                  (children.length ? "is-parent " : "") +
+                  (context.state.topicRef === t.topicRef ? "is-active" : ""),
               )}
+              style={inlineStyle(`--lvl:${level}`)}
             >
               {children.length ? (
                 btn(
-                  expanded ? "−" : "+",
+                  <IntelligenceIcon name="chevron" size={14} />,
                   "collapse",
                   t.topicRef,
                   "lgi-tm-tree-toggle",
                   {
                     "aria-label": `${expanded ? "收起" : "展开"}${t.displayName}`,
                     "aria-expanded": expanded,
+                    tabIndex: -1,
                   },
                 )
               ) : (
@@ -760,7 +764,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 </>
               )}
               {btn(
-                esc(t.displayName),
+                highlight(t.displayName),
                 "topic",
                 t.topicRef,
                 "lgi-tm-tree-name",
@@ -768,17 +772,13 @@ export function createTopicOverview(context: TopicOverviewContext) {
                   title: t.displayName,
                   "aria-current":
                     context.state.topicRef === t.topicRef ? "page" : undefined,
-                },
+                  "data-tree-item": "",
+                  "data-peek": peek,
+                  "data-parent-ref": t.parentTopicRef || "",
+                } as ButtonAttrs,
               )}
               {t.lifecycleState === "candidate" ? (
-                <>
-                  <span
-                    className={cls("lgi-tm-candidate-dot")}
-                    title={"候选方向"}
-                  >
-                    {"候选"}
-                  </span>
-                </>
+                <span className={cls("lgi-tm-candidate-dot")} title={"候选方向"}>{"候选"}</span>
               ) : (
                 ""
               )}
@@ -791,7 +791,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
             </div>
             {children.length && expanded ? (
               <>
-                <ul>{children.map((c) => branch(c, next))}</ul>
+                <ul>{children.map((c) => branch(c, level + 1, next))}</ul>
               </>
             ) : (
               ""
@@ -821,6 +821,10 @@ export function createTopicOverview(context: TopicOverviewContext) {
         .forEach((c) => optionBranch(c, next));
     }
     roots.forEach((t) => optionBranch(t));
+    const current = roots.filter((t) => !legacyConcept(t));
+    const visible = current.filter((t) => !q || subtreeHit(t));
+    const legacy = roots.filter(legacyConcept).filter((t) => !q || subtreeHit(t));
+    const hasParents = topics.some((t) => topics.some((c) => c.parentTopicRef === t.topicRef));
     return (
       <>
         <label className={cls("lgi-tm-mobile-tree-picker lgi-tm-control")}>
@@ -835,51 +839,75 @@ export function createTopicOverview(context: TopicOverviewContext) {
             {pickerOptions}
           </select>
         </label>
-        <div className={cls("lgi-tm-tree")} aria-label={"稳定主题结构"}>
+        <div className={cls("lgi-tm-tree")} aria-label={"稳定主题结构"} data-tree="" data-searching={q ? "" : undefined}>
           <h2 className={cls("v7-sr-only")}>{"主题列表"}</h2>
           <div
             className={cls(
-              "lgi-tm-tree-row " +
+              "lgi-tm-tree-row lgi-tm-tree-root " +
                 String(!context.state.topicRef ? "is-active" : ""),
             )}
           >
-            {btn("全部方向", "topic", "", "lgi-tm-tree-name")}
+            {btn("全部方向", "topic", "", "lgi-tm-tree-name", {
+              "aria-current": !context.state.topicRef ? "page" : undefined,
+              "data-tree-item": "",
+            } as ButtonAttrs)}
             <span className={cls("lgi-tm-num")}>
               {number(context.snapshot?.scope?.totalWorkCount)}
             </span>
           </div>
-          <ul>
-            {roots.filter((t) => !legacyConcept(t)).map((t) => branch(t))}
-          </ul>
-          {roots.some(legacyConcept) ? (
+          <div className={cls("lgi-tm-tree-row lgi-tm-tree-unassigned")} style={inlineStyle("--lvl:2")}>
+            <span className={cls("lgi-tm-tree-spacer")} aria-hidden={"true"}></span>
+            {btn("其中未归入主题", "unassigned", "", "lgi-tm-tree-name", {
+              title: "全部方向中尚未归入任何主题的材料",
+              "data-tree-item": "",
+            } as ButtonAttrs)}
+            <span className={cls("lgi-tm-num")}>
+              {number(context.snapshot?.scope?.unclassifiedWorkCount)}
+            </span>
+          </div>
+          {visible.length ? (
+            <>
+              <div className={cls("lgi-tm-tree-label")}>
+                <span>{"主题目录"}</span>
+                {hasParents && !q
+                  ? btn(list(context.state.collapsed).length ? "全部展开" : "全部收起", "collapse-all", "", "lgi-tm-tree-all")
+                  : <span></span>}
+                <span>{"作品"}</span>
+              </div>
+              <ul>{visible.map((t) => branch(t, 1))}</ul>
+            </>
+          ) : (
+            ""
+          )}
+          {legacy.length ? (
             <>
               <details
                 className={cls("lgi-tm-core-details")}
                 data-tree-legacy=""
                 {...attributes(
-                  context.state.legacyExpanded ||
-                    roots.some(
-                      (t) =>
-                        legacyConcept(t) &&
-                        t.topicRef === context.state.topicRef,
-                    )
+                  q ||
+                    context.state.legacyExpanded ||
+                    legacy.some((t) => t.topicRef === context.state.topicRef)
                     ? "open"
                     : "",
                 )}
               >
                 <summary>
-                  {["旧方法候选 · ", roots.filter(legacyConcept).length].join(
-                    "",
-                  )}
+                  {["旧方法候选 · ", legacy.length].join("")}
                 </summary>
                 <p className={cls("lgi-tm-note")}>
                   {
                     "保留原声与历史归属，尚待稳定概念归纳；这些节点不代表已形成专业主题树。"
                   }
                 </p>
-                <ul>{roots.filter(legacyConcept).map((t) => branch(t))}</ul>
+                <ul>{legacy.map((t) => branch(t, 1))}</ul>
               </details>
             </>
+          ) : (
+            ""
+          )}
+          {q && !visible.length && !legacy.length ? (
+            <p className={cls("lgi-tm-note")}>{"没有名称包含「" + context.treeQuery.trim() + "」的主题"}</p>
           ) : (
             ""
           )}
@@ -892,12 +920,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
               </p>
             </>
           )}
-          <div className={cls("lgi-tm-tree-row lgi-tm-tree-unassigned")}>
-            {btn("尚未归入主题", "unassigned", "", "lgi-tm-tree-name")}
-            <span className={cls("lgi-tm-num")}>
-              {number(context.snapshot?.scope?.unclassifiedWorkCount)}
-            </span>
-          </div>
           <p className={cls("v7-sr-only")}>
             {"每个数字为去重作品，子主题之间可以重叠。"}
           </p>
@@ -1112,7 +1134,18 @@ export function createTopicOverview(context: TopicOverviewContext) {
               tab(name, "tab", id, context.state.tab === id),
             )}
           </nav>
-          {btn("主题 × 旅程", "matrix", "", "lgi-tm-quiet")}
+          <div className={cls("lgi-tm-work-side")}>
+            {context.state.tab === "content" ? (
+              <>
+                <div className={cls("lgi-tm-work-tools")}>
+                  {materialSearch()}
+                  {materialModeSwitch()}
+                </div>
+                <span className={cls("lgi-tm-work-sep")} aria-hidden={"true"}></span>
+              </>
+            ) : null}
+            {btn(<>主题 × 旅程<IntelligenceIcon name="external" size={14}/></>, "matrix", "", "lgi-tm-text-action")}
+          </div>
         </div>
         {context.state.tab === "content" ? (
           <div className={cls("lgi-tm-material-first")}>{materialWorkspace()}</div>
@@ -1238,11 +1271,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
       <>
         {allRows.length ? (
           <>
-            <div className={cls("lgi-tm-section-head")}>
-              <div>
-                <h3>{"主题供给分布"}</h3>
-                <p>{"点名称下钻，勾选最多三个方向并排比较。"}</p>
-              </div>
+            <div className={cls("lgi-tm-section-head lgi-tm-tab-tools")}>
               <div className={cls("lgi-tm-overview-tools")}>
                 {tab(
                   "表格",
@@ -2159,7 +2188,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
       <>
         <div className={cls("lgi-tm-section-head")}>
           <div>
-            <h3>{"这些内容，实际在怎样讲？"}</h3>
             {researchCoverageSummary(ns)}
           </div>
         </div>
@@ -2352,10 +2380,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
     return (
       <>
         <div className={cls("lgi-tm-section-head")}>
-          <div>
-            <h3>{"这些材料主要来自谁？"}</h3>
-            <p>{"作者贡献引用当前服务端统计范围，作品按身份去重。"}</p>
-          </div>
           {btn("我方与对标范围", "identity")}
         </div>
         <div className={cls("lgi-tm-source-summary")}>
@@ -2477,10 +2501,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
     return (
       <>
         <div className={cls("lgi-tm-section-head")}>
-          <div>
-            <h3>{"新方向与尚未归类的材料"}</h3>
-            <p>{"候选有依据即可查看；新增结构不等于市场增长。"}</p>
-          </div>
           {btn("结构与依据变更", "changes")}
           {btn("结构调整", "structure-change")}
         </div>
@@ -2488,7 +2508,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
           ? rows.map((t) => (
               <>
                 <article className={cls("lgi-tm-candidate")}>
-                  {badge("新方向候选", true)}
+                  {badge("新方向候选", "warning")}
                   <h4>{esc(t.displayName)}</h4>
                   <p>{esc(t.definitionText)}</p>
                   <p>
@@ -2512,7 +2532,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
         {list(activeSnapshot.candidates).map((c) => (
           <>
             <article className={cls("lgi-tm-candidate")}>
-              {badge("研究提出的候选方向", true)}
+              {badge("研究提出的候选方向", "warning")}
               <h4>{esc(c.label)}</h4>
               <p>
                 {[
@@ -2561,10 +2581,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
     return (
       <>
         <div className={cls("lgi-tm-section-head")}>
-          <div>
-            <h3>{"从熟悉的方向，找到下一次切入"}</h3>
-            <p>{"我方发布历史不随概览或外部近期窗口清空。"}</p>
-          </div>
           {select("referenceWindowDays", "外部参考窗口", [
             ["7", "近7天"],
             ["30", "近30天"],
@@ -2654,16 +2670,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
     );
     if (context.state.materialMode === "high")
       return filtered
-        .filter((w) => {
-          const p = platformStats(context.snapshot?.statistics).find(
-            (p) => p.platform === w.platform,
-          );
-          return (
-            known(p?.highPerformanceThreshold) &&
-            known(w.likes) &&
-            w.likes >= p.highPerformanceThreshold
-          );
-        })
+        .filter(isHighWork)
         .sort(
           (a, b) =>
             a.platform.localeCompare(b.platform) ||
@@ -3001,6 +3008,11 @@ export function createTopicOverview(context: TopicOverviewContext) {
                     <span className={cls("lgi-tm-node-question")}>
                       {questions[i]}
                     </span>
+                    <span
+                      className={cls("lgi-tm-node-rel")}
+                      aria-hidden={"true"}
+                      style={inlineStyle(`--w:${(100 * (known(station.count) ? station.count : 0)) / Math.max(1, ...stations.map((x) => (known(x.count) ? x.count : 0)))}%`)}
+                    ></span>
                   </button>
                 </>
               ))}

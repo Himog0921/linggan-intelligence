@@ -1,5 +1,5 @@
 {
-  "fingerprint": "414a4c87400bbbe76b652a1a94eddad3c5ca625d0d3e8f9676a41e2bf5d6f0ba",
+  "fingerprint": "8087c4f58e8698004d71513773722b9cfe8a2f432e0a1b506535924de91296e2",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -471,11 +471,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/Topics.module.css",
-      "sha256": "da55979c8ae623a790190cc20bf78c3ab0f0feb7a7f66a0d1f27030d69d5cd51"
+      "sha256": "f6f8063ea93cff105efe0cb642152e16b9c084f369140ab8bde325b6eaa62368"
     },
     {
       "path": "apps/web/src/pages/topics/TopicsPage.tsx",
-      "sha256": "f01d4e90d705417456cb628a431a2bcc393b5c49158d12ae035edbcaf719ee25"
+      "sha256": "02e18bb08b3735cfee5a4080ff097d2a88a873682624863adc2033538f9cca28"
     },
     {
       "path": "apps/web/src/pages/topics/Workspace.module.css",
@@ -487,11 +487,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
-      "sha256": "5b2ea9723dcf5c5cf1d4ae26daa19c5925b4e624c12b799619019ffacb037d9b"
+      "sha256": "a48d1088d2610e1fe9ff72e2dbeae9f55474312bec468b993b5175c195a28fa2"
     },
     {
       "path": "apps/web/src/pages/topics/topicOverview.tsx",
-      "sha256": "2c94d28dc9eaca3efa1ae2c07632adb28889a84e49fc8ef942e7fa05ab3454d5"
+      "sha256": "f57c2507b8c7daa9a02d68f908743b35b775c09fef7ae2269b676ac8e5d7b153"
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.module.css",

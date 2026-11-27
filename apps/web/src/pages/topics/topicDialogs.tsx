@@ -1532,6 +1532,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
                       a.sourceState === "available"
                         ? "来源当前可用"
                         : "读取原版本时复核来源资格",
+                      a.sourceState === "available" ? "success" : "warning",
                     )}
                     {badge("不持续跟踪")}
                   </div>

@@ -217,19 +217,21 @@ try {
     assert.equal(await tree.locator('button[data-action="topic"]').first().innerText(), "全部方向");
     assert.equal(await sidebar.getByRole("button", { name: "调整归属" }).count(), 1,
       "existing move-topic capability must remain reachable below the tree");
-    const scopeFilter = page.locator('summary[aria-label="选择统计平台与发布时间"]').locator("..");
-    assert.equal(await scopeFilter.count(), 1, "scope filters must remain discoverable");
-    assert.equal(await scopeFilter.evaluate((el) => el.open), false);
-    await scopeFilter.locator("summary").click();
-    assert.equal(await scopeFilter.evaluate((el) => el.open), true);
-    assert.ok(await scopeFilter.locator("select").first().isVisible(), "scope selector must remain usable");
-    await scopeFilter.locator("summary").click();
-    assert.equal(await scopeFilter.evaluate((el) => el.open), false);
+    // Redesign 2026-11-27: platform/time are a visible LIDS scope bar (C17 triggers in one frame), not a folded popover.
+    const scopeBar = page.getByRole("group", { name: "统计范围" });
+    assert.equal(await scopeBar.count(), 1, "scope filters must remain discoverable");
+    const timeTrigger = scopeBar.getByRole("combobox", { name: "发布时间" });
+    assert.ok(await timeTrigger.isVisible(), "scope selector must remain usable");
+    await timeTrigger.click();
+    assert.ok(await page.getByRole("listbox", { name: "发布时间" }).isVisible(), "the C17 menu opens from the scope bar");
+    await page.keyboard.press("Escape");
+    assert.equal(await page.getByRole("listbox", { name: "发布时间" }).count(), 0);
     assert.equal(await page.locator('aside[aria-label="主题图谱导航"]').getByRole("group", { name: "主题图谱视图" }).count(), 0);
     const totals = await page.getByLabel("基础概览指标").innerText();
     const distribution = await page.getByLabel("已观察内容点赞分布").innerText();
-    await page.getByRole("textbox", { name: "查找材料与方向" }).fill("no-such-material-b-overview");
-    await page.getByRole("button", { name: "查找", exact: true }).click();
+    const find = page.getByRole("searchbox", { name: "查找材料与方向" });
+    await find.fill("no-such-material-b-overview");
+    await find.press("Enter");
     await page.getByText("当前条件没有关键词命中", { exact: true }).waitFor();
     assert.equal(await page.getByLabel("基础概览指标").innerText(), totals);
     assert.equal(await page.getByLabel("已观察内容点赞分布").innerText(), distribution);

@@ -119,10 +119,10 @@ describe("Topic React interaction and lifetime", () => {
         screen.queryByText(/正在载入其余材料与讨论/),
       ).not.toBeInTheDocument(),
     );
-    const input = screen.getByRole("textbox", { name: "查找材料与方向" });
+    const input = screen.getByRole("searchbox", { name: "查找材料与方向" });
     await userEvent.type(input, "材料 1");
     expect(input).toHaveValue("材料 1");
-    await userEvent.click(screen.getByRole("button", { name: "查找" }));
+    await userEvent.type(input, "{Enter}");
     expect(new URL(window.location.href).searchParams.get("query")).toBe(
       "材料 1",
     );
