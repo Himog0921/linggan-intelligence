@@ -122,7 +122,7 @@ impl ExecutorFence {
         let owned: bool = sqlx::query_scalar(
             "SELECT linggan_ai_executor_is_owner($1,$2,$3) FROM linggan_ai_executor_current c \
              JOIN linggan_ai_executor_instance i USING(instance_ref,generation) \
-             WHERE c.instance_ref=$1 AND c.generation=$2 FOR SHARE OF c,i",
+             WHERE c.instance_ref=$1 AND c.generation=$2 FOR SHARE OF c FOR KEY SHARE OF i",
         )
         .bind(self.instance_ref)
         .bind(self.generation)
@@ -225,23 +225,41 @@ impl ExecutorSession {
         }
         Ok(())
     }
+    // Lock first, then evaluate the transition on a fresh snapshot. A declined
+    // transition must finish rolling back before another connection can renew work.
+    async fn transition(&mut self, statement: &'static str) -> Result<(), ExecutorError> {
+        let fence = self.fence;
+        self.connection
+            .transaction(move |tx| Box::pin(async move {
+                sqlx::query("SELECT instance_ref FROM linggan_ai_executor_instance WHERE instance_ref=$1 FOR UPDATE")
+                    .bind(fence.instance_ref)
+                    .fetch_one(&mut **tx)
+                    .await?;
+                let changed = sqlx::query(statement)
+                    .bind(fence.instance_ref)
+                    .bind(fence.generation)
+                    .execute(&mut **tx)
+                    .await?;
+                if changed.rows_affected() != 1 {
+                    return Err(ExecutorError::FenceLost);
+                }
+                Ok(())
+            }))
+            .await
+    }
     pub async fn request_drain(&mut self) -> Result<(), ExecutorError> {
-        let changed=sqlx::query("UPDATE linggan_ai_executor_instance SET state='draining',drain_requested_at=COALESCE(drain_requested_at,clock_timestamp()),heartbeat_at=clock_timestamp() WHERE instance_ref=$1 AND linggan_ai_executor_is_owner($1,$2,false)")
-            .bind(self.fence.instance_ref).bind(self.fence.generation).execute(&mut self.connection).await?;
-        if changed.rows_affected() != 1 {
-            return Err(ExecutorError::FenceLost);
-        }
-        Ok(())
+        self.transition(
+            "UPDATE linggan_ai_executor_instance SET state='draining',
+             drain_requested_at=COALESCE(drain_requested_at,clock_timestamp()), heartbeat_at=clock_timestamp()
+             WHERE instance_ref=$1 AND linggan_ai_executor_is_owner($1,$2,false)",
+        ).await
     }
     /// A success acknowledgement may be written only after this database transition succeeds.
     pub async fn complete_drain(&mut self) -> Result<(), ExecutorError> {
-        let changed=sqlx::query("UPDATE linggan_ai_executor_instance i SET state='drained',drained_at=clock_timestamp(),heartbeat_at=clock_timestamp()
-            WHERE instance_ref=$1 AND state='draining' AND linggan_ai_executor_is_owner($1,$2,false)
-             AND NOT EXISTS(SELECT 1 FROM linggan_ai_batch_item_control WHERE lease_instance_ref=$1 AND state='running')")
-            .bind(self.fence.instance_ref).bind(self.fence.generation).execute(&mut self.connection).await?;
-        if changed.rows_affected() != 1 {
-            return Err(ExecutorError::FenceLost);
-        }
-        Ok(())
+        self.transition(
+            "UPDATE linggan_ai_executor_instance SET state='drained', drained_at=clock_timestamp(), heartbeat_at=clock_timestamp()
+             WHERE instance_ref=$1 AND state='draining' AND linggan_ai_executor_is_owner($1,$2,false)
+             AND NOT EXISTS(SELECT 1 FROM linggan_ai_batch_item_control WHERE lease_instance_ref=$1 AND state='running')",
+        ).await
     }
 }

@@ -186,6 +186,144 @@ async fn saved_core_drives_topic_queue_and_persisted_membership() {
 }
 
 #[tokio::test]
+#[ignore = "owned isolated PostgreSQL, frozen pre-upgrade queue fixture; no provider"]
+async fn old_oversized_unsent_core_is_requeued_once_with_current_packet() {
+    use super::super::topic_research_automation as topics;
+    let (db, config) = support::setup("topic_old_packet_retry").await;
+    configure_tasks_for_test(&db, config).await;
+    topics::change(
+        &db,
+        &topics::Change {
+            command_ref: Uuid::new_v4(),
+            domain_ref: support::D,
+            expected_revision: 0,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    async fn cores(db: &Database, config: Uuid, prefix: &str, count: usize) -> Vec<Uuid> {
+        let mut works = Vec::new();
+        for index in 0..count {
+            let work = support::work(db, &format!("{prefix}-{index}"), "合成正文材料").await;
+            seed_core(db, work, config, false).await;
+            works.push(work);
+        }
+        works
+    }
+    async fn skip(db: &Database, count: i64) {
+        sqlx::query("UPDATE linggan_ai_batch_item_control SET state='skipped',usable=false,
+            failure_code='ai_input_limit_before_dispatch',finished_at=scope_001_now()-interval '2 minutes'
+            WHERE item_ref IN (SELECT item_ref FROM linggan_ai_batch_item_control JOIN linggan_topic_research_stage USING(item_ref) JOIN linggan_topic_research_window USING(window_ref) JOIN linggan_topic_research_run USING(run_ref) WHERE state='pending' AND domain_ref=$2 ORDER BY item_ref LIMIT $1)")
+            .bind(count).bind(support::D).execute(db.pool()).await.unwrap();
+    }
+    async fn windows(db: &Database, works: &[Uuid]) -> i64 {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM linggan_topic_research_window JOIN linggan_topic_research_run USING(run_ref) WHERE work_ref=ANY($1) AND domain_ref=$2",
+        )
+        .bind(works)
+        .bind(support::D)
+        .fetch_one(db.pool())
+        .await
+        .unwrap()
+    }
+    let old = cores(&db, config, "old-packet", 8).await;
+    let mut cursor = None;
+    assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 8);
+    skip(&db, 8).await;
+    assert_eq!(
+        topics::tick(&db, &mut cursor).await.unwrap(),
+        0,
+        "current packet was already tried"
+    );
+    emulate_old_packet_format(&db, support::D).await;
+
+    let new = cores(&db, config, "new-core", 10).await;
+    assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 8);
+    let initial_old = windows(&db, &old).await;
+    let initial_new = windows(&db, &new).await;
+    assert_eq!((initial_old, initial_new), (12, 4));
+    assert_open_domain_retries_with_full_neighbor(&db, old[0]).await;
+    // Leave just one free slot each round while both populations still have work.
+    for _ in 0..2 {
+        assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 0);
+        skip(&db, 1).await;
+        assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 1);
+    }
+    assert_eq!(windows(&db, &old).await, initial_old + 1);
+    assert_eq!(windows(&db, &new).await, initial_new + 1);
+    for _ in 0..4 {
+        skip(&db, 8).await;
+        topics::tick(&db, &mut cursor).await.unwrap();
+    }
+    assert_eq!(topics::tick(&db, &mut cursor).await.unwrap(), 0);
+    assert_eq!(windows(&db, &old).await, 16);
+    assert_eq!(windows(&db, &new).await, 10);
+}
+
+// The first domain is at capacity with at least a full page of unprocessed old
+// skips. A new domain must still receive its independently admissible retry.
+async fn assert_open_domain_retries_with_full_neighbor(db: &Database, work: Uuid) {
+    use super::super::topic_research_automation as topics;
+    let domain = Uuid::parse_str("00000000-0000-4000-8000-000000000002").unwrap();
+    sqlx::query("INSERT INTO linggan_material_domain_usage(usage_ref,content_public_ref,domain_ref,role,basis_kind,package_ref)
+        SELECT gen_random_uuid(),content_public_ref,$2,'reference','legacy_domain_migration',package_ref
+        FROM linggan_material_domain_usage WHERE content_public_ref=$1 AND domain_ref=$3 LIMIT 1")
+        .bind(work).bind(domain).bind(support::D).execute(db.pool()).await.unwrap();
+    topics::change(
+        db,
+        &topics::Change {
+            command_ref: Uuid::new_v4(),
+            domain_ref: domain,
+            expected_revision: 0,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(topics::tick(db, &mut None).await.unwrap(), 1);
+    emulate_old_packet_format(db, domain).await;
+    sqlx::query("UPDATE linggan_ai_batch_item_control c SET state='skipped',usable=false,failure_code='ai_input_limit_before_dispatch',finished_at=scope_001_now()-interval '2 minutes'
+        FROM linggan_topic_research_stage s JOIN linggan_topic_research_window w USING(window_ref) JOIN linggan_topic_research_run r USING(run_ref)
+        WHERE c.item_ref=s.item_ref AND r.domain_ref=$1").bind(domain).execute(db.pool()).await.unwrap();
+    let domains: Vec<Uuid> = sqlx::query_scalar(topics::RETRY_CANDIDATES)
+        .bind(None::<Uuid>)
+        .bind(crate::topic_map_research_analysis::METHOD_VERSION)
+        .bind(None::<Uuid>)
+        .bind(None::<Uuid>)
+        .bind(None::<Uuid>)
+        .bind(None::<Vec<Uuid>>)
+        .fetch_all(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(domains, [domain]);
+    assert_eq!(topics::tick(db, &mut None).await.unwrap(), 1);
+    let pending:i64=sqlx::query_scalar("SELECT count(*) FROM linggan_topic_research_run JOIN linggan_topic_research_window USING(run_ref) JOIN linggan_topic_research_stage USING(window_ref) JOIN linggan_ai_batch_item_control USING(item_ref) WHERE domain_ref=$1 AND state='pending'")
+        .bind(domain).fetch_one(db.pool()).await.unwrap();
+    assert_eq!(pending, 1);
+}
+
+// Recreate immutable pre-upgrade manifests inside the disposable PostgreSQL fixture.
+async fn emulate_old_packet_format(db: &Database, domain: Uuid) {
+    let mut tx = db.pool().begin().await.unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_topic_research_window DISABLE TRIGGER topic_research_window_immutable",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE linggan_topic_research_window w SET input_refs=w.input_refs-'singlePassPacketVersion' FROM linggan_topic_research_run r WHERE w.run_ref=r.run_ref AND r.domain_ref=$1")
+        .bind(domain).execute(&mut *tx).await.unwrap();
+    sqlx::query(
+        "ALTER TABLE linggan_topic_research_window ENABLE TRIGGER topic_research_window_immutable",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+}
+
+#[tokio::test]
 #[ignore = "owned isolated PostgreSQL, synthetic Core queue; no provider"]
 async fn topic_candidates_reserve_progress_for_fresh_and_historical_cores() {
     let (db, model_config) = support::setup("topic_map_core_priority").await;

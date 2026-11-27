@@ -451,8 +451,13 @@ async fn service_heartbeat_wait_cannot_suspend_the_claim_transaction_that_releas
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }).await.unwrap();
-    // Cross the real five-second heartbeat tick while the claim owns FOR SHARE.
-    tokio::time::sleep(Duration::from_secs(6)).await;
+    // A blocked claim outlives a heartbeat timeout. The same generation must still renew.
+    let heartbeat: String = sqlx::query_scalar("SELECT heartbeat_at::text FROM linggan_ai_executor_instance WHERE instance_ref=$1")
+        .bind(owner).fetch_one(db.pool()).await.unwrap();
+    tokio::time::sleep(Duration::from_secs(11)).await;
+    let renewed: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ai_executor_current c JOIN linggan_ai_executor_instance i USING(instance_ref,generation) WHERE c.instance_ref=$1 AND i.heartbeat_at>$2::text::timestamptz AND clock_timestamp()-i.heartbeat_at<interval '7 seconds')")
+        .bind(owner).bind(heartbeat).fetch_one(db.pool()).await.unwrap();
+    assert!(renewed, "a blocked claim must allow its owner to heartbeat");
     sqlx::query("SELECT pg_advisory_unlock(hashtextextended($1,4540139))")
         .bind(owner.to_string())
         .execute(&mut blocker)

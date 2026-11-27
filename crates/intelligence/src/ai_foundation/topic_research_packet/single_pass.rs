@@ -86,15 +86,17 @@ fn input_payload(
     units: &[(String, analysis::Discussion)],
 ) -> Value {
     let mut payload = json!({"mode":mode,"domain":input.domain,"workRef":input.work.work_ref,
-        "definitions":definitions});
+        "definitionDefaults":{"conceptRole":"topic","qualityState":"current","parentTopicRef":null},
+        "definitions":definitions.iter().map(model_definition).collect::<Vec<_>>()});
     if mode == "author" {
-        payload["fragments"] =
-            json!(input.fragments.iter().enumerate().map(|(index,f)|json!({
-            "fragmentIndex":index,"fragmentId":f.fragment_id,"field":f.field,
-            "sourceRef":f.source_ref,"sourceVersion":f.source_version,"speaker":f.speaker,
-            "citationSpeakerRole":analysis::fragment_role(f),
-            "content":fragment_content(f),"issues":f.issues
-        })).collect::<Vec<_>>());
+        payload["fragments"] = json!(
+            input
+                .fragments
+                .iter()
+                .enumerate()
+                .map(|(index, f)| model_fragment(index, f))
+                .collect::<Vec<_>>()
+        );
         payload["citationSpeakerRule"] = json!(
             "判断讨论的 speakerRole 时读取所引片段的 citationSpeakerRole。只有全部引用均为 author 才标 author。只有全部引用为 quoted 才标 quoted。混合、未知或归属不明用 unknown。作者作品中的引述或图片模型观察不自动成为作者原话。字段 sp 为 unknown 时，陈述用“该材料讨论”等来源中立的表达。机制、疗效或因果判断要保留为来源主张及其不确定性。若 commentStudy 为空，projection.rm 必须是空数组。"
         );
@@ -102,7 +104,16 @@ fn input_payload(
         payload["roleMetadata"] = input.role_metadata.clone();
         let mut coverage = input.coverage.clone();
         if let Some(object) = coverage.as_object_mut() {
-            object.remove("core");
+            for key in [
+                "core",
+                "sourceHashes",
+                "fragmentOrigins",
+                "sourceFragmentIds",
+                "sourceFragmentId",
+                "windowKey",
+            ] {
+                object.remove(key);
+            }
         }
         payload["coverage"] = coverage;
         payload["contentCore"] = input.coverage["core"].clone();
@@ -135,17 +146,63 @@ fn compact_support_examples(candidate: &mut Value) {
     }
 }
 
-fn fragment_content(fragment: &linggan_evidence::creator_discovery::Fragment) -> Value {
-    let mut content = fragment.model_content();
+/// Stable fragment indices resolve exact quotes against the complete frozen manifest.
+fn model_fragment(index: usize, fragment: &linggan_evidence::creator_discovery::Fragment) -> Value {
+    let role = analysis::fragment_role(fragment);
     if matches!(
         fragment.field.as_str(),
         "core_text_evidence" | "core_image_evidence"
-    ) && let Some(content) = content.as_object_mut()
-    {
-        // The author packet already holds these same units in contentCore.
-        content.remove("knowledgeUnits");
+    ) {
+        return json!({"fragmentIndex":index,"field":fragment.field,"citationSpeakerRole":role,
+            "speaker":fragment.speaker,"content":{"text":fragment.text,"evidenceRef":fragment.structure["evidenceRef"],
+            "kind":fragment.fragment_id.rsplit('.').next()},"issues":fragment.issues});
     }
-    content
+    json!({"fragmentIndex":index,"fragmentId":fragment.fragment_id,"field":fragment.field,
+        "sourceRef":fragment.source_ref,"sourceVersion":fragment.source_version,"speaker":fragment.speaker,
+        "citationSpeakerRole":role,"content":fragment.model_content(),"issues":fragment.issues})
+}
+
+/// A boundary example needs its meaning and source role. The dispatch context retains
+/// its stable source, offsets and version for qualification and acceptance.
+fn model_definition(definition: &Value) -> Value {
+    let mut wire = definition.clone();
+    if let Some(object) = wire.as_object_mut() {
+        // The immutable definitionRef already identifies its version. Induction history
+        // stays in the dispatch context; qualityState carries its semantic consequence.
+        object.remove("version");
+        object.remove("inductionMethod");
+        if object.get("conceptRole").and_then(Value::as_str) == Some("topic") {
+            object.remove("conceptRole");
+        }
+        if object.get("qualityState").and_then(Value::as_str) == Some("current") {
+            object.remove("qualityState");
+        }
+        if object.get("parentTopicRef").is_some_and(Value::is_null) {
+            object.remove("parentTopicRef");
+        }
+    }
+    if let Some(examples) = wire
+        .get_mut("supportExamples")
+        .and_then(Value::as_array_mut)
+    {
+        for example in examples {
+            if let Some(citations) = example.get_mut("evidence").and_then(Value::as_array_mut) {
+                for citation in citations.iter_mut().filter_map(Value::as_object_mut) {
+                    citation
+                        .retain(|key, _| matches!(key.as_str(), "text" | "field" | "speakerRole"));
+                }
+            }
+            if let Some(object) = example.as_object_mut() {
+                object.retain(|key, _| {
+                    matches!(
+                        key.as_str(),
+                        "statement" | "speakerRole" | "evidenceRole" | "evidence"
+                    )
+                });
+            }
+        }
+    }
+    wire
 }
 
 #[derive(Deserialize)]

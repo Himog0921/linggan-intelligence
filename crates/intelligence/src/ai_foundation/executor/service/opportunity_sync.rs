@@ -218,7 +218,7 @@ impl OpportunitySync {
             JOIN linggan_opportunity_problem problem USING(problem_ref) \
             CROSS JOIN linggan_opportunity_metric_definition_current current \
             JOIN linggan_opportunity_metric_definition definition ON definition.version=current.version \
-            WHERE current.singleton AND change.changed_at+make_interval(secs=>\
+            WHERE current.singleton AND LEAST(change.queued_at,change.changed_at)+make_interval(secs=>\
               (definition.params->>'card_rebuild_debounce_seconds')::double precision)<=clock_timestamp() \
             ORDER BY problem.domain_ref")
             .fetch_all(database.pool()).await.map_err(|error| error.to_string())
@@ -382,7 +382,7 @@ mod tests {
         .await
         .unwrap();
         assert!(queued, "periodic discovery must requeue a stale index");
-        sqlx::query("UPDATE linggan_opportunity_card_change SET changed_at=clock_timestamp()-interval '301 seconds' WHERE problem_ref=$1")
+        sqlx::query("UPDATE linggan_opportunity_card_change SET queued_at=clock_timestamp()-interval '301 seconds' WHERE problem_ref=$1")
             .bind(problem).execute(db.pool()).await.unwrap();
         assert_eq!(
             sync.due_card_domains(&db, false).await.unwrap(),

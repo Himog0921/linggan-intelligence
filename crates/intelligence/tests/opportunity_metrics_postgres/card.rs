@@ -2087,7 +2087,13 @@ async fn assert_card_event_debounce(
         events, 0,
         "source events must be consumed only after problem changes are queued"
     );
-    sqlx::query("UPDATE linggan_opportunity_card_change SET changed_at=clock_timestamp()-interval '301 seconds'")
+    // Another event arrives after the first pending window elapsed. It must not restart the timer.
+    sqlx::query("SELECT linggan_opportunity_card_source_changed('domain',$1)")
+        .bind(domain.to_string())
+        .execute(db.pool())
+        .await
+        .unwrap();
+    sqlx::query("UPDATE linggan_opportunity_card_change SET queued_at=clock_timestamp()-interval '301 seconds'")
         .execute(db.pool()).await.unwrap();
     let delivered = rebuild_opportunity_cards(db, domain, digest, CardRebuildMode::Due)
         .await

@@ -556,6 +556,7 @@ migrate() {
   apply_migration_once "0242_creation_template_labels" "$project_root/database/migrations/0242_creation_template_labels.sql"
   apply_migration_once "0243_creation_evidence_templates" "$project_root/database/migrations/0243_creation_evidence_templates.sql"
   apply_migration_once "0244_creation_template_replication_skill" "$project_root/database/migrations/0244_creation_template_replication_skill.sql"
+  apply_migration_once "0245_opportunity_card_queue_age" "$project_root/database/migrations/0245_opportunity_card_queue_age.sql"
 }
 
 case "$command_name" in

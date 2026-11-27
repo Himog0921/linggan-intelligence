@@ -383,7 +383,7 @@ async fn pending_changes(
         "SELECT change.problem_ref,change.revision FROM linggan_opportunity_card_change change \
          JOIN linggan_opportunity_problem problem USING(problem_ref) WHERE problem.domain_ref=$1 \
          AND problem.created_at<=$2::timestamptz \
-         AND ($3 OR change.changed_at+make_interval(secs=>$4)<=clock_timestamp()) \
+         AND ($3 OR LEAST(change.queued_at,change.changed_at)+make_interval(secs=>$4)<=clock_timestamp()) \
          ORDER BY change.problem_ref FOR UPDATE OF change",
     )
     .bind(domain)
@@ -395,7 +395,7 @@ async fn pending_changes(
     let deferred: i64 = if mode == CardRebuildMode::Due {
         sqlx::query_scalar("SELECT count(*) FROM linggan_opportunity_card_change change \
             JOIN linggan_opportunity_problem problem USING(problem_ref) WHERE problem.domain_ref=$1 \
-              AND change.changed_at+make_interval(secs=>$2)>clock_timestamp()")
+              AND LEAST(change.queued_at,change.changed_at)+make_interval(secs=>$2)>clock_timestamp()")
             .bind(domain).bind(f64::from(params.card_rebuild_debounce_seconds))
             .fetch_one(&mut **tx).await?
     } else {

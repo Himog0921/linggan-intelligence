@@ -14,6 +14,7 @@ pub struct CursorState {
     definitions: Option<(Uuid, Uuid)>,
     comments: Option<(Uuid, Uuid)>,
     retries: Option<Uuid>,
+    retry_first: bool,
 }
 #[derive(Default, Serialize)]
 struct CoreCursor {
@@ -40,8 +41,27 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
     } else {
         0
     };
-    let repaired =
-        repaired + retry_confirmed_invalid_outputs(db, &mut position.retries, &selected).await?;
+    // When a single slot opens, alternate the first producer that sees it.
+    // A full queue leaves the preference intact until something can be admitted.
+    let mut retried = 0;
+    if position.retry_first {
+        retried = retry_eligible_windows(db, &mut position.retries, &selected).await?;
+    }
+    let new = queue_new_cores(db, position, &selected).await?;
+    if !position.retry_first {
+        retried = retry_eligible_windows(db, &mut position.retries, &selected).await?;
+    }
+    if retried + new > 0 {
+        position.retry_first = !position.retry_first;
+    }
+    Ok(repaired + retried + new)
+}
+
+async fn queue_new_cores(
+    db: &Database,
+    position: &mut CursorState,
+    selected: &selected_collection_scope::Filter,
+) -> Result<usize, FoundationError> {
     let rows = sqlx::query(include_str!("candidates.sql"))
         .bind(serde_json::json!(&position.cores))
         .bind(crate::topic_map_research_analysis::METHOD_VERSION)
@@ -50,7 +70,7 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
         .bind(selected.collection_run_ref)
         .fetch_all(db.pool())
         .await?;
-    let mut queued = repaired;
+    let mut queued = 0;
     for row in rows {
         let domain: Uuid = row.get("domain_ref");
         let core: Uuid = row.get("request_ref");
@@ -84,7 +104,7 @@ pub async fn tick(db: &Database, cursor: &mut Cursor) -> Result<usize, Foundatio
     Ok(queued)
 }
 
-async fn retry_confirmed_invalid_outputs(
+async fn retry_eligible_windows(
     db: &Database,
     position: &mut Option<Uuid>,
     selected: &selected_collection_scope::Filter,
@@ -104,7 +124,6 @@ async fn retry_confirmed_invalid_outputs(
     let mut queued = 0;
     for row in repairs {
         let window = row.get("window_ref");
-        *position = Some(window);
         let request = topic_research::Start {
             command_ref: row.get("command_ref"),
             domain_ref: row.get("domain_ref"),
@@ -112,9 +131,17 @@ async fn retry_confirmed_invalid_outputs(
         };
         match topic_research::retry_automatic(db, &request, row.get("core_ref"), window).await {
             Ok(_) => queued += 1,
+            Err(FoundationError::AdmissionDenied(reasons))
+                if reasons
+                    .iter()
+                    .any(|reason| reason == "topic_automatic_queue_full") =>
+            {
+                continue;
+            }
             Err(FoundationError::Database(error)) => return Err(error.into()),
             Err(_) => {}
         }
+        *position = Some(window);
     }
     Ok(queued)
 }
