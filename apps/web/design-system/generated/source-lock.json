@@ -1,5 +1,5 @@
 {
-  "fingerprint": "414a4c87400bbbe76b652a1a94eddad3c5ca625d0d3e8f9676a41e2bf5d6f0ba",
+  "fingerprint": "d2a2e93a8217a8abbd0df30811bb7d86520e4c21df8052e7fb2ee3bd95cbef2b",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -475,7 +475,7 @@
     },
     {
       "path": "apps/web/src/pages/topics/TopicsPage.tsx",
-      "sha256": "f01d4e90d705417456cb628a431a2bcc393b5c49158d12ae035edbcaf719ee25"
+      "sha256": "371c042fb0cb6d9c9d6af1be680766efab8204bce86f77fe2e09f246ab67c887"
     },
     {
       "path": "apps/web/src/pages/topics/Workspace.module.css",
@@ -487,11 +487,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
-      "sha256": "5b2ea9723dcf5c5cf1d4ae26daa19c5925b4e624c12b799619019ffacb037d9b"
+      "sha256": "478381bc79a8fa38cc5ea32a26abcb0f09f270ff423a6184b301f1ef785fc490"
     },
     {
       "path": "apps/web/src/pages/topics/topicOverview.tsx",
-      "sha256": "2c94d28dc9eaca3efa1ae2c07632adb28889a84e49fc8ef942e7fa05ab3454d5"
+      "sha256": "96d536703bc003555adce0c6bdb4123f38e5bf0b36d1a2e22033180e8dec86b5"
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.module.css",

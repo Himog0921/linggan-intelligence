@@ -15,6 +15,7 @@ pub mod creator_account_research;
 pub mod creator_research;
 pub mod executor;
 mod number;
+pub mod operating_direction;
 pub mod prompt;
 pub mod provider_store;
 pub mod rounds;

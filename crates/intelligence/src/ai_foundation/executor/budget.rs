@@ -18,7 +18,7 @@ pub(super) async fn admit_in(
         .await?;
     let config=sqlx::query("SELECT budget_mode,daily_token_limit FROM linggan_ai_task_config WHERE task_config_ref=$1 AND task_key=$2")
         .bind(config).bind(task.as_str()).fetch_one(&mut **tx).await?;
-    let held:String=sqlx::query_scalar("SELECT COALESCE(sum(charged_tokens),0)::text FROM linggan_model_invocation WHERE task_key=$1 AND budget_day=linggan_ai_budget_day($2::text::timestamptz)")
+    let held:String=sqlx::query_scalar("SELECT COALESCE(sum(charged_tokens),0)::text FROM linggan_ai_budget_usage WHERE task_key=$1 AND budget_day=linggan_ai_budget_day($2::text::timestamptz)")
         .bind(task.as_str()).bind(&admitted_at).fetch_one(&mut **tx).await?;
     let total = held
         .parse::<u64>()

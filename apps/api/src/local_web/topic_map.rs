@@ -1,4 +1,6 @@
 //! Topic Map HTTP composition. Canonical reads and durable commands remain in intelligence.
+mod directions;
+use directions::{read_directions, save_directions, preview_directions};
 use super::LocalWebState;
 use axum::{
     Extension, Json, Router,
@@ -49,6 +51,9 @@ pub(super) fn routes(
         });
     }
     Router::new()
+        .route("/api/local/topic-map/directions/runs", get(directions::list_runs).post(directions::generate))
+        .route("/api/local/topic-map/directions/preview", post(preview_directions))
+        .route("/api/local/topic-map/directions", get(read_directions).post(save_directions))
         .route(
             "/api/local/topic-map/alternatives/handoff",
             post(handoff_angle),

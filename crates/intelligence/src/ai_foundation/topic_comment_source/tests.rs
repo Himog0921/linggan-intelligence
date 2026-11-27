@@ -222,10 +222,10 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     let parsed = packet::validate(&output.to_string(), 0, &frozen, &proposed.context, None).unwrap();
     let mut forbidden = output.clone();
     forbidden["decisions"][1]["status"] = json!("new");
-    assert_eq!(
-        packet::validate(&forbidden.to_string(), 0, &frozen, &proposed.context, None).unwrap_err(),
-        "comment_topic_creation_forbidden"
-    );
+    let partial = packet::validate(&forbidden.to_string(), 0, &frozen, &proposed.context, None).unwrap();
+    assert_eq!(partial["rejectedUnits"][0]["reason"], "comment_topic_creation_forbidden");
+    assert_eq!(partial["resolution"]["decisions"].as_array().unwrap().len(), 1);
+    assert_eq!(partial["resolution"]["decisions"][0]["status"], "matched");
     let inv = invocation(&db, model_config).await;
     sqlx::query("INSERT INTO linggan_topic_research_dispatch(item_ref,invocation_ref,context) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=0").bind(window).bind(inv).bind(&proposed.context).execute(&mut *tx).await.unwrap();
     sqlx::query("INSERT INTO linggan_topic_research_stage_result(item_ref,invocation_ref,output) SELECT item_ref,$2,$3 FROM linggan_topic_research_stage WHERE window_ref=$1 AND stage_number=0").bind(window).bind(inv).bind(&parsed).execute(&mut *tx).await.unwrap();

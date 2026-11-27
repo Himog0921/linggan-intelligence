@@ -28,7 +28,7 @@ pub(crate) async fn snapshot_in(
         'unpricedMeasuredCalls',count(*) FILTER(WHERE usage_state='measured' AND cost_pico_usd IS NULL)::text,
         'cacheReadUnknownCalls',count(*) FILTER(WHERE cached_input_tokens IS NULL)::text,
         'reasoningUnknownCalls',count(*) FILTER(WHERE reasoning_tokens IS NULL)::text) AS row
-        FROM linggan_model_invocation WHERE budget_day>=linggan_ai_budget_day()-6 GROUP BY budget_day,task_key
+        FROM linggan_ai_budget_usage WHERE budget_day>=linggan_ai_budget_day()-6 GROUP BY budget_day,task_key
         ORDER BY budget_day DESC,task_key LIMIT 100)rows")
         .fetch_one(&mut **tx).await?;
     let failures:Value=sqlx::query_scalar("SELECT COALESCE(jsonb_agg(row ORDER BY created_at DESC),'[]') FROM (
@@ -42,8 +42,8 @@ pub(crate) async fn snapshot_in(
         .fetch_one(&mut **tx).await?;
     let late: Value = sqlx::query_scalar(
         "SELECT jsonb_build_object('receiptCount',count(*)::text,
-        'knownInputTokens',sum(input_tokens)::text,'knownOutputTokens',sum(output_tokens)::text,
-        'quotaReconciled',false) FROM linggan_ai_late_usage_receipt",
+        'knownInputTokens',sum(u.input_tokens)::text,'knownOutputTokens',sum(u.output_tokens)::text,
+        'quotaReconciled',COALESCE(bool_and(b.quota_reconciled),false)) FROM linggan_ai_late_usage_receipt u JOIN linggan_ai_budget_usage b USING(invocation_ref)",
     )
     .fetch_one(&mut **tx)
     .await?;

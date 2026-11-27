@@ -125,3 +125,14 @@ API子路由拥有进程内可重建完整投影，最多4个范围，60秒后�
 每次复用先在只读REPEATABLE READ事务核对当前schema中表的xmin/ctid/行数、relation身份及DDL/权限描述。仅排除不参与主题材料/研究资格的四个调度心跳、运行及公平控制账本。model_workspace 的 worker_last_seen_at/worker_state/worker_last_error、creator_discovery_policy 的 scan_after/updated_at 不参与主题canonical投影，分别从两表完整业务行摘要中移除；其余字段及将来新增列全部覆盖，不能把整张配置表忽略。模型调用账本只影响独立实时费用/研究进度，不是Snapshot来源，行变化不使本投影失效。目标 last_scheduler_considered_at 和作者分析 job_state/attempt_count/next_attempt_at/lease_token/lease_expires_at/last_error_code/updated_at 为已核对的巡检/生产控制字段，也从各表完整业务行摘要移除；目标生命周期/身份及作者结果、指纹、手工裁定继续覆盖。不以异步pg_stat计数代替资格版本。构建前后版本一致才发布，变化最多重试一次，再变化返回409；版本校验超时或数据库失败按既有503错误处理，不返回旧许可投影。时钟刷新时，旧投影只有在版本相同且未过期时才能复用。来源版本检查和正文/评论读取仍为各自请求的读取时刻，不承诺跨三个HTTP请求的全局原子快照。
 
 页面先展示完整统计和首批材料，明确其余材料正在载入；第二阶段成功后整份替换，不混合两次权威版本。材料阶段失败独立提示并保留已取得统计，不能当作空库。请求epoch约束两个阶段，旧范围响应不能覆盖当前范围。刷新沿同一版本核验；打开证据仍隐藏旧研究直到三项读取完成。Host/Origin防护、no-store、所有写命令及授权边界不变。
+
+
+## 运营方向清单
+
+`GET /api/local/topic-map/directions?domainRef=…` 返回领域最新编辑版本、当前已发布版本、可用研究主题、对标作者选项以及按稳定作品号去重的归属和依据。首次打开使用现有主题层级按覆盖作品数起草最多 40 个方向，其他根主题可逐项加入。方向数是运营目标，保存和发布不设数量下限配额。无发布版本时，页面显示待确认。
+
+`POST /api/local/topic-map/directions/preview` 对同一份草案计算发布前后方向数、覆盖作品数和归属变化数。向 `/api/local/topic-map/directions` POST 保存或发布。命令含 `domainRef`、`expectedRevision`、稳定的 `commandRef`、`publish` 及 `catalog`。同命令同内容可重试；落后版本返回冲突。保存草案期间仍使用上次正式版本。客户端展示原文依据时走现有证据库作品入口。
+
+运行中的作者包使用保存的任务配置与提示词版本。单次输入容量、返回结果能否落库、产出的讨论是否有有效归属分别查询。未派发与送达未知必须分别核账。单人本机沿用现有本地信任边界；公开入口沿用团队权限。
+
+方向生成记录由 `GET /api/local/topic-map/directions/runs?domainRef=…` 返回。相同路径 POST 接受 commandRef、domainRef、taskKey、topicRefs。direction_list_draft 归纳当前领域，direction_proposal 基于选定主题给出增量建议。模型只能生成候选，人工采纳后走已有预览与发布合同。业务窗口允许保存独立验证通过的讨论判断；拒绝项的稳定单元 ID 和原因保存在结果的 rejectedUnits，研究进度按窗口返回 rejectedUnitCount。

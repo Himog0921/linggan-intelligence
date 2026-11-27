@@ -634,7 +634,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                     t.topicRef,
                     "lgi-tm-quiet",
                     {
-                      title: t.displayName,
+                      title: t.definitionText || t.displayName,
                       "aria-current": t === selected ? "page" : undefined,
                     },
                   )}
@@ -765,7 +765,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 t.topicRef,
                 "lgi-tm-tree-name",
                 {
-                  title: t.displayName,
+                  title: t.definitionText || t.displayName,
                   "aria-current":
                     context.state.topicRef === t.topicRef ? "page" : undefined,
                 },
@@ -1578,7 +1578,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
         [
           [0, 20, "≤20赞"],
           [21, 99, "21–99赞"],
-          [100, 499, "100–499赞"],
+          [100, 199, "100–199赞"], [200, 499, "200–499赞"],
           [500, 999, "500–999赞"],
           [1000, Infinity, "≥1,000赞"],
           [null, null, "指标缺失"],

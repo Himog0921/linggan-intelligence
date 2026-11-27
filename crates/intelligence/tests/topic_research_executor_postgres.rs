@@ -19,6 +19,14 @@ mod core_fixture;
 mod l1_setup;
 #[path = "support/research_method_fixture.rs"]
 mod method;
+#[path = "support/late_ai_receipt.rs"]
+mod late;
+
+#[tokio::test]
+#[ignore = "owned PostgreSQL and gated loopback only"]
+async fn returned_topic_response_after_unknown_reuses_original_attempt_and_meter() {
+    exercise("late_after_unknown").await;
+}
 
 #[tokio::test]
 #[ignore = "isolated PostgreSQL and synthetic loopback only"]
@@ -40,12 +48,31 @@ async fn topic_single_pass_no_signal_publishes_analysis_without_assignment() {
 async fn topic_single_pass_invalid_ancestor_writes_no_result_or_assignment() {
     exercise("invalid_ancestor").await;
 }
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and synthetic loopback only"]
+async fn returned_topic_response_survives_blocked_publication_and_executor_restart() {
+    exercise("recover_publication").await;
+}
+
+#[tokio::test]
+#[ignore = "isolated PostgreSQL and synthetic loopback only"]
+async fn returned_topic_response_can_finish_after_its_original_lease_interval() {
+    exercise("slow_publication").await;
+}
+
+#[tokio::test]
+#[ignore = "isolated postgres and loopback provider"]
+async fn partial_window_exposes_one_assignment_and_one_rejection() {
+    exercise("partial_assignment").await;
+}
+
 async fn exercise(variant: &'static str) {
     let invalid = matches!(variant, "invalid_output" | "invalid_ancestor");
     let db = dossier::fixture::proof_database("topic_execution").await;
     let work = dossier::work(&db).await;
     dossier::current_image_reading_with_bytes(&db, Some(core_fixture::bytes())).await;
-    let endpoint = wire::Endpoint::variant(false, variant).await;
+    let late = variant == "late_after_unknown";
+    let mut endpoint = wire::Endpoint::variant(late, variant).await;
     let adapter = linggan_intelligence::pi_adapter::PiAdapter::configured_with_test_command(
         std::env::var_os("AI_FOUNDATION_PROOF_NODE").unwrap().into(),
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -166,14 +193,58 @@ async fn exercise(variant: &'static str) {
         method::assign(&db, &adapter, task, "V2", Some(versions[i])).await;
     }
     let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
-    let running = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
-        db.clone(),
-        "synthetic-topic-service",
-        4,
-        std::sync::Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
-        adapter,
-        drain.clone(),
-    ));
+    let mut gate = if matches!(variant, "recover_publication" | "slow_publication") {
+        let mut connection = db.pool().acquire().await.unwrap().detach();
+        sqlx::raw_sql("CREATE FUNCTION hold_publication() RETURNS trigger LANGUAGE plpgsql AS $$
+          BEGIN PERFORM pg_advisory_xact_lock(19198, 247); RETURN NEW; END $$;
+          CREATE TRIGGER slow_publication BEFORE INSERT ON linggan_topic_research_stage_result
+          FOR EACH ROW EXECUTE FUNCTION hold_publication();
+          SELECT pg_advisory_lock(19198,247);").execute(&mut connection).await.unwrap();
+        Some(connection)
+    } else { None };
+    let start_worker = || {
+        let future = linggan_intelligence::ai_foundation::executor::service::run(
+            db.clone(), "synthetic-topic-service", 4,
+            std::sync::Arc::new(linggan_intelligence::model_secrets::SyntheticModelSecrets),
+            adapter.clone(), drain.clone(),
+        );
+        tokio::spawn(async move {
+            let outcome = future.await;
+            if let Err(error) = &outcome { eprintln!("topic executor stopped: {error:?}"); }
+            outcome
+        })
+    };
+    if late { late::short_attempt_lease(&db).await; }
+    let mut running = start_worker();
+    if late {
+        endpoint.seen.take().unwrap().await.unwrap();
+        late::wait_unknown(&db).await;
+        endpoint.release.take().unwrap().send(()).unwrap();
+        late::wait_reconciled(&db).await;
+    }
+    if let Some(connection) = gate.as_mut() {
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            loop {
+                let blocked:bool=sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ai_returned_response) AND EXISTS(
+                    SELECT 1 FROM pg_locks WHERE locktype='advisory' AND classid=19198 AND objid=247 AND NOT granted)")
+                    .fetch_one(&mut *connection).await.unwrap();
+                if blocked { break; }
+                tokio::time::sleep(std::time::Duration::from_millis(30)).await;
+            }
+        }).await.expect("response committed before the held business projection");
+        let restart = variant == "recover_publication";
+        let held_seconds = if restart { 16 } else { 32 };
+        tokio::time::sleep(std::time::Duration::from_secs(held_seconds)).await;
+        assert!(!running.is_finished(), "business projection outlives the transport receipt deadline");
+        if restart {
+            running.abort();
+            assert!(running.await.unwrap_err().is_cancelled());
+            sqlx::query("SELECT pg_advisory_unlock(19198,247)").execute(&mut *connection).await.unwrap();
+            running = start_worker();
+        } else {
+            sqlx::query("SELECT pg_advisory_unlock(19198,247)").execute(&mut *connection).await.unwrap();
+        }
+    }
     let run = wait_for(&db, run_ref, &running).await;
     assert_eq!(run["executionMode"], "single_pass");
     assert_eq!(run["windowCount"], 1);
@@ -207,12 +278,14 @@ async fn exercise(variant: &'static str) {
             .await
             .unwrap();
     assert_eq!(results, if invalid { 0 } else { 1 });
-    assert_eq!(assignments, if variant == "normal" { 1 } else { 0 });
+    if variant == "partial_assignment" { assert_eq!(run["stages"][0]["rejectedUnitCount"], 1); }
+    let has_assignment = matches!(variant, "partial_assignment" | "normal" | "recover_publication" | "slow_publication" | "late_after_unknown");
+    assert_eq!(assignments, i64::from(has_assignment));
     let query = serde_json::from_value(serde_json::json!({"domainRef":dossier::DOMAIN})).unwrap();
     let graph = linggan_intelligence::topic_map::read_topic_map(&db, &query)
         .await
         .unwrap();
-    assert_eq!(!graph.topics.is_empty(), variant == "normal");
+    assert_eq!(!graph.topics.is_empty(), has_assignment);
     if automatic_retry {
         let retry_ref = tokio::time::timeout(std::time::Duration::from_secs(85), async {
             loop {
@@ -273,6 +346,11 @@ async fn exercise(variant: &'static str) {
             .unwrap(),
             2
         );
+    }
+    if matches!(variant, "recover_publication" | "slow_publication") {
+        let charges: Vec<i64> = sqlx::query_scalar("SELECT charged_tokens FROM linggan_model_invocation WHERE task_key='topic_research'")
+            .fetch_all(db.pool()).await.unwrap();
+        assert_eq!(charges, vec![26], "one returned provider usage record across local persistence retries");
     }
     let requests = endpoint.requests.lock().unwrap().clone();
     assert_eq!(requests.len(), if variant == "normal" || automatic_retry { 3 } else { 2 });

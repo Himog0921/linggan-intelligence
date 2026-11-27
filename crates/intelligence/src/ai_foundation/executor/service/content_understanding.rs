@@ -20,9 +20,9 @@ use uuid::Uuid;
 
 mod image_readings;
 
-struct Prepared {
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct Publication {
     invocation: Uuid,
-    request: PiRequest,
     request_ref: Uuid,
     prompt_version_ref: Uuid,
 }
@@ -30,7 +30,7 @@ async fn prepare(
     db: &Database,
     item: &ClaimedItem,
     secrets: &dyn ModelSecretStore,
-) -> Result<Prepared, ExecutorError> {
+) -> Result<(PiRequest, Publication), ExecutorError> {
     let InputRef::ContentUnderstanding { request_ref, .. } = item.input else {
         return Err(ExecutorError::Invalid);
     };
@@ -81,12 +81,11 @@ async fn prepare(
     )
     .await?;
     tx.commit().await?;
-    Ok(Prepared {
+    Ok((call.request, Publication {
         invocation: call.invocation,
-        request: call.request,
         request_ref,
         prompt_version_ref: call.prompt_version_ref,
-    })
+    }))
 }
 pub(super) async fn execute(
     db: &Database,
@@ -94,7 +93,7 @@ pub(super) async fn execute(
     secrets: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<(), ExecutorError> {
-    let prepared = match prepare(db, item, secrets).await {
+    let (request, prepared) = match prepare(db, item, secrets).await {
         Ok(value) => value,
         Err(ExecutorError::Configuration(FoundationError::AdmissionDenied(reasons))) => {
             let reason = reasons
@@ -115,19 +114,24 @@ pub(super) async fn execute(
         }
         Err(error) => return super::super::preparation::handle(db, item, error).await,
     };
-    let response = super::super::dispatch::call(db, item, adapter, &prepared.request).await;
+    let response = super::super::dispatch::call(db, item, adapter, &request).await;
+    if let Some(reply) = &response {
+        super::returned::capture(db, item, prepared.invocation, &prepared, reply).await?;
+        return super::returned::publication_result(settle(db, item, &prepared, Some(reply), false).await);
+    }
     receipt::finalize(db, item, prepared.invocation, response.as_ref(), || {
-        settle(db, item, &prepared, response.as_ref())
+        settle(db, item, &prepared, response.as_ref(), false)
     })
     .await
 }
-async fn settle(
+pub(super) async fn settle(
     db: &Database,
     item: &ClaimedItem,
-    prepared: &Prepared,
+    prepared: &Publication,
     response: Option<&PiResponse>,
+    terminal_unknown: bool,
 ) -> Result<(), ExecutorError> {
-    let (mut tx, cancelled) = receipt::lock_in(db, item, prepared.invocation, response).await?;
+    let (mut tx, cancelled) = super::returned::lock_publication(db, item, prepared.invocation, response, terminal_unknown).await?;
     let sources = owner::frozen_in(&mut tx, prepared.request_ref).await;
     let versions = sqlx::query("SELECT model_config_ref,skill_version_ref,to_char(scope_001_now() AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS created_at FROM linggan_ai_task_config WHERE task_config_ref=$1")
         .bind(item.task_config_ref).fetch_one(&mut *tx).await?;
@@ -259,16 +263,6 @@ async fn settle(
             }
         }
     }
-    receipt::observe_in(&mut tx, prepared.invocation, response).await?;
-    finish_invocation_in(
-        &mut tx,
-        prepared.invocation,
-        response,
-        success,
-        failure,
-        &metadata,
-    )
-    .await?;
     if response.is_some_and(|r| {
         !r.ok
             && r.diagnostic.as_ref().is_some_and(|d| {
@@ -279,6 +273,21 @@ async fn settle(
     }) {
         billing_pause::record(&mut tx, prepared.invocation).await?;
     }
+    if terminal_unknown {
+        super::returned::reconcile_in(&mut tx, prepared.invocation, response.ok_or(ExecutorError::Invalid)?, success, cancelled, failure).await?;
+        tx.commit().await?;
+        return Ok(());
+    }
+    receipt::observe_in(&mut tx, prepared.invocation, response).await?;
+    finish_invocation_in(
+        &mut tx,
+        prepared.invocation,
+        response,
+        success,
+        failure,
+        &metadata,
+    )
+    .await?;
     let output = json!({"requestRef":prepared.request_ref,"methodVersion":METHOD});
     receipt::write_item_in(
         &mut tx,

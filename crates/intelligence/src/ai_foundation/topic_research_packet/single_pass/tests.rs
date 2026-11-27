@@ -174,6 +174,69 @@ fn one_new_topic_definition_serves_multiple_units() {
 }
 
 #[test]
+fn independent_decision_survives_a_bad_sibling_only_with_complete_source_coverage() {
+    let fragments = vec![
+        fragment("f1", "知道要做却开始不了"),
+        fragment("f2", "计划了任务但无法启动"),
+    ];
+    let discussions = vec![
+        discussion("启动一", "知道要做却开始不了", &["f1"], &fragments),
+        discussion("启动二", "计划了任务但无法启动", &["f2"], &fragments),
+    ];
+    let payload = wire(
+        compact(&fragments, &discussions),
+        vec![new_topic("n1", root_parent())],
+        vec![
+            json!({"discussionIndex":0,"status":"new","matches":[],"newTopicId":"n1","relations":[],"reason":"独立启动问题"}),
+            json!({"discussionIndex":1,"status":"new","matches":[],"newTopicId":"n1","relations":[],"reason":"同一启动问题"}),
+        ],
+    );
+    let mut bad = payload.clone();
+    bad["decisions"][1]["status"] = json!("matched");
+    bad["decisions"][1]["newTopicId"] = Value::Null;
+    let parsed = validate(
+        &bad.to_string(),
+        &input(fragments.clone()),
+        &author_context(),
+    )
+    .unwrap();
+    assert_eq!(
+        parsed["resolution"]["decisions"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(
+        parsed["rejectedUnits"][0]["reason"],
+        "resolution_matched_without_match"
+    );
+    let mut broken_parent = payload.clone();
+    let mut dependent = broken_parent["newTopics"][0].clone();
+    dependent["newTopicId"] = json!("n2");
+    dependent["parent"] = json!({"kind":"new","newTopicId":"missing","topicRef":null,"definitionRef":null,"reason":"来源缺失"});
+    broken_parent["newTopics"]
+        .as_array_mut()
+        .unwrap()
+        .push(dependent);
+    broken_parent["decisions"][1]["newTopicId"] = json!("n2");
+    let partial = validate(
+        &broken_parent.to_string(),
+        &input(fragments.clone()),
+        &author_context(),
+    )
+    .unwrap();
+    assert_eq!(
+        partial["resolution"]["decisions"].as_array().unwrap().len(),
+        1
+    );
+    assert_eq!(partial["rejectedUnits"].as_array().unwrap().len(), 1);
+    let mut missing = payload;
+    missing["decisions"].as_array_mut().unwrap().pop();
+    assert_eq!(
+        validate(&missing.to_string(), &input(fragments), &author_context()).unwrap_err(),
+        "resolution_unit_coverage_mismatch"
+    );
+}
+
+#[test]
 fn duplicate_projection_discussions_keep_original_indices_aligned() {
     let fragments = vec![
         fragment("f1", "知道要做却开始不了"),
@@ -563,7 +626,14 @@ fn reassignment_reuses_the_saved_projection_without_regenerating_it() {
     assert_eq!(decisions[1]["status"], "matched");
 }
 
-fn chain_topic(id: &str, label: &str, definition: &str, inclusion: &str, exclusion: &str, parent: Value) -> Value {
+fn chain_topic(
+    id: &str,
+    label: &str,
+    definition: &str,
+    inclusion: &str,
+    exclusion: &str,
+    parent: Value,
+) -> Value {
     json!({"newTopicId":id,"label":label,"definition":definition,
         "inclusionCriteria":[inclusion],"exclusionCriteria":[exclusion],
         "domainFit":"in_scope","domainReason":"材料属于当前领域","abstractionReason":"可跨作品复用的执行问题",
@@ -578,7 +648,12 @@ fn new_topic_parent(id: &str) -> Value {
 #[test]
 fn a_three_layer_local_chain_is_accepted_with_every_parent_edge() {
     let fragments = vec![fragment("f1", "知道要做却开始不了")];
-    let discussions = vec![discussion("启动", "知道要做却开始不了", &["f1"], &fragments)];
+    let discussions = vec![discussion(
+        "启动",
+        "知道要做却开始不了",
+        &["f1"],
+        &fragments,
+    )];
     let payload = wire(
         compact(&fragments, &discussions),
         vec![
@@ -600,7 +675,9 @@ fn a_three_layer_local_chain_is_accepted_with_every_parent_edge() {
                 root_parent(),
             ),
         ],
-        vec![json!({"discussionIndex":0,"status":"new","matches":[],"newTopicId":"n1","relations":[],"reason":"启动问题"})],
+        vec![
+            json!({"discussionIndex":0,"status":"new","matches":[],"newTopicId":"n1","relations":[],"reason":"启动问题"}),
+        ],
     );
     let parsed = validate(&payload.to_string(), &input(fragments), &author_context()).unwrap();
     let parent = &parsed["resolution"]["decisions"][0]["proposedTopic"]["parent"];
@@ -612,7 +689,12 @@ fn a_three_layer_local_chain_is_accepted_with_every_parent_edge() {
 #[test]
 fn an_unreferenced_grandparent_repeating_criteria_is_rejected() {
     let fragments = vec![fragment("f1", "知道要做却开始不了")];
-    let discussions = vec![discussion("启动", "知道要做却开始不了", &["f1"], &fragments)];
+    let discussions = vec![discussion(
+        "启动",
+        "知道要做却开始不了",
+        &["f1"],
+        &fragments,
+    )];
     let payload = wire(
         compact(&fragments, &discussions),
         vec![
@@ -634,7 +716,9 @@ fn an_unreferenced_grandparent_repeating_criteria_is_rejected() {
                 root_parent(),
             ),
         ],
-        vec![json!({"discussionIndex":0,"status":"new","matches":[],"newTopicId":"n1","relations":[],"reason":"启动问题"})],
+        vec![
+            json!({"discussionIndex":0,"status":"new","matches":[],"newTopicId":"n1","relations":[],"reason":"启动问题"}),
+        ],
     );
     assert_eq!(
         validate(&payload.to_string(), &input(fragments), &author_context()).unwrap_err(),

@@ -97,7 +97,7 @@ async fn enqueue(
         ]));
     }
     let row=sqlx::query("SELECT w.input_refs,w.input_hash,w.work_ref,r.configurations,r.knowledge_cutoff::text AS cutoff FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) WHERE window_ref=$1 AND r.domain_ref=$2").bind(source).bind(domain).fetch_one(&mut *command.tx).await?;
-    let conflict: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE r.domain_ref=$1 AND w.input_hash=$2 AND (c.state IN('pending','running') OR c.failure_code='ai_dispatch_unknown'))")
+    let conflict: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) JOIN linggan_topic_research_stage s USING(window_ref) JOIN linggan_ai_research_item_outcome c USING(item_ref) WHERE r.domain_ref=$1 AND w.input_hash=$2 AND (c.state IN('pending','running') OR c.failure_code='ai_dispatch_unknown'))")
         .bind(domain).bind(row.get::<String,_>("input_hash")).fetch_one(&mut *command.tx).await?;
     if conflict {
         return Err(FoundationError::AdmissionDenied(vec![

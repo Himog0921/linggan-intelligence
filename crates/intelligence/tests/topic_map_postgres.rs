@@ -1387,3 +1387,6 @@ async fn creator_context_works_stay_out_of_the_topic_map_scope() {
     expected.sort();
     assert_eq!(listed, expected);
 }
+
+#[path="support/operating_direction_generation.rs"]
+mod operating_direction_generation;

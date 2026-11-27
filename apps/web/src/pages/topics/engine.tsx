@@ -2201,7 +2201,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
               navigate(`${WORKBENCH_PATH}?${new URLSearchParams({ domain, work: result.workId, view: "body" })}`);
           },
         );
-      } catch (error) { dialogFeedback(`加入选题池未完成：${caught(error).message}`); }
+      } catch (error) { dialogFeedback(`打开创作正文未完成：${caught(error).message}`); }
       return;
     }
     if (action === "export-alternative") {

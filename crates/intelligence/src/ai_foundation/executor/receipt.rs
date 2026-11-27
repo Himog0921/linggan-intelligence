@@ -100,6 +100,8 @@ pub(super) async fn lock_in<'a>(
         }
         Err(error) => return Err(error),
     };
+    sqlx::query("SELECT set_config('linggan.ai_publication_token',$1,true)")
+        .bind(item.lease_token.to_string()).execute(&mut *tx).await?;
     Ok((tx, cancelled))
 }
 pub(super) fn not_dispatched(response: Option<&PiResponse>) -> bool {
@@ -154,6 +156,16 @@ pub(super) async fn append_late_usage(
     let Some(response) = response else {
         return Ok(());
     };
+    let mut tx = db.pool().begin().await?;
+    record_late_usage_in(&mut tx, invocation, item.item_ref, item.owner.instance_ref(), item.lease_generation, response).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+pub(super) async fn record_late_usage_in(
+    tx: &mut Transaction<'_, Postgres>, invocation: Uuid, item_ref: Uuid, instance_ref: Uuid,
+    lease_generation: i64, response: &PiResponse,
+) -> Result<(), ExecutorError> {
     response.usage.ledger_usage()?;
     let usage = &response.usage;
     if usage.input_tokens.is_none() && usage.output_tokens.is_none() {
@@ -162,17 +174,17 @@ pub(super) async fn append_late_usage(
     let inserted=sqlx::query("INSERT INTO linggan_ai_late_usage_receipt(invocation_ref,item_ref,instance_ref,lease_generation,
         input_tokens,output_tokens,cached_input_tokens,cached_write_tokens,reasoning_tokens)
         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(invocation_ref) DO NOTHING")
-        .bind(invocation).bind(item.item_ref).bind(item.owner.instance_ref()).bind(item.lease_generation)
+        .bind(invocation).bind(item_ref).bind(instance_ref).bind(lease_generation)
         .bind(usage.input_tokens).bind(usage.output_tokens).bind(usage.cached_input_tokens)
-        .bind(usage.cached_write_tokens).bind(usage.reasoning_tokens).execute(db.pool()).await?;
+        .bind(usage.cached_write_tokens).bind(usage.reasoning_tokens).execute(&mut **tx).await?;
     if inserted.rows_affected() == 0 {
         let identical:bool=sqlx::query_scalar("SELECT item_ref=$2 AND instance_ref=$3 AND lease_generation=$4
             AND input_tokens IS NOT DISTINCT FROM $5 AND output_tokens IS NOT DISTINCT FROM $6
             AND cached_input_tokens IS NOT DISTINCT FROM $7 AND cached_write_tokens IS NOT DISTINCT FROM $8
             AND reasoning_tokens IS NOT DISTINCT FROM $9 FROM linggan_ai_late_usage_receipt WHERE invocation_ref=$1")
-            .bind(invocation).bind(item.item_ref).bind(item.owner.instance_ref()).bind(item.lease_generation)
+            .bind(invocation).bind(item_ref).bind(instance_ref).bind(lease_generation)
             .bind(usage.input_tokens).bind(usage.output_tokens).bind(usage.cached_input_tokens)
-            .bind(usage.cached_write_tokens).bind(usage.reasoning_tokens).fetch_one(db.pool()).await?;
+            .bind(usage.cached_write_tokens).bind(usage.reasoning_tokens).fetch_one(&mut **tx).await?;
         if !identical {
             return Err(ExecutorError::Invalid);
         }

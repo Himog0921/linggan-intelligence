@@ -321,9 +321,12 @@ fn concept(topic: &NewTopic) -> ConceptDefinition {
 
 /// Local ids exist only inside this response; acceptance receives ordinary database-facing proposals.
 /// A topic referenced only as another topic's parent still carries its own parent chain.
-fn proposed_topics(
-    new_topics: &[NewTopic],
-) -> Result<HashMap<String, ProposedTopic>, &'static str> {
+struct ProposedTopics {
+    valid: HashMap<String, ProposedTopic>,
+    errors: HashMap<String, &'static str>,
+}
+
+fn proposed_topics(new_topics: &[NewTopic]) -> Result<ProposedTopics, &'static str> {
     let mut by_id = HashMap::new();
     for topic in new_topics {
         if topic.new_topic_id.trim().is_empty()
@@ -336,10 +339,16 @@ fn proposed_topics(
         }
     }
     let mut built = HashMap::new();
+    let mut errors = HashMap::new();
     for id in by_id.keys() {
-        build_topic(id, &by_id, &mut Vec::new(), &mut built)?;
+        if let Err(reason) = build_topic(id, &by_id, &mut Vec::new(), &mut built) {
+            errors.insert((*id).to_owned(), reason);
+        }
     }
-    Ok(built)
+    Ok(ProposedTopics {
+        valid: built,
+        errors,
+    })
 }
 
 fn build_topic(
@@ -511,7 +520,14 @@ pub(super) fn validate(
         return Err("output_contract_invalid");
     }
     let comment = comments::is_comment(input);
-    if comment && !wire.new_topics.is_empty() {
+    if comment
+        && wire.new_topics.iter().any(|t| {
+            !wire
+                .decisions
+                .iter()
+                .any(|d| d.new_topic_id.as_deref() == Some(t.new_topic_id.as_str()))
+        })
+    {
         return Err("comment_topic_creation_forbidden");
     }
     let projection: Option<ResearchOutput> = match context["mode"].as_str() {
@@ -571,28 +587,129 @@ pub(super) fn validate(
         _ => return Err("output_schema_invalid"),
     };
     let proposed = proposed_topics(&wire.new_topics)?;
-    let mut decisions = Vec::new();
-    for decision in wire.decisions {
-        insert_decision(
-            &mut decisions,
-            expand_decision(decision, &indexed, &proposed)?,
-        )?;
+    // A broken local parent can invalidate a whole dependent branch. Preserve siblings only
+    // when a returned decision names that branch; unowned broken definitions fail the packet.
+    let mut referenced: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    for decision in &wire.decisions {
+        let mut next = decision.new_topic_id.as_deref();
+        while let Some(id) = next {
+            if !referenced.insert(id) {
+                break;
+            }
+            next = wire
+                .new_topics
+                .iter()
+                .find(|t| t.new_topic_id == id)
+                .and_then(|t| t.parent.new_topic_id.as_deref());
+        }
     }
-    let resolution = ResolutionOutput {
+    if let Some(reason) = proposed
+        .errors
+        .iter()
+        .find_map(|(id, reason)| (!referenced.contains(id.as_str())).then_some(*reason))
+    {
+        return Err(reason);
+    }
+    let mut decisions = Vec::new();
+    let mut early_rejections = std::collections::BTreeMap::new();
+    for decision in wire.decisions {
+        let (unit, _) = indexed
+            .get(decision.discussion_index)
+            .ok_or("discussion_index_invalid")?;
+        let result = if comment
+            && (decision.status == "new"
+                || decision.new_topic_id.is_some()
+                || !decision.relations.is_empty())
+        {
+            Err("comment_topic_creation_forbidden")
+        } else {
+            if let Some(reason) = decision
+                .new_topic_id
+                .as_ref()
+                .and_then(|id| proposed.errors.get(id))
+            {
+                Err(*reason)
+            } else {
+                expand_decision(decision, &indexed, &proposed.valid)
+            }
+        };
+        match result {
+            Ok(value) if !early_rejections.contains_key(unit) => {
+                insert_decision(&mut decisions, value)?
+            }
+            Err(reason)
+                if !decisions.iter().any(|d| &d.unit_id == unit)
+                    && !early_rejections.contains_key(unit) =>
+            {
+                early_rejections.insert(unit.clone(), reason);
+            }
+            _ => return Err("resolution_unit_coverage_mismatch"),
+        }
+    }
+    let mut resolution = ResolutionOutput {
         contract: analysis::RESOLVE_CONTRACT.into(),
         decisions,
     };
-    if comment {
-        comments::validate_matched_only(&resolution)?;
-    }
+    let mut rejected: Vec<_> = early_rejections
+        .iter()
+        .map(|(id, reason)| json!({"unitId":id,"reason":reason}))
+        .collect();
+    let full_error = early_rejections.values().next().copied().or_else(|| {
+        analysis::validate_resolution(&resolution, &units, &context["candidates"]).err()
+    });
     if units.is_empty() {
-        if !resolution.decisions.is_empty() {
+        if !resolution.decisions.is_empty() || !rejected.is_empty() {
             return Err("resolution_units_invalid");
         }
-    } else {
-        analysis::validate_resolution(&resolution, &units, &context["candidates"])?;
+    } else if let Some(full_error) = full_error {
+        // The input projection, every quote, and local parent references have already passed.
+        // Only a complete, uniquely identified set of decisions may be split into siblings.
+        let by_id: HashMap<_, _> = units.iter().map(|u| (u.0.as_str(), u)).collect();
+        if units.len() > analysis::MAX_DISCUSSIONS
+            || by_id.len() != units.len()
+            || resolution.decisions.len() + early_rejections.len() != units.len()
+            || early_rejections
+                .keys()
+                .any(|id| !by_id.contains_key(id.as_str()))
+            || resolution
+                .decisions
+                .iter()
+                .any(|d| !by_id.contains_key(d.unit_id.as_str()))
+        {
+            return Err(full_error);
+        }
+        let mut accepted = Vec::new();
+        for decision in &resolution.decisions {
+            let unit = by_id[decision.unit_id.as_str()];
+            let single = ResolutionOutput {
+                contract: resolution.contract.clone(),
+                decisions: vec![decision.clone()],
+            };
+            match analysis::validate_resolution(
+                &single,
+                std::slice::from_ref(unit),
+                &context["candidates"],
+            ) {
+                Ok(()) => accepted.push(decision.clone()),
+                Err(reason) => rejected.push(json!({"unitId":decision.unit_id,"reason":reason})),
+            }
+        }
+        if accepted.is_empty() || rejected.is_empty() {
+            return Err(full_error);
+        }
+        resolution.decisions = accepted;
+        let accepted_units: Vec<_> = units
+            .iter()
+            .filter(|u| resolution.decisions.iter().any(|d| d.unit_id == u.0))
+            .cloned()
+            .collect();
+        analysis::validate_resolution(&resolution, &accepted_units, &context["candidates"])?;
     }
-    Ok(json!({"contract":CONTRACT,"projection":projection,"resolution":resolution}))
+    let mut parsed = json!({"contract":CONTRACT,"projection":projection,"resolution":resolution});
+    if !rejected.is_empty() {
+        parsed["rejectedUnits"] = json!(rejected);
+    }
+    Ok(parsed)
 }
 
 pub(super) async fn publish_in(
@@ -619,6 +736,10 @@ pub(super) async fn publish_in(
                 .discussions,
         )
     };
+    let units: Vec<_> = units
+        .into_iter()
+        .filter(|u| resolution.decisions.iter().any(|d| d.unit_id == u.0))
+        .collect();
     let eligible = context["candidates"]
         .as_array()
         .into_iter()
@@ -645,8 +766,12 @@ pub(super) async fn publish_in(
     } else {
         json!(projection)
     };
+    let mut core = json!({"units":accepted});
+    if let Some(rejected) = parsed.get("rejectedUnits") {
+        core["rejectedUnits"] = rejected.clone();
+    }
     sqlx::query("INSERT INTO linggan_topic_research_result(result_ref,window_ref,invocation_ref,output_json,core_json,method_version) VALUES($1,$2,$3,$4,$5,$6)")
-        .bind(Uuid::new_v4()).bind(window).bind(invocation).bind(output).bind(json!({"units":accepted})).bind(analysis::METHOD_VERSION).execute(&mut **tx).await?;
+        .bind(Uuid::new_v4()).bind(window).bind(invocation).bind(output).bind(core).bind(analysis::METHOD_VERSION).execute(&mut **tx).await?;
     Ok(())
 }
 

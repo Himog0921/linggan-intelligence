@@ -145,7 +145,7 @@ pub(crate) async fn prior_dispatch_unresolved_in(
 ) -> Result<bool, FoundationError> {
     let sql = format!(
         "SELECT EXISTS(SELECT 1 FROM linggan_content_understanding_request r
-        JOIN linggan_ai_batch_item_control c USING(item_ref)
+        JOIN linggan_ai_research_item_outcome c USING(item_ref)
         {DISPATCH_RECONCILIATION_JOIN}
           AND NOT EXISTS (SELECT 1 FROM linggan_ai_late_usage_receipt usage
                           WHERE usage.invocation_ref=c.invocation_ref)
@@ -392,14 +392,16 @@ pub async fn latest(
     let p = source::load(&mut tx, domain, work, &cutoff).await?;
     let latest_sql = format!("SELECT r.request_ref,r.batch_ref,r.item_ref,r.input_manifest,r.material_snapshot_identity,
         r.created_at::text || r.request_ref::text AS request_order, (r.knowledge_cutoff <= $5::timestamptz) AS input_before_cutoff,
-        CASE WHEN result.offline_recovery THEN 'succeeded' ELSE c.state END AS state,
+        CASE WHEN result.offline_recovery THEN 'succeeded' ELSE COALESCE(late.local_state,c.state) END AS state,
         CASE WHEN result.offline_recovery THEN NULL
+             WHEN late.local_state IS NOT NULL THEN late.local_failure_code
              WHEN reconciliation.created_at<=$5::timestamptz THEN 'ai_adapter_rejected_before_dispatch'
              ELSE c.failure_code END AS failure_code,
         COALESCE(review.result,result.result) AS result, review.revision_ref,
         COALESCE(result.offline_recovery,false) AS offline_recovery,
         deeps.list AS deep_analyses
         FROM linggan_content_understanding_request r JOIN linggan_ai_batch_item_control c USING(item_ref)
+        LEFT JOIN linggan_ai_returned_response late ON late.invocation_ref=c.invocation_ref AND late.reconciled_at<=$5::timestamptz
         {DISPATCH_RECONCILIATION_JOIN}
           AND NOT EXISTS (SELECT 1 FROM linggan_ai_late_usage_receipt usage
                           WHERE usage.invocation_ref=c.invocation_ref AND usage.received_at<=$5::timestamptz)
