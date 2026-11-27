@@ -31,15 +31,14 @@ crumb = ('<nav class="v7-context-crumb" aria-label="当前位置"><b class="v7-a
          '<details class="v7-domain-picker"><summary aria-label="切换当前观察领域"><span>ADHD</span><small>3,282 篇作品</small><i aria-hidden="true"></i></summary>'
          '<nav aria-label="可选观察领域"><a href="#" aria-current="page"><span>ADHD</span><small>3,282 篇作品</small></a></nav></details>')
 header, n = re.subn(r'<nav class="v7-context-crumb".*?</nav>', crumb, header, flags=re.S); assert n == 1
-actions = ('<div id="topic-map-context-actions" class="v7-context-actions" aria-label="图谱操作">'
-           '<a class="v7-context-action" href="#">离线预演</a></div>')
-header, n = re.subn(r'<div class="v7-context-meta">.*?</div>', f'<div class="v7-context-meta">{actions}</div>', header, flags=re.S); assert n == 1
+# 离线预演入口按 Mog 2026-11-27 批注移除：Z02 右侧不放操作
+header, n = re.subn(r'<div class="v7-context-meta">.*?</div>', '<div class="v7-context-meta"></div>', header, flags=re.S); assert n == 1
 
 # ---- 3. page
 page_css = (P / 'page.css').read_text()
 body = (P / 'body.html').read_text()
 script = (P / 'app.js').read_text()
-leftover = sorted(set(re.findall(r'#[0-9a-fA-F]{6}\b', page_css.split('/* ---------- 页面骨架')[1])))
+leftover = sorted(set(re.findall(r'#[0-9a-fA-F]{6}\b', page_css.split('/* ---------- 骨架')[1])))
 print('hex outside token block:', leftover)
 
 html = f'''<!doctype html>
