@@ -14,7 +14,8 @@ dump = (B04 / 'app-css.txt').read_text()
 chunks = re.split(r'(?m)^/\* (\S+) \*/\n', dump)
 keep = ('styles/lids_tokens.css', 'styles/shell.css', 'styles/typography.css', 'FontNotice.module.css',
         'ContextTexture.module.css', 'AppShell.module.css', 'IntelligenceIcon.css', 'PatternWaves.css')
-app_css = [f'/* {chunks[i].split("/apps/web/")[-1]} */\n' + chunks[i + 1]
+TOKENS = P.parents[1] / 'src/styles/lids_tokens.css'   # 运行 Token 取仓库当前文件，不用导出快照里的旧版本
+app_css = [f'/* {chunks[i].split("/apps/web/")[-1]} */\n' + (TOKENS.read_text() if chunks[i].endswith('styles/lids_tokens.css') else chunks[i + 1])
            for i in range(1, len(chunks), 2) if chunks[i].endswith(keep)]
 assert len(app_css) == len(keep), [c.split('\n')[0] for c in app_css]
 app_css = '\n'.join(app_css)

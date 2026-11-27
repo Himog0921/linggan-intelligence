@@ -962,3 +962,12 @@ Mog 指出写稿屏的视觉、布局细节和下拉都没有按设计来。用�
 - **Token**：稿件 `page.css` 顶部 `[data-theme]{--lgi-cr-*}` 块 33 项原样登记进 `lids_tokens.css`，由 `scripts/sync-lids-runtime.py` 镜像到 tokens.md §3。页面样式 `CommentResearch.module.css` 不声明 `--lgi-*`；稿件里其余写死的 px 换成等值的 `--lgi-space-*` 或其倍数（`calc(var(--lgi-space-1) * n)`），量得渲染值与稿件一致。横幅图片从稿件 data URI 抽成 `src/assets/comment-research/` 文件。
 - **page_exception（已用 lids:record 登记）**：①趋势图「有数据以来/近 N 天」「图表/表格」按稿件用 32px 文字页签，`ObservationSeries` 不再作为 C26 ViewSwitch 的消费者；②本页 ActionButton 的 32px 小号（`.small`/`.quiet-small`）和图标与文字 8px 间距（`.icon-gap`）是页面内覆盖，C09 本身不变。未覆盖、仍与稿件不同的共享件差异：ink 主按钮边框 1px（稿件 2px）、quiet 按钮底色白（稿件透明，白底页面上不可见）、按钮行高 1.5（稿件 1，高度固定不影响布局）。
 - **外壳**：侧栏去掉「研究记录」，改为上下文栏右侧入口（N 项进行中 / N 项有失败）+ 对话框；旧 `view=runs|targets` 链接打开对话框。#643 定时清单设置与清单列表在对话框内保留。
+
+## 2026-11-27 · 徽章改为「色字 + 前置方块」；新增 `--lgi-badge-*` 与 `--lgi-scope-*`
+
+来源：Mog 2026-11-27 在主题图谱对齐稿（`apps/web/design-reference/topic-map-redesign.html`，源 `_topic-map-build/`）上的批注——「全局我们对于徽章，标签，不增加这种外层的浅色容器，而直接用颜色字体，加前面的小方块即可，注意好语义标准」，以及「平台 / 时间两个外框帮我专门设计一个可以共享的 token」；同日确认「把徽章的规则调整成现在的，两组新 token 同步」。
+
+- **规则（shared_standard，规则层）**：`primitives.md`「实心填充与文字色分工（DESIGN-003）」整节替换为「色字 + 前置方块」：不加底、不加框；方块用该角色的 `*-dot`，文字用该角色的文字色，两者不得互换；新增「内容分类」中性角色（正文色方块 + 正文色文字），分类不借用状态色；Signal 仍不作普通状态色。标签高度改为跟随行高。`system.md` 把「状态徽章」移出粗野主义节点清单。
+- **Token**：`lids_tokens.css` 手写段新增 `--lgi-badge-mark/gap/size/weight`（紧随五轴语义色）与 `--lgi-scope-height/frame/divider/pad/label/value/open/tail`（紧随 V8 动作族），全部引用既有 Token，无新色值；由 `scripts/sync-lids-runtime.py` 镜像到 tokens.md。范围下拉条是 C17 的组合用法（多只触发器共用一条墨色外框、段间墨色竖线、M2 纹理尾只在末端出现一次），C17 组件本身未改。
+- **未在本次范围**：现存页面里的实心状态标签按新规则属于「页面偏离既有标准」，需按 implementation_fix 逐页迁移；尚无 `TruthTag` 等正式标签组件，也未新增范围下拉条的共享 React 组件。
+- **验证**：`python3 scripts/sync-lids-runtime.py --check`、`node scripts/lids.mjs check` 通过；`lids:build` 需要 vite，本机未安装依赖，未运行。

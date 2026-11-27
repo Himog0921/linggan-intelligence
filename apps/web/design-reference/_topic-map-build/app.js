@@ -122,46 +122,103 @@
     sync();
   }
 
-  /* ---------- 主题树 ---------- */
+  /* ---------- 主题树：role=tree，单行名称 + 全名浮签 + 键盘导航 ---------- */
+  function hl(name, q) {
+    if (!q) return esc(name);
+    const i = name.toLowerCase().indexOf(q);
+    return i < 0 ? esc(name) : esc(name.slice(0, i)) + '<mark>' + esc(name.slice(i, i + q.length)) + '</mark>' + esc(name.slice(i + q.length));
+  }
+  function treeItem(name, count, o) {
+    const sel = state.topic === name;
+    return '<li role="none"><div class="tm-item ' + (o.cls || '') + '" role="treeitem" tabindex="' + (sel ? 0 : -1) + '" data-topic="' + esc(name) + '" aria-level="' + o.lvl + '" style="--lvl:' + o.lvl + '" aria-selected="' + sel + '"'
+      + (o.expanded == null ? '' : ' aria-expanded="' + o.expanded + '"') + (o.parent ? ' data-parent="' + esc(o.parent) + '"' : '') + '>'
+      + '<span class="lead"' + (o.expanded == null ? '' : ' data-toggle="' + esc(name) + '"') + '>' + (o.expanded == null ? '' : icon('chevron')) + '</span>'
+      + '<span class="name">' + hl(o.label || name, o.q) + '</span><span class="count">' + fmt(count) + '</span></div>';
+  }
   function renderTree() {
     const q = $('treeSearch').value.trim().toLowerCase();
     const hit = s => !q || s.toLowerCase().includes(q);
-    const node = (name, count, cls) => '<button class="tm-node' + (cls ? ' ' + cls : '') + (state.topic === name ? ' is-active' : '') + '" type="button" data-topic="' + esc(name) + '"' + (state.topic === name ? ' aria-current="true"' : '') + ' title="' + esc(name) + '"><span class="name">' + esc(name) + '</span><span class="count">' + fmt(count) + '</span></button>';
-    let html = '<button class="tm-node tm-plain tm-all' + (state.topic === '全部方向' ? ' is-active' : '') + '" type="button" data-topic="全部方向"><span class="name">全部方向</span><span class="count">' + fmt(DOMAIN.works) + '</span></button>'
-      + '<button class="tm-node tm-plain tm-gap' + (state.topic === UNASSIGNED ? ' is-active' : '') + '" type="button" data-topic="' + UNASSIGNED + '" title="全部方向中尚未归入任何主题的材料"><span class="name">其中未归入主题</span><span class="count">' + fmt(DOMAIN.unassigned) + '</span></button>';
+    const tree = document.querySelector('.tm-tree');
+    q ? tree.setAttribute('data-searching', '') : tree.removeAttribute('data-searching');
+    let html = '<ul role="tree" aria-label="主题目录">'
+      + treeItem('全部方向', DOMAIN.works, { lvl: 1, cls: 'root' }) + '</li>'
+      + treeItem(UNASSIGNED, DOMAIN.unassigned, { lvl: 2, cls: 'gap', label: '其中未归入主题', parent: '全部方向' }) + '</li>';
     const groups = TREE.filter(g => hit(g.name) || g.children.some(([c]) => hit(c)));
+    const anyCollapsed = TREE.some(g => state.collapsed.has(g.name));
     if (groups.length) {
-      html += '<div class="tm-tree-label"><span>主题目录</span><span>作品</span></div><ul>';
+      html += '<li role="none" class="tm-tree-label"><span>主题目录</span>' + (q ? '<span></span>' : '<button type="button" data-expandall>' + (anyCollapsed ? '全部展开' : '全部收起') + '</button>') + '<span>作品</span></li>';
       groups.forEach(g => {
-        const collapsed = !q && state.collapsed.has(g.name);
-        html += '<li class="tm-group"' + (collapsed ? ' data-collapsed' : '') + '><div class="tm-node-row">'
-          + '<button class="tm-toggle" type="button" data-toggle="' + esc(g.name) + '" aria-expanded="' + !collapsed + '" aria-label="' + (collapsed ? '展开' : '收起') + esc(g.name) + '">' + icon('chevron') + '</button>'
-          + node(g.name, g.count).replace('<span class="name">', '<span></span><span class="name">') + '</div><ul class="tm-children">'
-          + g.children.filter(([c]) => !q || hit(c) || hit(g.name)).map(([c, n]) => '<li>' + node(c, n) + '</li>').join('') + '</ul></li>';
+        const expanded = !!q || !state.collapsed.has(g.name);
+        html += '<li role="none" class="tm-group"' + (expanded ? '' : ' data-collapsed') + '>' + treeItem(g.name, g.count, { lvl: 1, cls: 'parent', expanded, q }).replace(/<\/div>$/, '</div>').replace(/^<li role="none">/, '')
+          + '<ul role="group">' + g.children.filter(([c]) => !q || hit(c) || hit(g.name)).map(([c, n]) => treeItem(c, n, { lvl: 2, cls: 'child', parent: g.name, q }) + '</li>').join('') + '</ul></li>';
       });
-      html += '</ul>';
     }
     const singles = SINGLES.filter(([s]) => hit(s));
-    if (singles.length) html += '<div class="tm-tree-label"><span>独立主题</span><span></span></div><ul>' + singles.map(([s, n]) => '<li class="tm-leaf">' + node(s, n) + '</li>').join('') + '</ul>';
-    if (q && !groups.length && !singles.length) html += '<div class="tm-tree-empty">没有名称包含「' + esc(q) + '」的主题</div>';
+    if (singles.length) html += '<li role="none" class="tm-tree-label"><span>独立主题</span><span></span><span></span></li>' + singles.map(([s, n]) => treeItem(s, n, { lvl: 1, cls: 'leaf', q }) + '</li>').join('');
+    html += '</ul>';
+    if (q && !groups.length && !singles.length) html = '<div class="tm-tree-empty">没有名称包含「' + esc(q) + '」的主题</div>';
     $('treeScroll').innerHTML = html;
     $('treeTotal').textContent = '主题结构 · ' + topicCount() + ' 个';
+    if (!document.querySelector('.tm-item[tabindex="0"]')) { const f = document.querySelector('.tm-item'); if (f) f.tabIndex = 0; }
   }
+  const visibleItems = () => [...document.querySelectorAll('#treeScroll .tm-item')].filter(el => el.offsetParent !== null);
+  function focusItem(el) { if (!el) return; document.querySelectorAll('#treeScroll .tm-item').forEach(x => x.tabIndex = -1); el.tabIndex = 0; el.focus(); el.scrollIntoView({ block: 'nearest' }); }
+  function itemByTopic(t) { return [...document.querySelectorAll('#treeScroll .tm-item')].find(el => el.dataset.topic === t); }
+  function toggleGroup(name, open) {
+    const isOpen = !state.collapsed.has(name);
+    if (open === isOpen) return;
+    isOpen ? state.collapsed.add(name) : state.collapsed.delete(name);
+    renderTree(); focusItem(itemByTopic(name));
+  }
+  $('treeScroll').addEventListener('click', e => {
+    const all = e.target.closest('[data-expandall]');
+    if (all) { const any = TREE.some(g => state.collapsed.has(g.name)); TREE.forEach(g => any ? state.collapsed.delete(g.name) : state.collapsed.add(g.name)); renderTree(); return; }
+    const lead = e.target.closest('[data-toggle]');
+    if (lead) { hidePeek(); toggleGroup(lead.dataset.toggle); return; }
+    const it = e.target.closest('.tm-item');
+    if (it) { hidePeek(); selectTopic(it.dataset.topic); focusItem(itemByTopic(it.dataset.topic)); }
+  });
+  $('treeScroll').addEventListener('keydown', e => {
+    const it = e.target.closest('.tm-item'); if (!it) return;
+    const items = visibleItems(), i = items.indexOf(it), exp = it.getAttribute('aria-expanded');
+    const go = el => { e.preventDefault(); focusItem(el); };
+    switch (e.key) {
+      case 'ArrowDown': go(items[Math.min(i + 1, items.length - 1)]); break;
+      case 'ArrowUp': go(items[Math.max(i - 1, 0)]); break;
+      case 'Home': go(items[0]); break;
+      case 'End': go(items[items.length - 1]); break;
+      case 'ArrowRight': e.preventDefault(); if (exp === 'false') toggleGroup(it.dataset.topic, true); else if (exp === 'true') focusItem(items[i + 1]); break;
+      case 'ArrowLeft': e.preventDefault(); if (exp === 'true') toggleGroup(it.dataset.topic, false); else if (it.dataset.parent) focusItem(itemByTopic(it.dataset.parent)); break;
+      case 'Enter': case ' ': e.preventDefault(); selectTopic(it.dataset.topic); focusItem(itemByTopic(it.dataset.topic)); break;
+    }
+  });
+  /* 全名浮签：只在名称被截断时出现 */
+  function showPeek(it) {
+    const name = it.querySelector('.name');
+    if (!name || name.scrollWidth <= name.clientWidth + 1) { hidePeek(); return; }
+    const t = findTopic(it.dataset.topic), peek = $('peek');
+    peek.innerHTML = esc(name.textContent) + '<small>' + fmt(t ? t.count : null) + ' 篇作品' + (t && t.children ? ' · ' + t.children + ' 个子主题' : '') + (t && t.parent ? ' · 属于「' + esc(t.parent) + '」' : '') + '</small>';
+    const r = it.getBoundingClientRect(), tr = document.querySelector('.tm-tree').getBoundingClientRect();
+    peek.style.left = (tr.right + 10) + 'px';
+    peek.style.top = Math.max(8, r.top + r.height / 2 - peek.offsetHeight / 2) + 'px';
+    peek.classList.add('show');
+  }
+  function hidePeek() { $('peek').classList.remove('show'); }
+  $('treeScroll').addEventListener('pointerover', e => { const it = e.target.closest('.tm-item'); if (it) showPeek(it); });
+  $('treeScroll').addEventListener('pointerleave', hidePeek);
+  $('treeScroll').addEventListener('focusin', e => { const it = e.target.closest('.tm-item'); if (it && it.matches(':focus-visible')) showPeek(it); });
+  $('treeScroll').addEventListener('focusout', hidePeek);
+  $('treeScroll').addEventListener('scroll', hidePeek);
 
   /* ---------- 页头 ---------- */
   function renderHead() {
-    const t = findTopic(state.topic), path = $('currentPath'), sep = '<span class="sep">/</span>';
-    if (state.topic === '全部方向') {
-      $('currentTitle').textContent = '全部方向';
-      $('currentMeta').innerHTML = DOMAIN.name + sep + '<b>' + fmt(DOMAIN.works) + '</b> 篇观察材料' + sep + '更新于 <b>' + DOMAIN.updated + '</b>';
-      path.hidden = true;
-    } else if (state.topic === UNASSIGNED) {
+    const t = findTopic(state.topic), path = $('currentPath');
+    if (state.topic === '全部方向') { $('currentTitle').textContent = '全部方向'; path.hidden = true; }
+    else if (state.topic === UNASSIGNED) {
       $('currentTitle').textContent = '未归入主题的材料';
-      $('currentMeta').innerHTML = DOMAIN.name + sep + '<b>' + fmt(DOMAIN.unassigned) + '</b> 篇，占全部方向 <b>' + pct(DOMAIN.unassigned, DOMAIN.works) + '</b>' + sep + '更新于 <b>' + DOMAIN.updated + '</b>';
       path.hidden = false; path.innerHTML = '<button type="button" data-topic="全部方向">全部方向</button><i>/</i><span>归类覆盖</span>';
     } else if (t) {
       $('currentTitle').textContent = t.name;
-      $('currentMeta').innerHTML = DOMAIN.name + sep + '<b>' + fmt(t.count) + '</b> 篇作品' + (t.children ? sep + '<b>' + t.children + '</b> 个子主题' : '') + sep + '更新于 <b>' + DOMAIN.updated + '</b>';
       path.hidden = false;
       path.innerHTML = '<button type="button" data-topic="全部方向">全部方向</button>' + (t.parent ? '<i>/</i><button type="button" data-topic="' + esc(t.parent) + '">' + esc(t.parent) + '</button>' : '') + '<i>/</i><span>' + (t.parent ? '子主题' : '主题') + '</span>';
     }
@@ -195,7 +252,7 @@
   }
 
   /* ---------- 工作区 ---------- */
-  function setWorkHead(title, count, tools) { $('sectionTitle').textContent = title; $('sectionCount').innerHTML = count; $('materialTools').hidden = !tools; }
+  function setWorkHead(title, count, tools) { $('materialTools').hidden = !tools; $('navSep').hidden = !tools; }
   function renderMaterials() {
     const q = $('materialSearch').value.trim().toLowerCase();
     const scoped = MATERIALS.map((m, i) => ({ ...m, i })).filter(inScope);
@@ -344,7 +401,7 @@
     if (lastFocus && lastFocus.isConnected) lastFocus.focus();
   }
 
-  function selectTopic(name) { state.topic = name; renderTree(); renderHead(); renderData(); renderTab(); $('main').scrollTo({ top: 0 }); }
+  function selectTopic(name) { const t = findTopic(name); if (t && t.parent) state.collapsed.delete(t.parent); state.topic = name; renderTree(); renderHead(); renderData(); renderTab(); $('main').scrollTo({ top: 0 }); }
   function setView(v) {
     state.view = v;
     document.querySelectorAll('button[data-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === v)));

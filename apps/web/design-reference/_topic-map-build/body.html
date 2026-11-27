@@ -10,7 +10,7 @@
         <button class="clear" type="button" aria-label="清空搜索" hidden>清空</button>
       </form>
     </div>
-    <nav class="tm-tree-scroll" id="treeScroll" aria-label="主题目录"></nav>
+    <div class="tm-tree-scroll" id="treeScroll"></div>
   </aside>
 
   <main class="tm-main" id="main" tabindex="-1" aria-labelledby="currentTitle">
@@ -19,7 +19,6 @@
       <div class="tm-title">
         <div class="path" id="currentPath" hidden></div>
         <h1 id="currentTitle">全部方向</h1>
-        <p id="currentMeta"></p>
       </div>
       <div class="tm-head-controls">
         <div class="scope" role="group" aria-label="统计范围" data-lids-component="C17">
@@ -47,14 +46,7 @@
           <button type="button" role="tab" data-tab="own" aria-selected="false">我方对照与再做</button>
         </div>
         <div class="tm-worknav-side">
-          <button class="text-action" id="matrixButton" type="button">主题 × 旅程<span data-icon="external"></span></button>
-        </div>
-      </nav>
-
-      <section class="tm-work" role="tabpanel" aria-labelledby="sectionTitle">
-        <div class="tm-work-head">
-          <div class="tm-work-title"><h2 id="sectionTitle">材料与讨论</h2><p id="sectionCount"></p></div>
-          <div class="tm-tools" id="materialTools">
+          <div class="tm-navtools" id="materialTools">
             <form class="find" data-find data-lids-component="C16" role="search" aria-label="查找材料" id="materialFind">
               <span class="mark" aria-hidden="true">FIND</span>
               <input id="materialSearch" type="search" placeholder="标题、作者或正文" autocomplete="off" aria-label="查找材料">
@@ -67,7 +59,12 @@
               <button type="button" data-filter="ordinary" aria-pressed="false">常规作品</button>
             </div>
           </div>
+          <span class="sep" id="navSep" aria-hidden="true"></span>
+          <button class="text-action" id="matrixButton" type="button">主题 × 旅程<span data-icon="external"></span></button>
         </div>
+      </nav>
+
+      <section class="tm-work" role="tabpanel" id="workPanel">
         <div id="tabContent"></div>
       </section>
     </section>
@@ -111,4 +108,5 @@
     <button class="btn small" type="button" id="inspCancel">返回列表</button>
   </div>
 </aside>
+<div class="tm-peek" id="peek" role="tooltip"></div>
 <div class="tm-toast" id="toast" role="status" aria-live="polite"></div>
