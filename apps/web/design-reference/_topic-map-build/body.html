@@ -1,0 +1,112 @@
+<div id="topic-map-root" class="tm-root" data-view="overview" aria-label="主题图谱">
+
+  <aside class="tm-tree" aria-label="主题结构">
+    <div class="tm-tree-head">
+      <div class="tm-kicker"><strong>TOPIC MAP</strong><span id="treeTotal">主题结构</span></div>
+      <form class="find" data-find data-lids-component="C16" role="search" aria-label="查找主题" id="treeFind">
+        <span class="mark" aria-hidden="true">FIND</span>
+        <input id="treeSearch" type="search" placeholder="主题名称" autocomplete="off" aria-label="查找主题">
+        <kbd aria-hidden="true">/</kbd>
+        <button class="clear" type="button" aria-label="清空搜索" hidden>清空</button>
+      </form>
+    </div>
+    <div class="tm-tree-scroll" id="treeScroll"></div>
+  </aside>
+
+  <main class="tm-main" id="main" tabindex="-1" aria-labelledby="currentTitle">
+
+    <header class="tm-pagehead">
+      <div class="tm-title">
+        <div class="path" id="currentPath" hidden></div>
+        <h1 id="currentTitle">全部方向</h1>
+      </div>
+      <div class="tm-head-controls">
+        <div class="scope" role="group" aria-label="统计范围" data-lids-component="C17">
+          <button class="scope-trigger" type="button" data-select="platform" aria-haspopup="listbox" aria-expanded="false"><span class="k">平台</span><span class="v">全部平台</span><span data-icon="chevron"></span></button>
+          <button class="scope-trigger" type="button" data-select="time" aria-haspopup="listbox" aria-expanded="false"><span class="k">时间</span><span class="v">全部时间</span><span data-icon="chevron"></span></button>
+        </div>
+        <div class="vs" role="group" aria-label="主题图谱视图" data-lids-component="C26">
+          <button type="button" data-view="overview" aria-pressed="true">主题概览</button>
+          <button type="button" data-view="journey" aria-pressed="false">用户生命旅程</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============ 主题概览 ============ -->
+    <section id="overviewPanel" aria-label="主题概览">
+      <div class="tm-data" id="dataModule" aria-label="主题统计与样本表现"></div>
+
+      <nav class="tm-worknav" aria-label="主题分析视图">
+        <div class="tm-tabs" role="tablist" id="workTabs">
+          <button type="button" role="tab" data-tab="materials" aria-selected="true">材料与讨论</button>
+          <button type="button" role="tab" data-tab="structure" aria-selected="false">结构与表现</button>
+          <button type="button" role="tab" data-tab="patterns" aria-selected="false">内容格局</button>
+          <button type="button" role="tab" data-tab="sources" aria-selected="false">来源分布</button>
+          <button type="button" role="tab" data-tab="candidates" aria-selected="false">新方向<span class="num">5</span></button>
+          <button type="button" role="tab" data-tab="own" aria-selected="false">我方对照与再做</button>
+        </div>
+        <div class="tm-worknav-side">
+          <div class="tm-navtools" id="materialTools">
+            <form class="find" data-find data-lids-component="C16" role="search" aria-label="查找材料" id="materialFind">
+              <span class="mark" aria-hidden="true">FIND</span>
+              <input id="materialSearch" type="search" placeholder="标题、作者或正文" autocomplete="off" aria-label="查找材料">
+              <kbd aria-hidden="true">/</kbd>
+              <button class="clear" type="button" aria-label="清空搜索" hidden>清空</button>
+            </form>
+            <div class="vs" role="group" aria-label="材料筛选" data-lids-component="C26">
+              <button type="button" data-filter="latest" aria-pressed="true">最新作品</button>
+              <button type="button" data-filter="high" aria-pressed="false">高表现</button>
+              <button type="button" data-filter="ordinary" aria-pressed="false">常规作品</button>
+            </div>
+          </div>
+          <span class="sep" id="navSep" aria-hidden="true"></span>
+          <button class="text-action" id="matrixButton" type="button">主题 × 旅程<span data-icon="external"></span></button>
+        </div>
+      </nav>
+
+      <section class="tm-work" role="tabpanel" id="workPanel">
+        <div id="tabContent"></div>
+      </section>
+    </section>
+
+    <!-- ============ 用户生命旅程 ============ -->
+    <section id="journeyPanel" class="tm-journey" aria-label="用户生命旅程" hidden>
+      <div class="tm-journey-head">
+        <p>基于 <b>3,267</b> 篇可读作品 · 选择阶段查看具体场景</p>
+        <div class="tm-tools">
+          <div class="vs" role="group" aria-label="阶段统计口径" data-lids-component="C26">
+            <button type="button" data-jmetric="main" aria-pressed="true">主阶段分布</button>
+            <button type="button" data-jmetric="involved" aria-pressed="false">阶段涉及率</button>
+          </div>
+          <div class="vs" role="group" aria-label="旅程呈现方式" data-lids-component="C26">
+            <button type="button" data-jdisplay="map" aria-pressed="true">地图</button>
+            <button type="button" data-jdisplay="list" aria-pressed="false">列表</button>
+          </div>
+        </div>
+      </div>
+      <div id="stageArea"></div>
+      <div class="tm-scene-head"><h3 id="sceneHeading">发现与理解<small>具体场景</small></h3><span id="sceneCount"></span></div>
+      <div class="tm-scenes" id="sceneGrid"></div>
+    </section>
+
+  </main>
+</div>
+
+<div class="sf-menu" id="selectMenu" role="listbox" hidden></div>
+<div class="tm-scrim" id="scrim"></div>
+<aside class="tm-inspector" id="inspector" aria-label="材料详情" aria-hidden="true">
+  <div class="tm-insp-head">
+    <div>
+      <div class="tm-insp-kicker"><strong>EVIDENCE</strong><span id="inspKind">原文与讨论</span></div>
+      <h2 id="inspTitle">材料详情</h2>
+    </div>
+    <button class="icon-btn" id="inspClose" type="button" aria-label="关闭详情"><span data-icon="close"></span></button>
+  </div>
+  <div class="tm-insp-body" id="inspBody"></div>
+  <div class="tm-insp-actions">
+    <button class="btn primary small" type="button" id="inspLocate">定位原始材料</button>
+    <button class="btn small" type="button" id="inspCancel">返回列表</button>
+  </div>
+</aside>
+<div class="tm-peek" id="peek" role="tooltip"></div>
+<div class="tm-toast" id="toast" role="status" aria-live="polite"></div>

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { btn } from "./topicElements";
+import { badge, btn } from "./topicElements";
 import { number, platformName } from "./topicModel";
 import type { PlatformStatistics, Snapshot, Statistics, Work } from "./types";
 import s from "./Overview.module.css";
@@ -27,7 +27,14 @@ export function OverviewDistribution({ works, platform, statistics, scope, compa
               title="点击查看或调整样本爆款规则">样本表现</button>
             <span>/ {platform ? platformName(platform.platform) : "暂无平台样本"}</span>
           </div>
-          <div className={s.compactSettings}>{headControls}
+          <div className={s.compactSettings}>
+          {platform?.highPerformanceThreshold != null ? (
+            <div className={s.compactLegend} aria-hidden="true">
+              {badge("常规")}
+              {badge("达到已设高表现规则", "signal")}
+            </div>
+          ) : null}
+          {headControls}
           <div className={s.compactSwitcher} role="group" aria-label="材料表现视图">
             <button type="button" aria-pressed={!table} onClick={() => setTable(false)}>分布图</button>
             <button type="button" aria-pressed={table} onClick={() => setTable(true)}>表格</button>

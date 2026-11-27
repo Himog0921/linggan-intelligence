@@ -40,9 +40,8 @@ describe("material-first overview preserves statistical boundaries", () => {
     expect(band).toHaveTextContent("已观察创作者");
     expect(band).toHaveTextContent("样本爆款率");
     expect(band).toHaveTextContent("点赞中位数");
-    expect(band).toHaveTextContent("昨日新增");
-    expect(band).toHaveTextContent("昨日达标");
-    expect(band).toHaveTextContent("较昨日");
+    // The API is a current snapshot: no yesterday column at all, not even a placeholder.
+    expect(band).not.toHaveTextContent("昨日");
     expect(band).not.toHaveTextContent("+86");
     expect(band).not.toHaveTextContent("+53");
     expect(within(band).queryByRole("button", { name: "查看或调整样本爆款规则" })).toBeNull();

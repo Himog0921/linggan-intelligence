@@ -1,66 +1,54 @@
-.readouts { min-width: 0; }
+/* TOPIC-MAP-REDESIGN (2026-11-27): the overview band is ONE three-row grid —
+   row 1 labels + chart head, row 2 figures + bars (shared baseline), row 3 bin labels.
+   Readouts and the compact chart join it with subgrid; no frames, no hairlines. */
+.readouts { min-width: 0; grid-row: 1 / span 3; display: grid; grid-template-rows: subgrid; }
 .metrics {
   min-width: 0;
+  grid-row: 1 / span 3;
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--lgi-space-3);
-  align-items: start;
+  grid-template-rows: subgrid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  column-gap: var(--lgi-space-8);
 }
 .readout {
   min-width: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  grid-row: 1 / span 3;
+  display: grid;
+  grid-template-rows: subgrid;
 }
 .label {
-  display: flex;
-  align-items: center;
-  gap: var(--lgi-space-1);
-  color: var(--lgi-muted);
-  font-size: var(--lgi-text-label);
-  line-height: var(--lgi-lh-data);
-  white-space: nowrap;
+  align-self: end;
   min-width: 0;
-  height: var(--lgi-space-5);
-  flex: 0 0 var(--lgi-space-5);
-}
-.label > span { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
-.glyph {
-  width: var(--lgi-space-4);
-  height: var(--lgi-space-4);
-  flex: none;
-  stroke: var(--lgi-ghost);
-  stroke-width: 1.6;
-  stroke-linecap: square;
-  stroke-linejoin: miter;
+  color: var(--lgi-ink);
+  font: var(--lgi-weight-semibold) var(--lgi-type-label-size)/var(--lgi-type-label-leading) var(--lgi-font-ui);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .figure {
-  display: flex;
-  align-items: end;
-  justify-content: space-between;
-  gap: var(--lgi-space-1);
+  grid-row: 2;
+  align-self: end;
+  display: grid;
+  gap: var(--lgi-space-2);
   min-width: 0;
-  min-height: var(--lgi-space-12);
-  height: var(--lgi-space-12);
-  margin-top: 0;
 }
 .value {
   display: flex;
-  align-items: baseline;
+  align-items: end;
   gap: var(--lgi-space-1);
   font-variant-numeric: tabular-nums;
   min-width: 0;
 }
 .value strong {
   color: var(--lgi-ink);
-  font: var(--lgi-weight-bold) var(--lgi-text-page-title)/var(--lgi-lh-title) var(--lgi-font-mono);
-  letter-spacing: var(--lgi-ls-tight);
+  font: var(--lgi-type-metric-weight) var(--lgi-type-metric-size)/1 var(--lgi-font-data);
   white-space: nowrap;
 }
 .value small { color: var(--lgi-muted); font-size: var(--lgi-text-label); }
-:global(#topic-map-root) .valueAction {
+.valueAction {
   display: inline-flex;
-  align-items: baseline;
+  align-items: end;
   gap: var(--lgi-space-1);
   min-height: 0;
   padding: 0;
@@ -69,44 +57,24 @@
   color: var(--lgi-ink);
   cursor: pointer;
 }
-:global(#topic-map-root) .valueAction:hover strong { color: var(--lgi-signal-ink); }
-/* The original global .lgi-tm-button has a 32px minimum and padding.
-   Override that at the same or higher specificity, or only the first KPI
-   (the one with a drill-down button) will float above the other three. */
-:global(#topic-map-root) .readouts .readout .figure .value .valueAction {
-  min-height: 0;
-  padding: 0;
-  margin: 0;
-  border: 0;
-  line-height: var(--lgi-lh-title);
-}
+.valueAction:hover strong { color: var(--lgi-signal-ink); }
+.valueAction:focus-visible { outline: var(--lgi-action-rail-width) solid var(--lgi-focus); }
 
-
-.delta {
-  display: inline-flex;
-  align-items: baseline;
-  gap: var(--lgi-space-1);
-  color: var(--lgi-ghost);
-  font: var(--lgi-weight-semibold) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);
-  white-space: nowrap;
-  flex: 0 0 auto;
-}
-.delta small { font: var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-sans); }
 .detail {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--lgi-space-1) var(--lgi-space-2);
+  gap: 0 var(--lgi-space-2);
   align-items: baseline;
-  margin-top: var(--lgi-space-2);
-  font-size: var(--lgi-text-label);
-  line-height: var(--lgi-lh-data);
+  font-size: var(--lgi-type-aux-size);
+  line-height: 1.5;
   color: var(--lgi-muted);
 }
 .detail > span { white-space: nowrap; }
 .detail b {
   color: var(--lgi-ink);
-  font-family: var(--lgi-font-mono);
-  font-weight: var(--lgi-weight-bold);
+  font-family: var(--lgi-font-data);
+  font-weight: var(--lgi-weight-semibold);
+  font-variant-numeric: tabular-nums;
 }
 .compactRuleTitle {
   border: 0;
@@ -119,9 +87,8 @@
 }
 .compactRuleTitle:hover { text-decoration: underline; text-underline-offset: var(--lgi-space-1); }
 .compactRuleTitle:focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: var(--lgi-space-1); }
-.noPlatform { color: var(--lgi-muted); font-size: var(--lgi-text-label); }
+.noPlatform { grid-row: 2 / span 2; align-self: end; color: var(--lgi-muted); font-size: var(--lgi-text-label); }
 .controls {
-  border-top: 1px solid var(--lgi-hairline);
   margin-top: var(--lgi-space-2);
   padding-top: var(--lgi-space-2);
 }
@@ -136,71 +103,74 @@
   clip: rect(0, 0, 0, 0);
   border: 0;
 }
-/* The compact histogram is the same six-bin evidence view, moved to the top reading band. */
+/* The compact histogram is the same six-bin evidence view; it shares the band's three rows. */
 .compactPanel {
-  display: flex;
-  flex-direction: column;
+  grid-row: 1 / span 3;
+  display: grid;
+  grid-template-rows: subgrid;
   min-width: 0;
-  border-left: 1px solid var(--lgi-hairline);
-  padding-left: var(--lgi-space-5);
 }
 .compactHead {
+  align-self: end;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--lgi-space-2);
-  min-height: var(--lgi-space-5);
+  gap: var(--lgi-space-3);
+  min-width: 0;
 }
 .compactTitle {
   display: inline-flex;
   align-items: baseline;
   gap: var(--lgi-space-2);
   white-space: nowrap;
-  font-size: var(--lgi-text-data);
+  font-size: var(--lgi-type-label-size);
 }
-.compactTitle span { color: var(--lgi-muted); font-size: var(--lgi-text-label); }
-.compactSettings { display: inline-flex; align-items: center; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: var(--lgi-space-2); }
+.compactTitle span { color: var(--lgi-muted); font-size: var(--lgi-type-aux-size); }
+.compactSettings { display: inline-flex; align-items: center; min-width: 0; flex-wrap: wrap; justify-content: flex-end; gap: var(--lgi-space-5); }
+.compactLegend { display: inline-flex; align-items: center; gap: var(--lgi-space-4); }
+.compactLegend > * { font-size: var(--lgi-type-aux-size); font-weight: var(--lgi-weight-regular); }
 .compactSwitcher { display: inline-flex; align-items: center; gap: var(--lgi-space-3); }
 .compactSwitcher button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: var(--lgi-space-6);
-  min-height: var(--lgi-space-6);
+  min-height: var(--lgi-space-8);
   background: none;
   border: 0;
-  border-bottom: 2px solid transparent;
-  color: var(--lgi-ghost);
-  padding: 0 0 var(--lgi-space-1);
-  font-size: var(--lgi-text-label);
+  color: var(--lgi-muted);
+  padding: 0 var(--lgi-space-1);
+  font-size: var(--lgi-type-label-size);
   white-space: nowrap;
   cursor: pointer;
 }
-.compactSwitcher button[aria-pressed="true"] {
-  color: var(--lgi-ink);
-  font-weight: var(--lgi-weight-semibold);
-  border-bottom-color: var(--lgi-signal);
+.compactSwitcher button:hover:not([aria-pressed="true"]) { color: var(--lgi-ink); }
+.compactSwitcher button[aria-pressed="true"] { color: var(--lgi-ink); font-weight: var(--lgi-weight-semibold); }
+.compactSwitcher button[aria-pressed="true"]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: calc(var(--lgi-space-1) * .75);
+  background: var(--lgi-signal);
 }
 .compactPlot {
+  grid-row: 2;
   position: relative;
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: var(--lgi-space-2);
+  align-items: stretch;
+  gap: var(--lgi-space-3);
   min-width: 0;
-}
-.compactPlot::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: calc(var(--lgi-space-12) + var(--lgi-space-3));
-  border-top: 1px solid var(--lgi-border);
-  pointer-events: none;
+  min-height: 0;
+  border-bottom: var(--lgi-action-border-width) solid var(--lgi-ink);
 }
 .compactColumn {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: stretch;
+  min-height: 0;
+  height: 100%;
   background: transparent;
   border: 0;
   padding: 0;
@@ -212,15 +182,16 @@
 .compactColumn:disabled { cursor: default; }
 .compactColumn:focus-visible { outline: 2px solid var(--lgi-focus); outline-offset: calc(var(--lgi-space-1) / 2); }
 .compactBarSpace {
-  height: calc(var(--lgi-space-12) + var(--lgi-space-3));
-  border-bottom: 0;
+  flex: 1;
+  min-height: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   justify-items: center;
   min-width: 0;
 }
 .compactBarSpace b {
-  font: var(--lgi-weight-bold) var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);
+  font: var(--lgi-weight-medium) var(--lgi-type-aux-size)/1 var(--lgi-font-data);
+  font-variant-numeric: tabular-nums;
   white-space: nowrap;
   padding-bottom: var(--lgi-space-1);
 }
@@ -232,19 +203,23 @@
   min-height: 0;
 }
 .compactColumn[data-high="true"] .compactBarSpace b { color: var(--lgi-signal-ink); }
-.compactBar { display: block; width: 65%; max-width: var(--lgi-space-8); flex: none; background: var(--lgi-ink); }
+.compactBar { display: block; width: 100%; max-width: var(--lgi-tm-bar-max); flex: none; background: var(--lgi-ink); transition: opacity var(--lgi-duration-state) var(--lgi-ease-ui); }
 .compactBar.signal { background: var(--lgi-signal); }
+.compactPlot:hover .compactColumn:not(:hover) .compactBar { opacity: .4; }
 .compactBinName {
-  margin-top: var(--lgi-space-2);
-  font: var(--lgi-text-label)/var(--lgi-lh-data) var(--lgi-font-mono);
+  position: absolute;
+  top: calc(100% + var(--lgi-space-2));
+  left: 0;
+  right: 0;
+  font: var(--lgi-type-aux-size)/1.5 var(--lgi-font-data);
   color: var(--lgi-muted);
   white-space: nowrap;
 }
-.compactTableWrap { max-height: var(--lgi-space-24); overflow-y: auto; scrollbar-width: thin; }
+.compactTableWrap { grid-row: 2 / span 2; max-height: calc(var(--lgi-space-24) + var(--lgi-space-8)); overflow-y: auto; scrollbar-width: thin; }
 .compactTable { width: 100%; border-collapse: collapse; font-size: var(--lgi-text-label); }
 .compactTable th, .compactTable td { text-align: left; font-weight: var(--lgi-weight-regular); padding: var(--lgi-space-1) 0; }
 .compactTable td:nth-child(2) { font-family: var(--lgi-font-mono); }
-.compactTable tr + tr { border-top: 1px solid var(--lgi-hairline); }
+.compactTable tbody tr:nth-child(even) { background: var(--lgi-canvas-low); }
 .aside { min-width: 0; }
 
 .chartHead {
@@ -297,14 +272,19 @@
 .boundaries dd { margin: 0; text-align: right; color: var(--lgi-ink); }
 .boundaryActions { display: flex; align-items: flex-start; flex-direction: column; gap: var(--lgi-space-3); }
 @media (max-width: 1150px) {
-  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--lgi-space-4); }
-  .compactPanel { border-left: 0; padding-left: 0; border-top: 1px solid var(--lgi-hairline); padding-top: var(--lgi-space-3); }
+  .compactPanel { margin-top: var(--lgi-space-5); }
 }
 @media (max-width: 700px) {
-  .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .value strong { font-size: var(--lgi-text-section); }
-  .figure { align-items: flex-start; flex-wrap: wrap; gap: var(--lgi-space-1); }
-  .compactPanel { margin-top: var(--lgi-space-3); }
 }
 
-.progress { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--lgi-space-4); padding-block: var(--lgi-space-4); border-top: 1px solid var(--lgi-hairline); margin-top: var(--lgi-space-4); }
+.progress { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--lgi-space-4); padding-block: var(--lgi-space-4); margin-top: var(--lgi-space-2); }
+
+/* Narrow: readouts fall back to a 2×2 block; the chart keeps its own three rows. */
+@media (max-width: 820px) {
+  .readouts, .metrics, .readout { grid-row: auto; grid-template-rows: none; }
+  .readouts { display: block; }
+  .metrics { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--lgi-space-4) var(--lgi-space-6); }
+  .readout { display: flex; flex-direction: column; gap: var(--lgi-space-2); }
+  .compactPanel { grid-row: auto; grid-template-rows: auto calc(var(--lgi-space-16)) auto; row-gap: var(--lgi-space-2); }
+}

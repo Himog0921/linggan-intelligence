@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type RefObject,
 } from "react";
 import { AppShell } from "../../app/AppShell";
 import { ContextBreadcrumb } from "../../shared/ContextBar";
@@ -62,12 +63,98 @@ const TopicContents = memo(function TopicContents({
     </div>
   );
 });
+/** Topic tree aids that the engine's string-built markup cannot own: a full-name peek for names cut by
+ * the 224px column, and arrow-key movement between visible topics (Left/Right fold or climb). */
+function useTreeNavigation(root: RefObject<HTMLDivElement | null>, version: number) {
+  const [peek, setPeek] = useState<{ name: string; meta: string; top: number; left: number } | null>(null);
+  const pendingFocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = pendingFocus.current;
+    pendingFocus.current = null;
+    if (id === null) return;
+    root.current
+      ?.querySelector<HTMLButtonElement>(`[data-tree] [data-tree-item][data-id="${CSS.escape(id)}"]`)
+      ?.focus({ preventScroll: true });
+  }, [root, version]);
+  useEffect(() => {
+    const node = root.current;
+    if (!node) return;
+    const items = () =>
+      [...node.querySelectorAll<HTMLButtonElement>("[data-tree] [data-tree-item]")].filter((el) => el.offsetParent !== null);
+    const show = (el: HTMLElement) => {
+      if (el.scrollWidth <= el.clientWidth + 1) return setPeek(null);
+      const row = el.getBoundingClientRect();
+      const column = el.closest("aside")?.getBoundingClientRect();
+      setPeek({
+        name: el.getAttribute("title") || el.textContent || "",
+        meta: el.dataset.peek || "",
+        top: row.top + row.height / 2,
+        left: (column?.right ?? row.right) + 10,
+      });
+    };
+    const over = (event: Event) => {
+      const el = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-tree] [data-tree-item]") : null;
+      if (el) show(el);
+      else setPeek(null);
+    };
+    const focus = (event: FocusEvent) => {
+      const el = event.target instanceof HTMLElement ? event.target.closest<HTMLElement>("[data-tree] [data-tree-item]") : null;
+      if (el && el.matches(":focus-visible")) show(el);
+      else setPeek(null);
+    };
+    const hide = () => setPeek(null);
+    const key = (event: KeyboardEvent) => {
+      const el = event.target instanceof HTMLElement ? event.target.closest<HTMLButtonElement>("[data-tree] [data-tree-item]") : null;
+      if (!el || event.altKey || event.ctrlKey || event.metaKey) return;
+      const list = items(), i = list.indexOf(el);
+      const toggle = el.parentElement?.querySelector<HTMLButtonElement>("[data-action=\"collapse\"]");
+      const go = (target: HTMLButtonElement | undefined) => {
+        if (!target) return;
+        event.preventDefault();
+        target.focus();
+        target.scrollIntoView({ block: "nearest" });
+      };
+      const fold = (button: HTMLButtonElement) => {
+        pendingFocus.current = el.dataset.id ?? null;
+        button.click();
+      };
+      if (event.key === "ArrowDown") go(list[Math.min(i + 1, list.length - 1)]);
+      else if (event.key === "ArrowUp") go(list[Math.max(i - 1, 0)]);
+      else if (event.key === "Home") go(list[0]);
+      else if (event.key === "End") go(list[list.length - 1]);
+      else if (event.key === "ArrowRight") {
+        event.preventDefault();
+        if (toggle?.getAttribute("aria-expanded") === "false") fold(toggle);
+        else if (el.dataset.id) go(list.find((item) => item.dataset.parentRef === el.dataset.id));
+      } else if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        if (toggle?.getAttribute("aria-expanded") === "true") fold(toggle);
+        else if (el.dataset.parentRef) go(list.find((x) => x.dataset.id === el.dataset.parentRef));
+      }
+    };
+    node.addEventListener("pointerover", over);
+    node.addEventListener("pointerleave", hide);
+    node.addEventListener("focusin", focus);
+    node.addEventListener("keydown", key);
+    node.addEventListener("scroll", hide, true);
+    return () => {
+      node.removeEventListener("pointerover", over);
+      node.removeEventListener("pointerleave", hide);
+      node.removeEventListener("focusin", focus);
+      node.removeEventListener("keydown", key);
+      node.removeEventListener("scroll", hide, true);
+    };
+  }, [root]);
+  return peek;
+}
+
 export function TopicsPage() {
   const navigate = useNavigate();
   const [engine] = useState(() => createTopicEngine(path => { void navigate(path); }));
   const version = useSyncExternalStore(engine.subscribe, engine.getVersion);
   const root = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
+  const peek = useTreeNavigation(root, version);
   const state = engine.getState();
   const currentDialog = engine.getDialog();
   const shell = useQuery({
@@ -106,6 +193,16 @@ export function TopicsPage() {
     if (mainScroll !== null) {
       const main = root.current?.querySelector("[data-topic-main]");
       if (main) main.scrollTop = mainScroll;
+    }
+    const findFocus = engine.consumeFindFocus();
+    if (findFocus) {
+      const input = [...(root.current?.querySelectorAll<HTMLInputElement>("[data-find] input") ?? [])].find(
+        (node) => node.getAttribute("aria-label") === findFocus.label,
+      );
+      if (input && document.activeElement !== input) {
+        input.focus({ preventScroll: true });
+        input.setSelectionRange(findFocus.start, findFocus.end, findFocus.direction ?? undefined);
+      }
     }
     if (engine.consumeScrollReset())
       root.current
@@ -161,7 +258,6 @@ export function TopicsPage() {
         ),
         meta: (
           <div id="topic-map-context-actions" className="v7-context-actions" aria-label="图谱操作" onClick={engine.onClick}>
-            <a className="v7-context-action" href="/topics/offline-review">离线预演</a>
             {engine.getContextActions()}
           </div>
         ),
@@ -183,6 +279,16 @@ export function TopicsPage() {
             notice={engine.getNotice()}
             error={shell.isError ? shell.error.message : null}
           />
+          {peek ? (
+            <div
+              className={c("lgi-tm-peek")}
+              role="tooltip"
+              style={{ top: peek.top, left: peek.left }}
+            >
+              {peek.name}
+              {peek.meta ? <small>{peek.meta}</small> : null}
+            </div>
+          ) : null}
           {currentDialog ? (
             <dialog
               ref={dialog}

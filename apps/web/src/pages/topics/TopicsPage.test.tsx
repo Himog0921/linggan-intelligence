@@ -88,8 +88,36 @@ describe("Topic React interaction and lifetime", () => {
     const journeyViews = screen.getByRole("group", { name: "主题图谱视图" });
     expect(within(journeyViews).getByRole("button", { name: "用户生命旅程" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("主题概览与样本表现")).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "查找材料与方向" })).toBeInTheDocument();
     await userEvent.click(within(journeyViews).getByRole("button", { name: "主题概览" }));
     await waitFor(() => expect(document.querySelector("#topic-map-root")).toHaveAttribute("data-view", "overview"));
+  });
+  it("keeps keyboard focus on a topic when its children collapse and expand", async () => {
+    const snapshot = topicSnapshot();
+    const [parent] = snapshot.topics;
+    if (!parent) throw Error("synthetic parent topic is missing");
+    snapshot.topics.push({
+      ...parent,
+      topicRef: "20000000-0000-4000-8000-000000000002",
+      canonicalKey: "synthetic-child-topic",
+      displayName: "合成子主题",
+      parentTopicRef: topicRef,
+    });
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => jsonResponse(
+      path.includes("/summary?") || path.includes("/overview?") ? snapshot : defaultRead(path),
+    )));
+    page();
+    await screen.findByRole("button", { name: "合成子主题" });
+    const tree = screen.getByLabelText("稳定主题结构");
+    within(tree).getByRole("button", { name: "合成主题" }).focus();
+    await userEvent.keyboard("{ArrowLeft}");
+    const collapsed = screen.getByLabelText("稳定主题结构");
+    expect(within(collapsed).queryByRole("button", { name: "合成子主题" })).not.toBeInTheDocument();
+    expect(within(collapsed).getByRole("button", { name: "合成主题" })).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
+    const expanded = screen.getByLabelText("稳定主题结构");
+    expect(within(expanded).getByRole("button", { name: "合成子主题" })).toBeInTheDocument();
+    expect(within(expanded).getByRole("button", { name: "合成主题" })).toHaveFocus();
   });
   it("keeps complete statistics during staged material loading and edits search text", async () => {
     const full = pendingResponse();
@@ -122,10 +150,10 @@ describe("Topic React interaction and lifetime", () => {
       ).not.toBeInTheDocument(),
     );
     expect(screen.getByRole("region",{name:"运营方向"})).toBeInTheDocument();
-    const input = screen.getByRole("textbox", { name: "查找材料与方向" });
+    const input = screen.getByRole("searchbox", { name: "查找材料与方向" });
     await userEvent.type(input, "材料 1");
     expect(input).toHaveValue("材料 1");
-    await userEvent.click(screen.getByRole("button", { name: "查找" }));
+    await userEvent.type(input, "{Enter}");
     expect(new URL(window.location.href).searchParams.get("query")).toBe(
       "材料 1",
     );
