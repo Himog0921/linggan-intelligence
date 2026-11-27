@@ -8,7 +8,6 @@ use crate::{
         self as analysis, ResearchOutput, ResolutionOutput, verification,
     },
 };
-use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
@@ -60,13 +59,13 @@ fn resolution_schema(input: &ResearchInput) -> Value {
 }
 /// Frozen IDs remain unchanged; withdrawn or superseded candidate text cannot be sent or admitted.
 pub(crate) async fn candidate_sources_current(
-    db: &Database,
+    tx: &mut Transaction<'_, Postgres>,
     input: &ResearchInput,
     context: &Value,
 ) -> Result<(), FoundationError> {
     let domain: Uuid = serde_json::from_value(input.domain["domainRef"].clone())
         .map_err(|_| FoundationError::Invalid)?;
-    let qualified = crate::topic_map_core::catalog(db, domain)
+    let (qualified, _) = crate::topic_map_core::qualified_catalog_in(tx, domain)
         .await
         .map_err(|e| match e {
             crate::model_settings::ModelError::Database(e) => FoundationError::Database(e),
@@ -91,13 +90,12 @@ pub(crate) async fn candidate_sources_current(
     Ok(())
 }
 pub(crate) async fn prepare(
-    db: &Database,
     tx: &mut Transaction<'_, Postgres>,
     window: Uuid,
     stage: u8,
     input: &ResearchInput,
 ) -> Result<Packet, FoundationError> {
-    if owner::single_pass(input) { return single_pass::prepare(db, tx, window, input).await; }
+    if owner::single_pass(input) { return single_pass::prepare(tx, window, input).await; }
     let fragments = || {
         input.fragments.iter().enumerate().map(|(index,f)|json!({"fragmentIndex":index,"fragmentId":f.fragment_id,"field":f.field,"sourceRef":f.source_ref,"sourceVersion":f.source_version,"speaker":f.speaker,"content":f.model_content(),"issues":f.issues})).collect::<Vec<_>>()
     };
@@ -130,7 +128,7 @@ pub(crate) async fn prepare(
             let domain: Uuid =
                 serde_json::from_value(input.domain["domainRef"].clone()).map_err(|_| invalid())?;
             let catalog =
-                crate::topic_map_core::catalog(db, domain)
+                crate::topic_map_core::catalog_in(tx, domain)
                     .await
                     .map_err(|e| match e {
                         crate::model_settings::ModelError::Database(e) => {
@@ -154,7 +152,7 @@ pub(crate) async fn prepare(
                     .map_err(|_| invalid())?;
             let units = assignment_units(tx, window, input).await?;
             let context:Value=sqlx::query_scalar("SELECT d.context FROM linggan_topic_research_dispatch d JOIN linggan_topic_research_stage s USING(item_ref) WHERE s.window_ref=$1 AND s.stage_number=2").bind(window).fetch_one(&mut **tx).await?;
-            candidate_sources_current(db, input, &context).await?;
+            candidate_sources_current(tx, input, &context).await?;
             let packet = verification::resolution_review(
                 &units,
                 &resolution,

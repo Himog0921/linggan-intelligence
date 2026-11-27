@@ -77,7 +77,7 @@ async fn prepare(
         )
         .await?;
     }
-    let packet = packet::prepare(db, &mut tx, request_ref, stage_number, &data).await?;
+    let packet = packet::prepare(&mut tx, request_ref, stage_number, &data).await?;
     let super::research_call::Call {
         invocation,
         request,
@@ -166,7 +166,7 @@ async fn settle(
     response: Option<&PiResponse>,
 ) -> Result<(), ExecutorError> {
     let (mut tx, cancelled) = receipt::lock_in(db, item, prepared.invocation, response).await?;
-    let sources = owner::frozen(db, prepared.window).await;
+    let sources = owner::frozen_in(&mut tx, prepared.window).await;
     if let Err(crate::ai_foundation::store::FoundationError::Database(_)) = &sources {
         return Err(sources.err().unwrap().into());
     }
@@ -197,7 +197,7 @@ async fn settle(
     let candidate_sources_ok = if prepared.stage >= 2 || prepared.single_pass {
         match sources.as_ref() {
             Ok(input) => {
-                match packet::candidate_sources_current(db, input, &prepared.context).await {
+                match packet::candidate_sources_current(&mut tx, input, &prepared.context).await {
                     Ok(()) => true,
                     Err(crate::ai_foundation::store::FoundationError::Database(e)) => {
                         return Err(e.into());

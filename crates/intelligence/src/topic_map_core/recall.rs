@@ -2,14 +2,33 @@
 use crate::model_settings::ModelError;
 use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
-use sqlx::Row;
+use sqlx::{Postgres, Row, Transaction};
 use uuid::Uuid;
 
 pub(crate) async fn catalog(db: &Database, domain: Uuid) -> Result<Value, ModelError> {
+    let mut tx = db.pool().begin().await?;
+    let catalog = catalog_in(&mut tx, domain).await?;
+    tx.commit().await?;
+    Ok(catalog)
+}
+
+pub(crate) async fn catalog_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+) -> Result<Value, ModelError> {
+    let (mut catalog, sources) = qualified_catalog_in(tx, domain).await?;
+    attach_support(tx, domain, &sources, &mut catalog).await?;
+    Ok(catalog)
+}
+
+pub(crate) async fn qualified_catalog_in(
+    tx: &mut Transaction<'_, Postgres>,
+    domain: Uuid,
+) -> Result<(Value, super::source_qualification::QualifiedInputs), ModelError> {
     let (unavailable, sources) =
-        super::qualify_definitions_and_inputs(db, Some(domain), &std::collections::HashMap::new())
+        super::qualify_definitions_and_inputs_in(tx, Some(domain), &std::collections::HashMap::new())
             .await?;
-    let mut catalog = catalog_with(db.pool(), domain).await?;
+    let mut catalog = catalog_with(&mut **tx, domain).await?;
     if let Some(rows) = catalog.as_array_mut() {
         rows.retain(|r| {
             r["definitionRef"]
@@ -18,8 +37,7 @@ pub(crate) async fn catalog(db: &Database, domain: Uuid) -> Result<Value, ModelE
                 .is_some_and(|id| !unavailable.contains(&id))
         });
     }
-    attach_support(db, domain, &sources, &mut catalog).await?;
-    Ok(catalog)
+    Ok((catalog, sources))
 }
 async fn catalog_with<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
     executor: E,
@@ -33,13 +51,13 @@ async fn catalog_with<'e, E: sqlx::Executor<'e, Database = sqlx::Postgres>>(
 /// Reuse the exact qualified definition-creation windows already loaded above.
 /// One example per definition keeps prompt growth linear; it is illustrative, not exhaustive.
 async fn attach_support(
-    db: &Database,
+    tx: &mut Transaction<'_, Postgres>,
     domain: Uuid,
     sources: &super::source_qualification::QualifiedInputs,
     catalog: &mut Value,
 ) -> Result<(), ModelError> {
     let rows = sqlx::query("SELECT rule.definition_ref, task.work_ref, task.input_refs, (run.configurations->>0)::uuid AS config_ref, result.core_json FROM linggan_topic_map_concept_rule rule JOIN linggan_topic_research_result result ON result.invocation_ref=rule.invocation_ref JOIN linggan_topic_research_window task USING(window_ref) JOIN linggan_topic_research_run run USING(run_ref) WHERE rule.domain_ref=$1")
-        .bind(domain).fetch_all(db.pool()).await?;
+        .bind(domain).fetch_all(&mut **tx).await?;
     for row in rows {
         let definition: Uuid = row.get("definition_ref");
         let Some(candidate) = catalog.as_array_mut().and_then(|items| {
