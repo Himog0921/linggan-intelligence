@@ -34,9 +34,8 @@ async function calculate(action) {
   assert.ok(result.ok(), await result.text()); return result.json();
 }
 try {
-  await step('existing topics entry opens explicit synthetic input and fixed output', async () => {
-    await page.goto(`${origin}/topics`);
-    await page.getByRole('link', { name: '离线预演', exact: true }).click();
+  await step('dedicated offline-review route opens explicit synthetic input and fixed output', async () => {
+    await page.goto(`${origin}/topics/offline-review`);
     await page.getByRole('heading', { name: '方向与解读 · 离线预演' }).waitFor();
     await page.getByRole('heading', { name: '合成输入', exact: true }).waitFor();
     assert.ok(await page.getByText('合成样本 · 未调用模型 · 未写正式业务结果', { exact: true }).isVisible());

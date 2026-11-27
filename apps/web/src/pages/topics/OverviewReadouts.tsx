@@ -1,5 +1,4 @@
 import { Fragment, type ReactNode } from "react";
-import { btn } from "./topicElements";
 import { number, pct, platformName, readoutNumber } from "./topicModel";
 import type { Snapshot, Statistics } from "./types";
 import s from "./Overview.module.css";
@@ -23,14 +22,12 @@ function Readout({
     <div className={s.readout} data-readout="">
       <div className={s.label} data-readout-label="">{label}</div>
       <div className={s.figure}>
-        <div className={s.value}>{drill
-          ? btn(
-              <><strong>{value}</strong>{unit ? <small>{unit}</small> : null}</>,
-              "materials", "", s.valueAction,
-              { "aria-label": label + " " + (valueText || "") + " " + (unit || "") + "，查看材料" },
-            )
-          : <><strong>{value}</strong>{unit ? <small>{unit}</small> : null}</>
-        }</div>
+        <div className={s.value}>{drill ? (
+          <button type="button" data-action="materials" className={s.valueAction}
+            aria-label={label + " " + (valueText || "") + " " + (unit || "") + "，查看材料"}>
+            <strong>{value}</strong>{unit ? <small>{unit}</small> : null}
+          </button>
+        ) : <><strong>{value}</strong>{unit ? <small>{unit}</small> : null}</>}</div>
         <div className={s.detail} data-readout-detail="">{detail}</div>
       </div>
     </div>

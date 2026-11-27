@@ -35,7 +35,7 @@
 }
 .value {
   display: flex;
-  align-items: baseline;
+  align-items: end;
   gap: var(--lgi-space-1);
   font-variant-numeric: tabular-nums;
   min-width: 0;
@@ -46,9 +46,9 @@
   white-space: nowrap;
 }
 .value small { color: var(--lgi-muted); font-size: var(--lgi-text-label); }
-:global(#topic-map-root) .valueAction {
+.valueAction {
   display: inline-flex;
-  align-items: baseline;
+  align-items: end;
   gap: var(--lgi-space-1);
   min-height: 0;
   padding: 0;
@@ -57,18 +57,8 @@
   color: var(--lgi-ink);
   cursor: pointer;
 }
-:global(#topic-map-root) .valueAction:hover strong { color: var(--lgi-signal-ink); }
-/* The original global .lgi-tm-button has a 32px minimum and padding.
-   Override that at the same or higher specificity, or only the first KPI
-   (the one with a drill-down button) will float above the other three. */
-:global(#topic-map-root) .readouts .readout .figure .value .valueAction {
-  min-height: 0;
-  padding: 0;
-  margin: 0;
-  border: 0;
-  line-height: var(--lgi-lh-title);
-}
-
+.valueAction:hover strong { color: var(--lgi-signal-ink); }
+.valueAction:focus-visible { outline: var(--lgi-action-rail-width) solid var(--lgi-focus); }
 
 .detail {
   display: flex;
