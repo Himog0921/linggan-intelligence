@@ -94,8 +94,10 @@ describe("Topic React interaction and lifetime", () => {
   });
   it("keeps keyboard focus on a topic when its children collapse and expand", async () => {
     const snapshot = topicSnapshot();
+    const [parent] = snapshot.topics;
+    if (!parent) throw Error("synthetic parent topic is missing");
     snapshot.topics.push({
-      ...snapshot.topics[0],
+      ...parent,
       topicRef: "20000000-0000-4000-8000-000000000002",
       canonicalKey: "synthetic-child-topic",
       displayName: "合成子主题",
