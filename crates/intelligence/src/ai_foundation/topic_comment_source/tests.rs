@@ -188,9 +188,30 @@ async fn saved_comments_match_only_existing_topics_and_keep_unmatched() {
     .unwrap();
     let (topic, definition) = seed_topic(&db).await;
     let mut tx = db.pool().begin().await.unwrap();
-    let proposed = packet::prepare(&db, &mut tx, window, 0, &frozen)
-        .await
-        .unwrap();
+    // Leave only this transaction available while preparing and validating its receipt.
+    let mut held = Vec::new();
+    for _ in 1..db.pool().options().get_max_connections() {
+        held.push(db.pool().acquire().await.unwrap());
+    }
+    let proposed = tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        let restored = owner::frozen_in(&mut tx, window).await.unwrap();
+        assert_eq!(restored.hash, frozen.hash);
+        let packet = packet::prepare(&mut tx, window, 0, &restored)
+            .await
+            .unwrap();
+        packet::candidate_sources_current(&mut tx, &restored, &packet.context)
+            .await
+            .unwrap();
+        let stale = json!({"candidates":[{"definitionRef":Uuid::new_v4()}]});
+        assert!(matches!(
+            packet::candidate_sources_current(&mut tx, &restored, &stale).await,
+            Err(FoundationError::AdmissionDenied(reasons)) if reasons == ["ai_source_unavailable"]
+        ));
+        packet
+    })
+    .await
+    .unwrap();
+    drop(held);
     assert_eq!(
         proposed.schema["properties"]["decisions"]["items"]["properties"]["status"]["enum"],
         json!(["matched", "uncertain", "out_of_scope"])

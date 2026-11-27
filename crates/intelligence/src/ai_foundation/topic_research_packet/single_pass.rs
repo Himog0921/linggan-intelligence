@@ -11,7 +11,6 @@ pub(crate) const CONTRACT: &str = "topic-map.single-pass.v1";
 const MAX_NEW_TOPIC_ID: usize = 40;
 
 pub(super) async fn prepare(
-    db: &Database,
     tx: &mut Transaction<'_, Postgres>,
     window: Uuid,
     input: &ResearchInput,
@@ -32,7 +31,7 @@ pub(super) async fn prepare(
     };
     let domain =
         serde_json::from_value(input.domain["domainRef"].clone()).map_err(|_| invalid())?;
-    let mut catalog = crate::topic_map_core::catalog(db, domain)
+    let mut catalog = crate::topic_map_core::catalog_in(tx, domain)
         .await
         .map_err(|e| match e {
             crate::model_settings::ModelError::Database(e) => FoundationError::Database(e),

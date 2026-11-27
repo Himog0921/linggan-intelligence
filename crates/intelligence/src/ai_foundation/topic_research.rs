@@ -272,15 +272,24 @@ async fn start_inner(
         .await
 }
 pub(crate) async fn frozen(db: &Database, window: Uuid) -> Result<ResearchInput, FoundationError> {
-    let row=sqlx::query("SELECT w.work_ref,w.input_refs,r.domain_ref,r.configurations,to_char(r.knowledge_cutoff AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS cutoff FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) WHERE window_ref=$1").bind(window).fetch_optional(db.pool()).await?.ok_or(FoundationError::NotFound)?;
+    let mut tx = db.pool().begin().await?;
+    let input = frozen_in(&mut tx, window).await?;
+    tx.commit().await?;
+    Ok(input)
+}
+
+pub(crate) async fn frozen_in(
+    tx: &mut Transaction<'_, Postgres>,
+    window: Uuid,
+) -> Result<ResearchInput, FoundationError> {
+    let row=sqlx::query("SELECT w.work_ref,w.input_refs,r.domain_ref,r.configurations,to_char(r.knowledge_cutoff AT TIME ZONE 'UTC','YYYY-MM-DD\"T\"HH24:MI:SS.US\"Z\"') AS cutoff FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref) WHERE window_ref=$1").bind(window).fetch_optional(&mut **tx).await?.ok_or(FoundationError::NotFound)?;
     let configs: Vec<Uuid> =
         serde_json::from_value(row.get("configurations")).map_err(|_| FoundationError::Invalid)?;
     let manifest: Value = row.get("input_refs");
     if manifest["inputContract"] == super::topic_comment_source::CONTRACT {
         let request = serde_json::from_value(manifest["semanticRequestRef"].clone())
             .map_err(|_| FoundationError::Invalid)?;
-        let mut tx = db.pool().begin().await?;
-        let input = super::topic_comment_source::load_in(&mut tx, request).await?;
+        let input = super::topic_comment_source::load_in(tx, request).await?;
         if input.hash != manifest["inputHash"].as_str().unwrap_or("")
             || input.domain["domainRef"] != serde_json::json!(row.get::<Uuid, _>("domain_ref"))
         {
@@ -294,8 +303,8 @@ pub(crate) async fn frozen(db: &Database, window: Uuid) -> Result<ResearchInput,
     }
     let work: Uuid = row.get("work_ref");
     let refs = source::manifest_source_work_refs(work, &manifest);
-    let loaded = source::load_inputs_for_works_at(
-        db,
+    let loaded = source::load_inputs_for_works_at_in(
+        tx,
         row.get("domain_ref"),
         configs[0],
         &refs,

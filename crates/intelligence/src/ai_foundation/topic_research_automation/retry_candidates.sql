@@ -1,5 +1,10 @@
--- Apply the per-domain queue bound before selecting the shared retry page.
-WITH full_domains AS (
+-- Group frozen Core identities once so each candidate does not rescan all windows.
+WITH repeated_cores AS MATERIALIZED (
+    SELECT r.domain_ref, w.work_ref, w.input_refs#>>'{coverage,coreRef}' AS core_ref
+    FROM linggan_topic_research_window w JOIN linggan_topic_research_run r USING(run_ref)
+    WHERE w.input_refs->>'methodVersion'=$2
+    GROUP BY 1,2,3 HAVING count(*)>1
+), full_domains AS (
     SELECT r.domain_ref FROM linggan_topic_research_run r
     JOIN linggan_topic_research_window w USING(run_ref)
     JOIN linggan_topic_research_stage s USING(window_ref)
@@ -53,12 +58,9 @@ WHERE r.domain_ref NOT IN (SELECT domain_ref FROM full_domains)
           ('global','executor','task:topic_research') AND NOT enabled
   )
   AND NOT EXISTS (
-      SELECT 1 FROM linggan_topic_research_window other
-      JOIN linggan_topic_research_run owner USING(run_ref)
-      WHERE owner.domain_ref=r.domain_ref AND other.window_ref<>w.window_ref
-        AND other.work_ref=w.work_ref
-        AND other.input_refs#>>'{coverage,coreRef}'=w.input_refs#>>'{coverage,coreRef}'
-        AND other.input_refs->>'methodVersion'=$2
+      SELECT 1 FROM repeated_cores other
+      WHERE other.domain_ref=r.domain_ref AND other.work_ref=w.work_ref
+        AND other.core_ref=w.input_refs#>>'{coverage,coreRef}'
   )
 ORDER BY w.window_ref
 LIMIT 4

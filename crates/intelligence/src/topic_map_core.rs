@@ -4,12 +4,12 @@ mod acceptance;
 pub(crate) use acceptance::{Acceptance, accept_in};
 #[path = "topic_map_core/recall.rs"]
 mod recall;
-pub(crate) use recall::catalog;
+pub(crate) use recall::{catalog, catalog_in, qualified_catalog_in};
 #[path = "topic_map_core/source_qualification.rs"]
 mod source_qualification;
 pub(crate) use source_qualification::{
-    definition_dependencies, qualify_definitions_and_inputs, qualify_definitions_and_inputs_in,
-    unavailable_definitions, unavailable_definitions_in,
+    definition_dependencies, qualify_definitions_and_inputs_in, unavailable_definitions,
+    unavailable_definitions_in,
 };
 
 use crate::{
