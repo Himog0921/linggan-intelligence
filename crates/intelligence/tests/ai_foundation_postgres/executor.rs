@@ -256,7 +256,10 @@ async fn ai_foundation_executor_drain_blocks_claims_but_allows_receipts_and_requ
         owner.complete_drain().await,
         Err(ExecutorError::FenceLost)
     ));
-    item.renew(&db).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), item.renew(&db))
+        .await
+        .expect("declined drain must release the instance lock before the item renews")
+        .unwrap();
     item.defer(&db, "executor_draining").await.unwrap();
     owner.complete_drain().await.unwrap();
     let status:bool=sqlx::query_scalar("SELECT state='drained' AND drain_requested_at IS NOT NULL AND drained_at IS NOT NULL FROM linggan_ai_executor_instance WHERE instance_ref=$1")
