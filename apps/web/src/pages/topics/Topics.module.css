@@ -3185,7 +3185,7 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-button.lgi-tm-text-action,
 :global(#topic-map-root) .lgi-tm-button.lgi-tm-text-action:not(.is-active):not(:disabled):hover {
   min-height: 0;
-  padding: 0 0 1px;
+  padding: 0 0 var(--lgi-action-border-width);
   border: 0;
   border-bottom: var(--lgi-action-rail-width) solid var(--lgi-border-solid);
   border-radius: 0;
@@ -3502,7 +3502,7 @@ body.topic-map-page {
 }
 :global(#topic-map-root) .lgi-tm-peek small {
   display: block;
-  margin-top: 2px;
+  margin-top: calc(var(--lgi-space-1) / 2);
   color: color-mix(in srgb, var(--lgi-on-dark) 62%, transparent);
   font: var(--lgi-type-aux-size)/1.4 var(--lgi-font-data);
 }
@@ -3701,7 +3701,7 @@ body.topic-map-page {
   align-items: center;
   gap: var(--lgi-space-4);
 }
-:global(#topic-map-root) .lgi-tm-work-tools .lgi-tm-find { width: 240px; }
+:global(#topic-map-root) .lgi-tm-work-tools .lgi-tm-find { width: calc(var(--lgi-shell-side) + var(--lgi-space-4)); }
 :global(#topic-map-root) .lgi-tm-work-tools .lgi-tm-mode-switch { border-bottom-color: transparent; }
 :global(#topic-map-root) .lgi-tm-work-sep {
   width: var(--lgi-action-border-width);
@@ -3760,7 +3760,7 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-material-first .lgi-tm-evidence-copy,
 :global(#topic-map-root) .lgi-tm-evidence-copy {
   display: grid;
-  gap: 2px;
+  gap: calc(var(--lgi-space-1) / 2);
   min-width: 0;
   max-width: none;
 }
@@ -3900,7 +3900,7 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-map-nodes > .lgi-tm-journey-node:nth-child(n).is-active .lgi-tm-node-index { color: var(--lgi-signal-ink); }
 :global(#topic-map-root) .lgi-tm-node-question {
   order: 1;
-  min-height: 3em;
+  min-height: calc(3 * var(--lgi-type-label-size));
   font-size: var(--lgi-type-label-size);
   color: var(--lgi-muted);
 }

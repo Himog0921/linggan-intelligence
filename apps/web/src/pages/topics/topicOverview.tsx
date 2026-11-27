@@ -214,11 +214,14 @@ export function createTopicOverview(context: TopicOverviewContext) {
     const threshold = platformStats(context.snapshot?.statistics).find((p) => p.platform === w.platform)?.highPerformanceThreshold;
     return known(threshold) && known(w.likes) && w.likes >= threshold;
   }
-  function stat(value: number | null | undefined, high = false) {
-    return known(value) ? (
-      <span className={cls("lgi-tm-stat " + (high ? "is-high" : ""))}>{number(value)}</span>
-    ) : (
-      <span className={cls("lgi-tm-stat is-unknown")} title={"未获取到该互动数据，不等于 0"}>{"—"}</span>
+  function stat(label: string, value: number | null | undefined, high = false) {
+    const available = known(value);
+    return (
+      <span className={cls(`lgi-tm-stat ${available ? (high ? "is-high" : "") : "is-unknown"}`)}
+        title={available ? undefined : "未获取到该互动数据，不等于 0"}>
+        <span className={cls("v7-sr-only")}>{available ? `${label} ` : `${label} 未获取`}</span>
+        {available ? number(value) : <span aria-hidden="true">—</span>}
+      </span>
     );
   }
   /** Ledger rows: one line of title, one of facts, one of excerpt; the four interaction columns align across rows. */
@@ -305,10 +308,10 @@ export function createTopicOverview(context: TopicOverviewContext) {
                     </p>
                     {materialSourceNote(w)}
                   </div>
-                  {stat(w.likes, high)}
-                  {stat(w.collects)}
-                  {stat(w.comments)}
-                  {stat(w.shares)}
+                  {stat("点赞", w.likes, high)}
+                  {stat("收藏", w.collects)}
+                  {stat("评论", w.comments)}
+                  {stat("分享", w.shares)}
                   <div className={cls("lgi-tm-evidence-actions")}>
                     {btn(
                       <>{readLabel(w, "原文与讨论")}<IntelligenceIcon name="external" size={14}/></>,
@@ -351,6 +354,12 @@ export function createTopicOverview(context: TopicOverviewContext) {
           className={cls("lgi-tm-workspace-content")}
           aria-label={"匹配材料"}
         >
+          {context.state.view === "journey" && (
+            <div className={cls("lgi-tm-work-tools")}>
+              {materialSearch()}
+              {materialModeSwitch()}
+            </div>
+          )}
           {scopeChips()}
           {context.state.query ? (
             <>
@@ -746,7 +755,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
               )}
               style={inlineStyle(`--lvl:${level}`)}
             >
-              {children.length ? (
+              {children.length && !q ? (
                 btn(
                   <IntelligenceIcon name="chevron" size={14} />,
                   "collapse",
@@ -3369,8 +3378,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
     scopeText,
     header,
     observedPlatforms,
-    platformControl,
-    controls,
     materialSearch,
     summary,
     tree,

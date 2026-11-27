@@ -213,7 +213,7 @@
   min-height: 0;
 }
 .compactColumn[data-high="true"] .compactBarSpace b { color: var(--lgi-signal-ink); }
-.compactBar { display: block; width: 100%; max-width: var(--lgi-tm-bar-max); min-height: 2px; flex: none; background: var(--lgi-ink); transition: opacity var(--lgi-duration-state) var(--lgi-ease-ui); }
+.compactBar { display: block; width: 100%; max-width: var(--lgi-tm-bar-max); flex: none; background: var(--lgi-ink); transition: opacity var(--lgi-duration-state) var(--lgi-ease-ui); }
 .compactBar.signal { background: var(--lgi-signal); }
 .compactPlot:hover .compactColumn:not(:hover) .compactBar { opacity: .4; }
 .compactBinName {

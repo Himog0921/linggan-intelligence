@@ -62,8 +62,17 @@ const TopicContents = memo(function TopicContents({
 });
 /** Topic tree aids that the engine's string-built markup cannot own: a full-name peek for names cut by
  * the 224px column, and arrow-key movement between visible topics (Left/Right fold or climb). */
-function useTreeNavigation(root: RefObject<HTMLDivElement | null>) {
+function useTreeNavigation(root: RefObject<HTMLDivElement | null>, version: number) {
   const [peek, setPeek] = useState<{ name: string; meta: string; top: number; left: number } | null>(null);
+  const pendingFocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const id = pendingFocus.current;
+    pendingFocus.current = null;
+    if (id === null) return;
+    root.current
+      ?.querySelector<HTMLButtonElement>(`[data-tree] [data-tree-item][data-id="${CSS.escape(id)}"]`)
+      ?.focus({ preventScroll: true });
+  }, [root, version]);
   useEffect(() => {
     const node = root.current;
     if (!node) return;
@@ -102,17 +111,21 @@ function useTreeNavigation(root: RefObject<HTMLDivElement | null>) {
         target.focus();
         target.scrollIntoView({ block: "nearest" });
       };
+      const fold = (button: HTMLButtonElement) => {
+        pendingFocus.current = el.dataset.id ?? null;
+        button.click();
+      };
       if (event.key === "ArrowDown") go(list[Math.min(i + 1, list.length - 1)]);
       else if (event.key === "ArrowUp") go(list[Math.max(i - 1, 0)]);
       else if (event.key === "Home") go(list[0]);
       else if (event.key === "End") go(list[list.length - 1]);
       else if (event.key === "ArrowRight") {
         event.preventDefault();
-        if (toggle?.getAttribute("aria-expanded") === "false") toggle.click();
-        else if (toggle) go(list[i + 1]);
+        if (toggle?.getAttribute("aria-expanded") === "false") fold(toggle);
+        else if (el.dataset.id) go(list.find((item) => item.dataset.parentRef === el.dataset.id));
       } else if (event.key === "ArrowLeft") {
         event.preventDefault();
-        if (toggle?.getAttribute("aria-expanded") === "true") toggle.click();
+        if (toggle?.getAttribute("aria-expanded") === "true") fold(toggle);
         else if (el.dataset.parentRef) go(list.find((x) => x.dataset.id === el.dataset.parentRef));
       }
     };
@@ -138,7 +151,7 @@ export function TopicsPage() {
   const version = useSyncExternalStore(engine.subscribe, engine.getVersion);
   const root = useRef<HTMLDivElement>(null);
   const dialog = useRef<HTMLDialogElement>(null);
-  const peek = useTreeNavigation(root);
+  const peek = useTreeNavigation(root, version);
   const state = engine.getState();
   const currentDialog = engine.getDialog();
   const shell = useQuery({
@@ -178,14 +191,14 @@ export function TopicsPage() {
       const main = root.current?.querySelector("[data-topic-main]");
       if (main) main.scrollTop = mainScroll;
     }
-    const findLabel = engine.consumeFindFocus();
-    if (findLabel) {
+    const findFocus = engine.consumeFindFocus();
+    if (findFocus) {
       const input = [...(root.current?.querySelectorAll<HTMLInputElement>("[data-find] input") ?? [])].find(
-        (node) => node.getAttribute("aria-label") === findLabel,
+        (node) => node.getAttribute("aria-label") === findFocus.label,
       );
       if (input && document.activeElement !== input) {
         input.focus({ preventScroll: true });
-        input.setSelectionRange(input.value.length, input.value.length);
+        input.setSelectionRange(findFocus.start, findFocus.end, findFocus.direction ?? undefined);
       }
     }
     if (engine.consumeScrollReset())

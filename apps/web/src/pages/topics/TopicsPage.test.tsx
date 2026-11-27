@@ -88,8 +88,34 @@ describe("Topic React interaction and lifetime", () => {
     const journeyViews = screen.getByRole("group", { name: "主题图谱视图" });
     expect(within(journeyViews).getByRole("button", { name: "用户生命旅程" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.getByLabelText("主题概览与样本表现")).toBeInTheDocument();
+    expect(screen.getByRole("searchbox", { name: "查找材料与方向" })).toBeInTheDocument();
     await userEvent.click(within(journeyViews).getByRole("button", { name: "主题概览" }));
     await waitFor(() => expect(document.querySelector("#topic-map-root")).toHaveAttribute("data-view", "overview"));
+  });
+  it("keeps keyboard focus on a topic when its children collapse and expand", async () => {
+    const snapshot = topicSnapshot();
+    snapshot.topics.push({
+      ...snapshot.topics[0],
+      topicRef: "20000000-0000-4000-8000-000000000002",
+      canonicalKey: "synthetic-child-topic",
+      displayName: "合成子主题",
+      parentTopicRef: topicRef,
+    });
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => jsonResponse(
+      path.includes("/summary?") || path.includes("/overview?") ? snapshot : defaultRead(path),
+    )));
+    page();
+    await screen.findByRole("button", { name: "合成子主题", exact: true });
+    const tree = screen.getByLabelText("稳定主题结构");
+    within(tree).getByRole("button", { name: "合成主题", exact: true }).focus();
+    await userEvent.keyboard("{ArrowLeft}");
+    const collapsed = screen.getByLabelText("稳定主题结构");
+    expect(within(collapsed).queryByRole("button", { name: "合成子主题" })).not.toBeInTheDocument();
+    expect(within(collapsed).getByRole("button", { name: "合成主题", exact: true })).toHaveFocus();
+    await userEvent.keyboard("{ArrowRight}");
+    const expanded = screen.getByLabelText("稳定主题结构");
+    expect(within(expanded).getByRole("button", { name: "合成子主题" })).toBeInTheDocument();
+    expect(within(expanded).getByRole("button", { name: "合成主题", exact: true })).toHaveFocus();
   });
   it("keeps complete statistics during staged material loading and edits search text", async () => {
     const full = pendingResponse();

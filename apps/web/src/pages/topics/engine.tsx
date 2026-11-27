@@ -60,7 +60,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
   let bootstrapDomain = "";
   /** Topic-tree FIND text: a navigation aid only, never part of the URL or the statistics scope. */
   let treeQuery = "";
-  let findFocusRequest: string | null = null;
+  let findFocusRequest: { label: string | null; start: number | null; end: number | null; direction: "forward" | "backward" | "none" | null } | null = null;
   const listeners = new Set<() => void>(),
     controllers = new Set<AbortController>();
   let root: HTMLDivElement | null = null,
@@ -745,7 +745,12 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     const active = document.activeElement;
     findFocusRequest =
       active instanceof HTMLInputElement && root?.contains(active) && active.closest("[data-find]")
-        ? active.getAttribute("aria-label")
+        ? {
+            label: active.getAttribute("aria-label"),
+            start: active.selectionStart,
+            end: active.selectionEnd,
+            direction: active.selectionDirection,
+          }
         : null;
     mainRevision++;
     notify();
