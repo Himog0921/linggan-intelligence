@@ -266,11 +266,11 @@ try {
     await page.setViewportSize({ width: 2048, height: 960 });
     await page.evaluate(() => document.fonts.ready);
     const visual = await page.getByLabel("基础概览指标").evaluate((region) => {
-      const cards = [...region.firstElementChild.children].slice(0, 4);
+      const cards = [...region.querySelectorAll("[data-readout]")].slice(0, 4);
       return cards.map((card) => {
-        const caption = card.children[0].getBoundingClientRect();
-        const value = card.children[1].querySelector("strong")?.getBoundingClientRect();
-        const foot = card.children[2].getBoundingClientRect();
+        const caption = card.querySelector("[data-readout-label]").getBoundingClientRect();
+        const value = card.querySelector("strong")?.getBoundingClientRect();
+        const foot = card.querySelector("[data-readout-detail]").getBoundingClientRect();
         return { captionTop: caption.top, valueBottom: value?.bottom ?? 0, footTop: foot.top };
       });
     });

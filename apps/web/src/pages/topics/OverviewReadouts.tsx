@@ -20,8 +20,8 @@ function Readout({
   drill?: boolean;
 }) {
   return (
-    <div className={s.readout}>
-      <div className={s.label}>{label}</div>
+    <div className={s.readout} data-readout="">
+      <div className={s.label} data-readout-label="">{label}</div>
       <div className={s.figure}>
         <div className={s.value}>{drill
           ? btn(
@@ -31,7 +31,7 @@ function Readout({
             )
           : <><strong>{value}</strong>{unit ? <small>{unit}</small> : null}</>
         }</div>
-        <div className={s.detail}>{detail}</div>
+        <div className={s.detail} data-readout-detail="">{detail}</div>
       </div>
     </div>
   );

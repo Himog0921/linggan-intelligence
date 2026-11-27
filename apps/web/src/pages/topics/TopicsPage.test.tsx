@@ -105,17 +105,17 @@ describe("Topic React interaction and lifetime", () => {
       path.includes("/summary?") || path.includes("/overview?") ? snapshot : defaultRead(path),
     )));
     page();
-    await screen.findByRole("button", { name: "合成子主题", exact: true });
+    await screen.findByRole("button", { name: "合成子主题" });
     const tree = screen.getByLabelText("稳定主题结构");
-    within(tree).getByRole("button", { name: "合成主题", exact: true }).focus();
+    within(tree).getByRole("button", { name: "合成主题" }).focus();
     await userEvent.keyboard("{ArrowLeft}");
     const collapsed = screen.getByLabelText("稳定主题结构");
     expect(within(collapsed).queryByRole("button", { name: "合成子主题" })).not.toBeInTheDocument();
-    expect(within(collapsed).getByRole("button", { name: "合成主题", exact: true })).toHaveFocus();
+    expect(within(collapsed).getByRole("button", { name: "合成主题" })).toHaveFocus();
     await userEvent.keyboard("{ArrowRight}");
     const expanded = screen.getByLabelText("稳定主题结构");
     expect(within(expanded).getByRole("button", { name: "合成子主题" })).toBeInTheDocument();
-    expect(within(expanded).getByRole("button", { name: "合成主题", exact: true })).toHaveFocus();
+    expect(within(expanded).getByRole("button", { name: "合成主题" })).toHaveFocus();
   });
   it("keeps complete statistics during staged material loading and edits search text", async () => {
     const full = pendingResponse();
