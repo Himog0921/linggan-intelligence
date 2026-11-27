@@ -1,0 +1,922 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Linggan Intelligence · 主题图谱 UI 重设计 Demo</title>
+<style>
+:root{
+  --ink:#17191b;
+  --body:#333a3f;
+  --muted:#73808a;
+  --faint:#9aa3aa;
+  --line:#e4e8ea;
+  --line-strong:#cbd2d6;
+  --paper:#fff;
+  --canvas:#f7f8f8;
+  --soft:#f2f4f4;
+  --signal:#c63214;
+  --signal-soft:#fbefec;
+  --signal-mark:#f24a23;
+  --green:#32775c;
+  --shadow:0 16px 48px rgba(20,26,30,.14);
+  --sidebar:304px;
+  --topbar:46px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--paper);color:var(--ink);font-family:"OPPO Sans","PingFang SC","Microsoft YaHei",Arial,sans-serif}
+body{font-size:14px}
+button,input,select{font:inherit}
+button{cursor:pointer}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.app{min-height:100vh;display:flex;flex-direction:column}
+.topbar{
+  height:var(--topbar);flex:0 0 var(--topbar);display:flex;align-items:center;
+  justify-content:space-between;padding:0 28px 0 24px;color:#fff;
+  background-color:#101116;
+  background-image:radial-gradient(circle,rgba(255,255,255,.28) .75px,transparent .9px);
+  background-size:6px 6px;background-position:0 0;
+  border-bottom:1px solid #292a30;
+}
+.brand{display:flex;align-items:center;gap:14px;min-width:0}
+.brand-mark{font-size:13px;font-weight:800;letter-spacing:.06em;border-right:1px solid #45464c;padding-right:14px;color:#fff}
+.brand-name{font-size:13px;font-weight:700;white-space:nowrap}
+.domain-select{
+  display:flex;align-items:center;gap:9px;height:28px;padding:0 10px;
+  border:1px solid #55565d;background:#1b1c22;color:#fff;border-radius:2px;
+  font-size:12px;
+}
+.domain-select .chev{color:#aeb4ba;font-size:10px}
+.topbar-right{display:flex;align-items:center;gap:10px;color:#9da3aa;font-size:11px}
+.topbar-context{border-left:1px solid #45464c;padding-left:12px}
+.shell{display:grid;grid-template-columns:var(--sidebar) minmax(0,1fr);min-height:calc(100vh - var(--topbar))}
+.sidebar{
+  border-right:1px solid var(--line);background:#fcfcfc;display:flex;flex-direction:column;
+  min-height:calc(100vh - var(--topbar));max-height:calc(100vh - var(--topbar));position:sticky;top:var(--topbar)
+}
+.sidebar-head{padding:22px 18px 14px;border-bottom:1px solid var(--line)}
+.eyebrow{font:600 10px/1.2 Arial,sans-serif;letter-spacing:.13em;color:var(--muted);text-transform:uppercase}
+.sidebar-title-row{display:flex;align-items:flex-end;justify-content:space-between;margin-top:6px}
+.sidebar-title{font-size:19px;font-weight:750;letter-spacing:-.03em}
+.sidebar-sub{font-size:11px;color:var(--muted)}
+.tree-search{position:relative;margin-top:16px}
+.tree-search input{
+  width:100%;height:35px;border:1px solid var(--line);background:#fff;border-radius:3px;
+  padding:0 32px 0 31px;color:var(--ink);font-size:12px;
+}
+.search-icon{position:absolute;left:10px;top:9px;color:#8a949b;font-size:14px}
+.search-clear{position:absolute;right:8px;top:7px;border:0;background:none;color:#9aa3aa;padding:2px 4px}
+.tree-scroll{overflow:auto;flex:1;padding:12px 10px 14px 12px;scrollbar-width:thin}
+.tree-section-label{
+  display:flex;align-items:center;justify-content:space-between;padding:8px 9px 6px;
+  color:#8b959c;font-size:10px;letter-spacing:.08em;font-weight:700;
+}
+.all-node,.tree-row{
+  width:100%;display:flex;align-items:center;text-align:left;border:0;background:transparent;
+  color:var(--body);min-height:37px;border-radius:3px;padding:0 9px;gap:8px;
+}
+.all-node{height:38px;background:var(--signal-soft);color:var(--signal);font-weight:700;margin-bottom:10px}
+.all-node .node-count{color:var(--signal)}
+.tree-list,.tree-children{list-style:none;margin:0;padding:0}
+.tree-group{position:relative;margin:2px 0 5px}
+.tree-row{position:relative;font-size:12px}
+.tree-row:hover,.tree-child:hover{background:#f1f3f3}
+.tree-row.active,.tree-child.active{background:var(--signal-soft);color:var(--signal);font-weight:700}
+.tree-row.active:before,.tree-child.active:before{
+  content:"";position:absolute;left:0;top:5px;bottom:5px;width:3px;background:var(--signal);border-radius:0 2px 2px 0
+}
+.tree-toggle{
+  width:17px;height:24px;flex:0 0 17px;display:grid;place-items:center;
+  border:0;background:transparent;color:#79848b;padding:0;font-size:13px;
+}
+.tree-toggle.spacer{visibility:hidden}
+.tree-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tree-row.parent .tree-name{font-weight:650;color:#242a2e}
+.tree-row.active .tree-name,.tree-child.active .tree-name{color:var(--signal)}
+.node-count{flex:0 0 auto;min-width:20px;text-align:right;color:#69757d;font-size:11px;font-variant-numeric:tabular-nums}
+.tree-children{margin:1px 0 8px 18px;padding-left:14px;position:relative}
+.tree-children:before{
+  content:"";position:absolute;left:4px;top:0;bottom:9px;width:1px;background:#dce1e3
+}
+.tree-child{
+  position:relative;width:100%;height:34px;display:flex;align-items:center;gap:7px;
+  border:0;background:transparent;border-radius:3px;padding:0 8px 0 4px;text-align:left;color:#59646b;font-size:11.5px
+}
+.tree-child:before{
+  content:"";position:absolute;left:-10px;top:50%;width:9px;height:1px;background:#dce1e3
+}
+.tree-child .tree-name{padding-left:2px}
+.tree-bottom{padding:10px 12px 14px;border-top:1px solid var(--line);background:#fcfcfc}
+.unassigned{
+  width:100%;display:flex;align-items:center;justify-content:space-between;min-height:43px;
+  border:1px solid var(--line);background:#fff;border-radius:3px;padding:0 11px;color:var(--body);font-size:12px
+}
+.unassigned strong{font-size:14px;font-variant-numeric:tabular-nums}
+.main{min-width:0;padding:0 30px 52px;max-width:none}
+.context-row{
+  min-height:66px;display:flex;align-items:center;justify-content:space-between;gap:18px;
+  border-bottom:1px solid var(--line);padding:10px 0;
+}
+.context-left{display:flex;align-items:baseline;gap:14px;min-width:0}
+.page-title{font-size:21px;font-weight:760;letter-spacing:-.04em;white-space:nowrap}
+.page-meta{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.context-controls{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.select-control{
+  height:32px;display:flex;align-items:center;gap:8px;padding:0 9px;border:1px solid var(--line);
+  border-radius:3px;background:#fff;color:#4d5960;font-size:11px
+}
+.select-control select{border:0;background:transparent;color:inherit;outline:0;max-width:110px;font-size:11px}
+.view-switch{display:flex;align-items:center;border-bottom:1px solid var(--line-strong);height:34px;margin-left:8px}
+.view-switch button{
+  height:34px;border:0;border-bottom:2px solid transparent;background:transparent;color:#748087;
+  padding:0 10px;font-size:12px;font-weight:600
+}
+.view-switch button.active{border-bottom-color:var(--signal);color:var(--ink)}
+.overview-band{
+  display:grid;grid-template-columns:minmax(0,1.55fr) minmax(390px,.9fr);
+  gap:22px;padding:18px 0 17px;border-bottom:1px solid var(--line);align-items:stretch
+}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));min-width:0}
+.metric{padding:2px 16px 2px 0;min-width:0;position:relative}
+.metric+.metric{padding-left:16px;border-left:1px solid var(--line)}
+.metric-label{display:flex;align-items:center;gap:7px;color:#68747c;font-size:11px;white-space:nowrap}
+.metric-label .glyph{font-size:13px;color:#87939a}
+.metric-value{font-size:28px;line-height:1.2;font-weight:760;letter-spacing:-.04em;margin-top:11px;font-variant-numeric:tabular-nums}
+.metric-value small{font-size:12px;font-weight:500;color:#65717a;margin-left:4px;letter-spacing:0}
+.metric-detail{margin-top:6px;color:#7b868d;font-size:10.5px;white-space:nowrap}
+.metric-detail strong{font-weight:650;color:#4c575e}
+.distribution{border-left:1px solid var(--line);padding-left:20px;min-width:0}
+.distribution-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
+.distribution-title{font-size:12px;font-weight:700}
+.distribution-sub{font-size:10px;color:var(--muted);font-weight:400;margin-left:5px}
+.chart-mode{display:flex;gap:8px}
+.chart-mode button{border:0;background:none;color:#89939a;font-size:10px;padding:2px}
+.chart-mode button.active{color:var(--ink);font-weight:700}
+.chart-bars{height:88px;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:12px;align-items:end;border-bottom:1px solid #dfe4e6;padding:0 3px}
+.bar-item{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:5px;min-width:0;border:0;background:transparent;padding:0 1px;position:relative}
+.bar-value{font-size:10px;color:#56616a;font-variant-numeric:tabular-nums}
+.bar{width:22px;max-width:75%;background:#171c20;min-height:2px;transition:height .2s ease}
+.bar.high{background:var(--signal)}
+.bar-label{font-size:10px;color:#77828a;white-space:nowrap;position:absolute;bottom:-19px}
+.chart-foot{display:flex;justify-content:space-between;color:#98a1a7;font-size:9px;margin-top:23px}
+.work-nav{
+  display:flex;align-items:center;justify-content:space-between;gap:18px;
+  border-bottom:1px solid var(--line-strong);min-height:48px;margin-top:1px
+}
+.work-tabs{display:flex;align-items:stretch;gap:23px;min-width:0;overflow:auto;scrollbar-width:none}
+.work-tabs::-webkit-scrollbar{display:none}
+.work-tabs button{
+  position:relative;white-space:nowrap;height:47px;border:0;background:transparent;color:#59646b;
+  padding:0 0;font-size:12px;font-weight:600
+}
+.work-tabs button.active{color:var(--ink)}
+.work-tabs button.active:after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:3px;background:var(--signal)}
+.work-nav-right{display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.text-action{border:0;background:transparent;color:#5f6b72;font-size:11px;padding:6px 2px}
+.text-action:hover{color:var(--signal)}
+.work-area{padding-top:17px;min-width:0}
+.section-head{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:15px}
+.section-title-wrap{display:flex;align-items:baseline;gap:10px;min-width:0}
+.section-title{font-size:15px;font-weight:750;letter-spacing:-.02em}
+.section-count{font-size:11px;color:#7a858c}
+.material-tools{display:flex;align-items:center;gap:9px;min-width:0}
+.search-box{display:flex;align-items:center;gap:7px;height:33px;border:1px solid var(--line);border-radius:3px;padding:0 9px;min-width:225px}
+.search-box input{border:0;outline:0;min-width:0;width:100%;font-size:11px;color:var(--ink)}
+.search-box span{color:#8c969c}
+.filter-tabs{display:flex;align-items:center;gap:13px}
+.filter-tabs button{border:0;background:none;padding:6px 0;color:#7c878e;font-size:11px;white-space:nowrap}
+.filter-tabs button.active{color:var(--ink);font-weight:700;position:relative}
+.filter-tabs button.active:after{content:"";position:absolute;bottom:-4px;left:0;right:0;height:2px;background:var(--signal)}
+.material-list{border-top:1px solid var(--line)}
+.material-row{
+  display:grid;grid-template-columns:70px minmax(0,1fr) 150px;gap:15px;
+  padding:15px 0 14px;border-bottom:1px solid var(--line);min-width:0;align-items:start
+}
+.cover{
+  width:70px;height:92px;overflow:hidden;position:relative;border:1px solid #e2e6e7;
+  background:#e7eee9;display:flex;align-items:center;justify-content:center
+}
+.cover:before{content:"";position:absolute;left:8px;right:8px;top:10px;height:2px;background:rgba(22,35,38,.25)}
+.cover:after{content:"";position:absolute;left:8px;right:8px;bottom:10px;height:1px;background:rgba(22,35,38,.2)}
+.cover .cover-title{position:relative;z-index:1;width:100%;padding:8px 6px;font-size:9px;line-height:1.5;font-weight:800;color:#24332d}
+.cover .cover-kicker{position:absolute;left:7px;top:17px;font-size:6px;letter-spacing:.08em;color:#65786d}
+.cover.cover-2{background:#e8edf4}
+.cover.cover-2 .cover-title{color:#1c3550}
+.cover.cover-3{background:#f1e8d8}
+.cover.cover-3 .cover-title{color:#5b4327}
+.cover.cover-4{background:#eee7eb}
+.cover.cover-4 .cover-title{color:#58384c}
+.cover.cover-5{background:#e6edf0}
+.cover.cover-5 .cover-title{color:#27434d}
+.cover-shape{position:absolute;width:28px;height:28px;border:1px solid currentColor;border-radius:50%;right:-6px;bottom:20px;opacity:.25}
+.material-main{min-width:0}
+.material-title{font-size:14px;line-height:1.5;font-weight:720;color:#1b2023;margin:0 0 5px}
+.material-meta{display:flex;align-items:center;gap:9px;flex-wrap:wrap;color:#78838a;font-size:10px;margin-bottom:8px}
+.material-meta .tag{background:#f0f2f2;color:#66727a;padding:3px 6px;border-radius:2px}
+.material-excerpt{font-size:11.5px;line-height:1.75;color:#4e5960;margin:0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.material-foot{display:flex;align-items:center;gap:13px;margin-top:9px;color:#879198;font-size:10px}
+.material-foot span{white-space:nowrap}
+.material-actions{display:flex;flex-direction:column;align-items:flex-end;justify-content:space-between;gap:8px;min-height:90px;padding-top:2px}
+.action-link{border:0;background:transparent;color:#46525a;font-size:11px;padding:5px 0}
+.action-link:hover{color:var(--signal)}
+.action-button{height:30px;padding:0 10px;border:1px solid #d8dddf;background:#fff;border-radius:3px;color:#333c41;font-size:11px}
+.action-button:hover{border-color:var(--signal);color:var(--signal)}
+.action-button.saved{background:var(--signal-soft);border-color:#f0c9c0;color:var(--signal)}
+.empty-state{padding:42px 20px;text-align:center;color:var(--muted);font-size:12px}
+.panel-table{width:100%;border-collapse:collapse;font-size:12px}
+.panel-table th{text-align:left;color:#78838a;font-weight:600;background:#f7f8f8;padding:10px 12px;border-bottom:1px solid var(--line)}
+.panel-table td{padding:13px 12px;border-bottom:1px solid var(--line);color:#384148}
+.panel-table tr:hover td{background:#fafbfb}
+.table-topic{font-weight:650;color:#252b2f}
+.mini-bar{display:inline-block;height:5px;width:92px;background:#edf0f1;vertical-align:middle;margin-right:8px}
+.mini-bar i{display:block;height:100%;background:#252b2f}
+.pattern-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0 22px}
+.pattern-block{padding:15px 0;border-top:1px solid var(--line)}
+.pattern-block h3{font-size:12px;margin:0 0 12px}
+.pattern-item{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #eef0f1;font-size:11px;color:#4c575e}
+.pattern-item strong{font-variant-numeric:tabular-nums;color:#22292d}
+.source-list{border-top:1px solid var(--line)}
+.source-row{display:grid;grid-template-columns:minmax(180px,1.5fr) 1fr 1fr 110px;align-items:center;gap:18px;padding:13px 10px;border-bottom:1px solid var(--line);font-size:12px}
+.source-name{font-weight:650}
+.source-muted{color:#7c878e;font-size:11px}
+.source-count{font-variant-numeric:tabular-nums}
+.candidate-list{border-top:1px solid var(--line)}
+.candidate-row{display:grid;grid-template-columns:minmax(0,1fr) 90px 110px;gap:15px;align-items:center;padding:14px 10px;border-bottom:1px solid var(--line)}
+.candidate-row strong{font-size:12px}
+.candidate-row p{font-size:11px;color:#758088;margin:5px 0 0}
+.status-text{font-size:10px;color:#8b6b42}
+.journey-toolbar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 0 13px;border-bottom:1px solid var(--line)}
+.journey-switch{display:flex;align-items:center;gap:15px}
+.journey-switch button{border:0;background:none;padding:5px 0;color:#78838a;font-size:11px}
+.journey-switch button.active{color:var(--ink);font-weight:700;border-bottom:2px solid var(--signal)}
+.journey-layout{padding-top:17px}
+.journey-summary{display:flex;align-items:center;justify-content:space-between;gap:15px;margin-bottom:19px}
+.journey-summary strong{font-size:14px}
+.journey-summary span{font-size:11px;color:#7c878e}
+.stage-track{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));position:relative;padding:7px 0 18px;gap:0}
+.stage-track:before{content:"";position:absolute;top:22px;left:9%;right:9%;height:1px;background:#dce1e3}
+.stage{position:relative;text-align:center;min-width:0;padding:0 9px;cursor:pointer}
+.stage-node{
+  width:31px;height:31px;border:1px solid #aeb8bd;background:#fff;border-radius:50%;
+  display:grid;place-items:center;margin:0 auto 11px;position:relative;z-index:1;
+  color:#4d5960;font-size:11px;font-weight:700
+}
+.stage.active .stage-node{background:var(--signal);border-color:var(--signal);color:#fff;box-shadow:0 0 0 4px var(--signal-soft)}
+.stage-name{font-size:12px;font-weight:700;color:#30383d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage-count{font-size:22px;font-weight:760;letter-spacing:-.03em;margin-top:7px;font-variant-numeric:tabular-nums}
+.stage-count small{font-size:10px;color:#7a858c;font-weight:500;letter-spacing:0}
+.stage-question{font-size:10px;color:#7c878e;margin-top:4px;line-height:1.5}
+.scene-head{display:flex;align-items:center;justify-content:space-between;margin:8px 0 12px}
+.scene-head h3{font-size:14px;margin:0}
+.scene-head span{font-size:11px;color:#7c878e}
+.scene-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 22px;border-top:1px solid var(--line)}
+.scene-card{padding:15px 0 14px;border-bottom:1px solid var(--line);min-width:0}
+.scene-title{font-size:12px;font-weight:700;line-height:1.55;margin:0 0 7px}
+.scene-meta{font-size:10px;color:#7e8990;margin-bottom:9px}
+.scene-quote{border-left:2px solid #d9dfe1;padding:1px 0 1px 10px;color:#4e5960;font-size:11px;line-height:1.7;margin:0 0 10px}
+.scene-foot{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.scene-foot span{font-size:10px;color:#89939a}
+.drawer-backdrop{position:fixed;inset:0;background:rgba(15,20,23,.25);z-index:20;display:none}
+.drawer-backdrop.open{display:block}
+.drawer{
+  position:fixed;z-index:21;top:0;right:0;bottom:0;width:min(520px,92vw);background:#fff;
+  box-shadow:var(--shadow);transform:translateX(102%);transition:transform .22s ease;display:flex;flex-direction:column
+}
+.drawer.open{transform:translateX(0)}
+.drawer-head{display:flex;align-items:flex-start;justify-content:space-between;gap:15px;padding:22px 23px 16px;border-bottom:1px solid var(--line)}
+.drawer-kicker{font:700 10px Arial,sans-serif;letter-spacing:.12em;color:#8b959b}
+.drawer-head h2{font-size:17px;line-height:1.45;margin:6px 0 0}
+.drawer-close{width:30px;height:30px;border:1px solid var(--line);background:#fff;border-radius:3px;color:#657078}
+.drawer-body{padding:20px 23px;overflow:auto}
+.drawer-section{margin-bottom:22px}
+.drawer-section h3{font-size:11px;color:#7b858c;margin:0 0 9px}
+.drawer-section p{font-size:13px;line-height:1.85;color:#30393f;margin:0}
+.drawer-quote{font-size:14px;line-height:1.9;border-left:3px solid var(--signal);padding:2px 0 2px 13px;margin:0;color:#2c3439}
+.drawer-meta{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.drawer-meta div{padding:10px 0;border-top:1px solid var(--line)}
+.drawer-meta span{display:block;color:#879198;font-size:10px;margin-bottom:4px}
+.drawer-meta strong{font-size:12px;font-weight:650}
+.toast{
+  position:fixed;bottom:22px;left:50%;transform:translate(-50%,14px);opacity:0;pointer-events:none;
+  background:#1b2024;color:#fff;padding:10px 15px;border-radius:3px;font-size:11px;z-index:30;transition:.2s
+}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+@media(max-width:1250px){
+  :root{--sidebar:270px}
+  .main{padding-left:22px;padding-right:22px}
+  .overview-band{grid-template-columns:minmax(0,1.2fr) minmax(340px,.9fr);gap:15px}
+  .metric{padding-right:9px}
+  .metric+.metric{padding-left:9px}
+  .metric-value{font-size:24px}
+  .work-tabs{gap:16px}
+}
+@media(max-width:980px){
+  :root{--sidebar:235px}
+  .overview-band{grid-template-columns:1fr}
+  .distribution{border-left:0;border-top:1px solid var(--line);padding:14px 0 0}
+  .context-row{align-items:flex-start;flex-direction:column}
+  .context-controls{width:100%;justify-content:space-between}
+  .material-row{grid-template-columns:60px minmax(0,1fr) 110px}
+  .cover{width:60px;height:82px}
+}
+@media(max-width:720px){
+  .shell{grid-template-columns:1fr}
+  .sidebar{position:relative;top:auto;max-height:360px;min-height:0;border-right:0;border-bottom:1px solid var(--line)}
+  .main{padding:0 14px 35px}
+  .topbar{padding:0 14px}
+  .topbar-context{display:none}
+  .metrics{grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}
+  .metric:nth-child(3){border-left:0;padding-left:0}
+  .metric-value{font-size:24px}
+  .context-controls{flex-wrap:wrap}
+  .work-nav{align-items:flex-start;flex-direction:column;gap:0}
+  .work-nav-right{padding:7px 0}
+  .section-head{align-items:flex-start;flex-direction:column}
+  .material-tools{width:100%;flex-wrap:wrap}
+  .search-box{flex:1;min-width:150px}
+  .material-row{grid-template-columns:54px minmax(0,1fr)}
+  .cover{width:54px;height:74px}
+  .material-actions{grid-column:2;flex-direction:row;min-height:0;align-items:center;justify-content:flex-start}
+  .scene-grid{grid-template-columns:1fr}
+  .stage-track{grid-template-columns:1fr;gap:10px;padding-left:0}
+  .stage-track:before{top:14px;bottom:14px;left:15px;right:auto;width:1px;height:auto}
+  .stage{display:grid;grid-template-columns:32px minmax(0,1fr);text-align:left;gap:0 12px;padding:0}
+  .stage-node{grid-row:1 / span 3;margin:0}
+  .stage-name,.stage-count,.stage-question{grid-column:2}
+  .stage-count{margin-top:3px}
+  .stage-question{margin-top:0}
+  .pattern-grid{grid-template-columns:1fr}
+  .source-row{grid-template-columns:1fr 1fr}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-mark">LI</span>
+      <span class="brand-name">主题图谱</span>
+      <button class="domain-select" type="button" id="domainButton">ADHD <span class="chev">▾</span></button>
+    </div>
+    <div class="topbar-right"><span class="topbar-context">领域研究工作区</span></div>
+  </header>
+
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <div class="eyebrow">TOPIC STRUCTURE</div>
+        <div class="sidebar-title-row">
+          <div class="sidebar-title">主题结构</div>
+          <div class="sidebar-sub">23 个主题</div>
+        </div>
+        <div class="tree-search">
+          <span class="search-icon">⌕</span>
+          <input id="treeSearch" type="search" placeholder="查找主题" autocomplete="off">
+          <button class="search-clear" id="clearTreeSearch" type="button" aria-label="清空搜索">×</button>
+        </div>
+      </div>
+
+      <div class="tree-scroll" id="treeScroll">
+        <button class="all-node active" data-topic="全部方向" data-count="3,282">
+          <span class="tree-name">全部方向</span><span class="node-count">3,282</span>
+        </button>
+
+        <div class="tree-section-label"><span>主题目录</span><span>作品数</span></div>
+        <ul class="tree-list" id="treeList">
+          <li class="tree-group" data-search="ADHD新鲜情境优势与后续维持落差 ADHD对新异与熟悉信息的注意力成本差异 ADHD工作安排中启动与运维职责分离">
+            <div class="tree-row parent">
+              <button class="tree-toggle" type="button" aria-label="展开或收起">⌄</button>
+              <button class="tree-name node-select" type="button" data-topic="ADHD新鲜情境优势与后续维持落差" data-count="1">ADHD新鲜情境优势与后续维持落差</button>
+              <span class="node-count">1</span>
+            </div>
+            <ul class="tree-children">
+              <li><button class="tree-child" type="button" data-topic="ADHD对新异与熟悉信息的注意力成本差异" data-count="1"><span class="tree-name">ADHD对新异与熟悉信息的注意力成本差异</span><span class="node-count">1</span></button></li>
+              <li><button class="tree-child" type="button" data-topic="ADHD工作安排中启动与运维职责分离" data-count="1"><span class="tree-name">ADHD工作安排中启动与运维职责分离</span><span class="node-count">1</span></button></li>
+            </ul>
+          </li>
+
+          <li class="tree-group" data-search="A娃养育如何调整普通鸡娃路径 ADHD孩子先运动再作业如何安排 ADHD孩子睡眠优先如何协调作业量 A娃如何用单一兴趣带动学科学习 A娃家庭如何脱离学校评价标准">
+            <div class="tree-row parent">
+              <button class="tree-toggle" type="button" aria-label="展开或收起">⌄</button>
+              <button class="tree-name node-select" type="button" data-topic="A娃养育如何调整普通鸡娃路径" data-count="1">A娃养育如何调整普通鸡娃路径</button>
+              <span class="node-count">1</span>
+            </div>
+            <ul class="tree-children">
+              <li><button class="tree-child" type="button" data-topic="ADHD孩子先运动再作业如何安排" data-count="1"><span class="tree-name">ADHD孩子先运动再作业如何安排</span><span class="node-count">1</span></button></li>
+              <li><button class="tree-child" type="button" data-topic="ADHD孩子睡眠优先如何协调作业量" data-count="1"><span class="tree-name">ADHD孩子睡眠优先如何协调作业量</span><span class="node-count">1</span></button></li>
+              <li><button class="tree-child" type="button" data-topic="A娃如何用单一兴趣带动学科学习" data-count="1"><span class="tree-name">A娃如何用单一兴趣带动学科学习</span><span class="node-count">1</span></button></li>
+              <li><button class="tree-child" type="button" data-topic="A娃家庭如何脱离学校评价标准" data-count="1"><span class="tree-name">A娃家庭如何脱离学校评价标准</span><span class="node-count">1</span></button></li>
+            </ul>
+          </li>
+
+          <li class="tree-group" data-search="儿童行为与情绪问题的可落地干预方法 ADHD儿童冲突中用言语回击替代动手">
+            <div class="tree-row parent">
+              <button class="tree-toggle" type="button" aria-label="展开或收起">⌄</button>
+              <button class="tree-name node-select" type="button" data-topic="儿童行为与情绪问题的可落地干预方法" data-count="2">儿童行为与情绪问题的可落地干预方法</button>
+              <span class="node-count">2</span>
+            </div>
+            <ul class="tree-children">
+              <li><button class="tree-child" type="button" data-topic="ADHD儿童冲突中用言语回击替代动手" data-count="1"><span class="tree-name">ADHD儿童冲突中用言语回击替代动手</span><span class="node-count">1</span></button></li>
+            </ul>
+          </li>
+
+          <li class="tree-group" data-search="儿童行为问题的成因与需求分析 ADHD对立违抗背后的恐惧与情绪成因">
+            <div class="tree-row parent">
+              <button class="tree-toggle" type="button" aria-label="展开或收起">⌄</button>
+              <button class="tree-name node-select" type="button" data-topic="儿童行为问题的成因与需求分析" data-count="2">儿童行为问题的成因与需求分析</button>
+              <span class="node-count">2</span>
+            </div>
+            <ul class="tree-children">
+              <li><button class="tree-child" type="button" data-topic="ADHD对立违抗背后的恐惧与情绪成因" data-count="1"><span class="tree-name">ADHD对立违抗背后的恐惧与情绪成因</span><span class="node-count">1</span></button></li>
+            </ul>
+          </li>
+
+          <li class="tree-section-label"><span>独立主题</span><span></span></li>
+          <li class="tree-group" data-search="15岁前大脑可塑性与ADHD干预信心">
+            <div class="tree-row"><button class="tree-toggle spacer" type="button">·</button><button class="tree-name node-select" type="button" data-topic="15岁前大脑可塑性与ADHD干预信心" data-count="1">15岁前大脑可塑性与ADHD干预信心</button><span class="node-count">1</span></div>
+          </li>
+          <li class="tree-group" data-search="ADHD与读写障碍的多重天赋后遗症解释">
+            <div class="tree-row"><button class="tree-toggle spacer" type="button">·</button><button class="tree-name node-select" type="button" data-topic="ADHD与读写障碍的“多重天赋后遗症”解释" data-count="1">ADHD与读写障碍的“多重天赋后遗症”解释</button><span class="node-count">1</span></div>
+          </li>
+          <li class="tree-group" data-search="ADHD与销售等即时反馈工作的适配">
+            <div class="tree-row"><button class="tree-toggle spacer" type="button">·</button><button class="tree-name node-select" type="button" data-topic="ADHD与销售等即时反馈工作的适配" data-count="1">ADHD与销售等即时反馈工作的适配</button><span class="node-count">1</span></div>
+          </li>
+          <li class="tree-group" data-search="ADHD代偿在生育后失效与成人就医标签困境">
+            <div class="tree-row"><button class="tree-toggle spacer" type="button">·</button><button class="tree-name node-select" type="button" data-topic="ADHD代偿在生育后失效与成人就医标签困境" data-count="1">ADHD代偿在生育后失效与成人就医标签困境</button><span class="node-count">1</span></div>
+          </li>
+          <li class="tree-group" data-search="ADHD孩子识字记字困难与家长陪学痛苦">
+            <div class="tree-row"><button class="tree-toggle spacer" type="button">·</button><button class="tree-name node-select" type="button" data-topic="ADHD孩子识字记字困难与家长陪学痛苦" data-count="1">ADHD孩子识字记字困难与家长陪学痛苦</button><span class="node-count">1</span></div>
+          </li>
+          <li class="tree-group" data-search="孩子上课注意力不集中发呆的家长求助">
+            <div class="tree-row"><button class="tree-toggle spacer" type="button">·</button><button class="tree-name node-select" type="button" data-topic="孩子上课注意力不集中、发呆的家长求助" data-count="1">孩子上课注意力不集中、发呆的家长求助</button><span class="node-count">1</span></div>
+          </li>
+          <li class="tree-group" data-search="孩子写作业坐不住与家长无奈">
+            <div class="tree-row"><button class="tree-toggle spacer" type="button">·</button><button class="tree-name node-select" type="button" data-topic="孩子写作业坐不住与家长无奈" data-count="1">孩子写作业坐不住与家长无奈</button><span class="node-count">1</span></div>
+          </li>
+          <li class="tree-group" data-search="儿童阅读与书写障碍训练资料的适配选择">
+            <div class="tree-row"><button class="tree-toggle spacer" type="button">·</button><button class="tree-name node-select" type="button" data-topic="儿童阅读与书写障碍训练资料的适配选择" data-count="1">儿童阅读与书写障碍训练资料的适配选择</button><span class="node-count">1</span></div>
+          </li>
+        </ul>
+      </div>
+      <div class="tree-bottom">
+        <button class="unassigned" id="unassignedButton" type="button"><span>尚未归类材料</span><strong>3,242</strong></button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="context-row">
+        <div class="context-left">
+          <div class="page-title" id="currentTitle">全部方向</div>
+          <div class="page-meta" id="currentMeta">ADHD · 3,282 篇观察材料 · 更新于 11/26 17:44</div>
+        </div>
+        <div class="context-controls">
+          <label class="select-control">平台
+            <select id="platformFilter"><option>全部平台</option><option>小红书</option><option>抖音</option></select>
+          </label>
+          <label class="select-control">时间
+            <select id="timeFilter"><option>全部时间</option><option>近7天</option><option>近30天</option><option>近90天</option></select>
+          </label>
+          <div class="view-switch" role="tablist" aria-label="页面视图">
+            <button class="active" type="button" data-page-view="overview">主题概览</button>
+            <button type="button" data-page-view="journey">用户生命旅程</button>
+          </div>
+        </div>
+      </div>
+
+      <section class="overview-band" aria-label="主题统计">
+        <div class="metrics">
+          <div class="metric">
+            <div class="metric-label"><span class="glyph">▤</span>观察到的内容</div>
+            <div class="metric-value" id="metricWorks">3,282<small>篇</small></div>
+            <div class="metric-detail">可读 <strong>3,267</strong></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label"><span class="glyph">♙</span>已观察创作者</div>
+            <div class="metric-value">1,521<small>位</small></div>
+            <div class="metric-detail">身份未知 <strong>149</strong> 篇</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label"><span class="glyph">✧</span>样本高表现率</div>
+            <div class="metric-value">34.6%</div>
+            <div class="metric-detail">达标 <strong>1,122</strong> · 可判定 <strong>3,243</strong></div>
+          </div>
+          <div class="metric">
+            <div class="metric-label"><span class="glyph">⌁</span>点赞中位数</div>
+            <div class="metric-value">37</div>
+            <div class="metric-detail">P90 <strong>921.4</strong> · 未知 <strong>39</strong> 篇</div>
+          </div>
+        </div>
+        <div class="distribution">
+          <div class="distribution-head">
+            <div class="distribution-title">样本表现 <span class="distribution-sub">/ 小红书点赞分布</span></div>
+            <div class="chart-mode"><button class="active" type="button" data-chart="bars">分布图</button><button type="button" data-chart="table">表格</button></div>
+          </div>
+          <div class="chart-bars" id="chartBars">
+            <button class="bar-item" type="button" title="查看 0–20 赞作品"><span class="bar-value">1,320</span><span class="bar" style="height:54px"></span><span class="bar-label">0–20</span></button>
+            <button class="bar-item" type="button" title="查看 21–99 赞作品"><span class="bar-value">801</span><span class="bar" style="height:34px"></span><span class="bar-label">21–99</span></button>
+            <button class="bar-item" type="button" title="查看 100–499 赞作品"><span class="bar-value">651</span><span class="bar high" style="height:28px"></span><span class="bar-label">100–499</span></button>
+            <button class="bar-item" type="button" title="查看 500–999 赞作品"><span class="bar-value">168</span><span class="bar high" style="height:8px"></span><span class="bar-label">500–999</span></button>
+            <button class="bar-item" type="button" title="查看 1千–5千 赞作品"><span class="bar-value">209</span><span class="bar high" style="height:10px"></span><span class="bar-label">1千–5千</span></button>
+            <button class="bar-item" type="button" title="查看 ≥5千 赞作品"><span class="bar-value">94</span><span class="bar high" style="height:5px"></span><span class="bar-label">≥5千</span></button>
+          </div>
+          <div class="chart-foot"><span>当前样本</span><span>橙红：达到已设高表现规则</span></div>
+        </div>
+      </section>
+
+      <nav class="work-nav" aria-label="主题分析视图">
+        <div class="work-tabs" id="workTabs">
+          <button type="button" class="active" data-tab="materials">材料与讨论</button>
+          <button type="button" data-tab="structure">结构与表现</button>
+          <button type="button" data-tab="patterns">内容格局</button>
+          <button type="button" data-tab="sources">来源分布</button>
+          <button type="button" data-tab="candidates">新方向</button>
+          <button type="button" data-tab="own">我方对照与再做</button>
+        </div>
+        <div class="work-nav-right"><button class="text-action" id="matrixButton" type="button">主题 × 旅程 ↗</button></div>
+      </nav>
+
+      <section class="work-area" id="overviewPanel">
+        <div class="section-head">
+          <div class="section-title-wrap">
+            <div class="section-title" id="sectionTitle">材料与讨论</div>
+            <div class="section-count" id="sectionCount">3,282 篇当前材料</div>
+          </div>
+          <div class="material-tools" id="materialTools">
+            <label class="search-box"><span>⌕</span><input id="materialSearch" type="search" placeholder="查找材料与方向"></label>
+            <div class="filter-tabs" id="materialFilters">
+              <button class="active" type="button" data-material-filter="latest">最新作品</button>
+              <button type="button" data-material-filter="high">高表现</button>
+              <button type="button" data-material-filter="ordinary">常规作品</button>
+            </div>
+          </div>
+        </div>
+        <div id="tabContent"></div>
+      </section>
+
+      <section class="work-area journey-layout" id="journeyPanel" hidden>
+        <div class="journey-toolbar">
+          <div class="journey-switch">
+            <button class="active" type="button" data-journey-metric="main">主阶段分布</button>
+            <button type="button" data-journey-metric="involved">阶段涉及率</button>
+          </div>
+          <div class="journey-switch">
+            <button class="active" type="button" data-journey-display="map">地图</button>
+            <button type="button" data-journey-display="list">列表</button>
+          </div>
+        </div>
+        <div class="journey-summary">
+          <strong>用户经历的五个主要阶段</strong>
+          <span>3,267 篇可读作品 · 点击阶段查看具体场景</span>
+        </div>
+        <div class="stage-track" id="stageTrack">
+          <div class="stage active" data-stage="发现与理解">
+            <div class="stage-node">01</div><div class="stage-name">发现与理解</div><div class="stage-count">6 <small>篇 · 0.2%</small></div><div class="stage-question">发生了什么？怎样理解？</div>
+          </div>
+          <div class="stage" data-stage="求助与评估">
+            <div class="stage-node">02</div><div class="stage-name">求助与评估</div><div class="stage-count">2 <small>篇 · 0.1%</small></div><div class="stage-question">何时求助？如何评估？</div>
+          </div>
+          <div class="stage" data-stage="选择支持">
+            <div class="stage-node">03</div><div class="stage-name">选择支持</div><div class="stage-count">2 <small>篇 · 0.1%</small></div><div class="stage-question">哪些支持适合当前处境？</div>
+          </div>
+          <div class="stage" data-stage="开始实践">
+            <div class="stage-node">04</div><div class="stage-name">开始实践</div><div class="stage-count">5 <small>篇 · 0.2%</small></div><div class="stage-question">先试什么？怎样开始？</div>
+          </div>
+          <div class="stage" data-stage="长期管理">
+            <div class="stage-node">05</div><div class="stage-name">长期管理</div><div class="stage-count">13 <small>篇 · 0.4%</small></div><div class="stage-question">如何调整并持续支持？</div>
+          </div>
+        </div>
+        <div class="scene-head"><h3 id="sceneHeading">发现与理解 · 具体场景</h3><span>127 个场景</span></div>
+        <div class="scene-grid" id="sceneGrid"></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<div class="drawer-backdrop" id="drawerBackdrop"></div>
+<aside class="drawer" id="detailDrawer" aria-label="材料详情">
+  <div class="drawer-head">
+    <div><div class="drawer-kicker">EVIDENCE / SOURCE</div><h2 id="drawerTitle">材料详情</h2></div>
+    <button class="drawer-close" id="drawerClose" type="button" aria-label="关闭">×</button>
+  </div>
+  <div class="drawer-body" id="drawerBody"></div>
+</aside>
+<div class="toast" id="toast"></div>
+
+<script>
+const materialData = [
+  {
+    title:"时间可视化，看看谁是偷走你手机时间的top1",
+    author:"自律鸭鸭",date:"2026/11/25",type:"待归方向",likes:2,saves:0,comments:0,shares:0,filter:"latest",cover:"cover-1",
+    excerpt:"每天明明只刷了一会手机，怎么看时间已经过去了三个小时！时间都去哪儿了，看不见也没感觉啊！抓狂，那就来看看鸭鸭帮你记录的手机使用时间吧。",
+    quote:"每天明明只刷了一会手机，怎么看时间已经过去了三个小时！时间都去哪儿了，看不见也没感觉啊！",
+    source:"小红书"
+  },
+  {
+    title:"出门前总找钥匙？从今晚改",
+    author:"长皮虾",date:"2026/11/25",type:"待归方向",likes:null,saves:null,comments:null,shares:null,filter:"latest",cover:"cover-2",
+    excerpt:"马上就走，有时候只是还没开始找钥匙。包在沙发上，工牌在另一件外套口袋里，伞等到拉开门才想起来。",
+    quote:"三个来回之后，电梯已经走了两趟。把指南里的晨间练习压成了今晚就能做的一件事。",
+    source:"小红书"
+  },
+  {
+    title:"家长在教导受挫后，如何重新安排日常练习",
+    author:"ADHD有多难",date:"2026/11/24",type:"家庭训练",likes:128,saves:36,comments:12,shares:5,filter:"high",cover:"cover-3",
+    excerpt:"每天都想把事情做好，但孩子和家长都容易在反复提醒中疲惫。先把练习拆小，再决定什么时候继续。",
+    quote:"情绪还是会忍不住暴躁起来。后来我发现，先停下来比继续讲道理更有用。",
+    source:"小红书"
+  },
+  {
+    title:"孩子先运动再写作业，家里的一次调整",
+    author:"真正高端的A娃养育",date:"2026/11/23",type:"家庭训练",likes:56,saves:18,comments:7,shares:2,filter:"ordinary",cover:"cover-4",
+    excerpt:"放学后先运动一会儿，再回来写作业。不是每次都顺利，但家里的冲突少了一些。",
+    quote:"我家大盛每天放学以后，先运动30分钟，再回来写作业。",
+    source:"小红书"
+  },
+  {
+    title:"三年级孩子在家庭语文学习中的识字困境",
+    author:"读写障碍慢慢变好后",date:"2026/11/22",type:"学习场景",likes:305,saves:77,comments:21,shares:8,filter:"high",cover:"cover-5",
+    excerpt:"孩子能说出意思，却常常写不出来。每天只安排少量生字，先让他真正理解字形和意思。",
+    quote:"每天只吃透3个生字。慢一点，孩子反而愿意继续。",
+    source:"小红书"
+  }
+];
+
+const scenesByStage = {
+  "发现与理解":[
+    ["面向英区 ADHD 同伴的线上学习招募","1 篇独立来源作品 · 1 条定位依据","寻英区 ADHD 一起线上学习","一位家长在寻找可以共同学习、相互陪伴的同伴。"],
+    ["独自学习难以坚持，朋友只玩乐的日常处境","1 篇独立来源作品 · 2 条定位依据","我自己学不下去","想找一个能一起学习的人，却很难在身边找到。"],
+    ["三年级 ADHD 孩子在家庭语文学习中的识字困境","1 篇独立来源作品 · 2 条定位依据","注意力缺陷型 ADHD 多动症，三年级了","家长开始把孩子的学习困难落实到具体的识字场景。"],
+    ["七岁小一孩子口头答得出，书写仍做不到","1 篇独立来源作品 · 2 条定位依据","已经七岁，上小一的他仍然做不到","口头表达和书面表达之间出现明显落差。"]
+  ],
+  "求助与评估":[
+    ["家长寻找读写困难的专业评估路径","1 篇独立来源作品 · 2 条定位依据","到底要不要做一次专业评估？","家长希望知道下一步应该找谁、看什么。"],
+    ["复查改善后仍然不知道如何判断","1 篇独立来源作品 · 1 条定位依据","复查结果比之前好，但还是很纠结","已有检查结果，但缺少理解和比较依据。"]
+  ],
+  "选择支持":[
+    ["在家用 Phonics 教三个单词，孩子仍难以独立写出","1 篇独立来源作品 · 3 条定位依据","今天用 Phonics 教他拼读，只安排三个单词","家长在比较不同学习方法是否适合孩子。"],
+    ["家长寻找适合孩子的训练资料","1 篇独立来源作品 · 2 条定位依据","有没有更适合他的训练材料？","选择支持方式时，需要考虑孩子真实的学习表现。"]
+  ],
+  "开始实践":[
+    ["放学后先运动再写作业","1 篇独立来源作品 · 1 条定位依据","我家大盛每天放学以后，先运动30分钟","家庭开始尝试调整日常任务顺序。"],
+    ["每天只安排三个生字的识字练习","1 篇独立来源作品 · 2 条定位依据","每天只吃透3个生字","把练习拆成孩子能够完成的小任务。"]
+  ],
+  "长期管理":[
+    ["家长在教导受挫后重新调整目标","1 篇独立来源作品 · 3 条定位依据","情绪还是会忍不住暴躁起来","家庭在反复实践中调整目标和节奏。"],
+    ["长期记录孩子的睡眠与学习状态","1 篇独立来源作品 · 2 条定位依据","最近开始记录每天的状态","家长持续观察变化，再调整家庭安排。"]
+  ]
+};
+
+let currentTab = "materials";
+let currentPageView = "overview";
+let currentMaterialFilter = "latest";
+let currentStage = "发现与理解";
+let currentJourneyMetric = "main";
+let currentJourneyDisplay = "map";
+let selectedTopic = "全部方向";
+const tabLabels = {
+  materials:"材料与讨论",structure:"结构与表现",patterns:"内容格局",
+  sources:"来源分布",candidates:"新方向",own:"我方对照与再做"
+};
+
+function showToast(message){
+  const toast=document.getElementById("toast");
+  toast.textContent=message;toast.classList.add("show");
+  clearTimeout(showToast.timer);showToast.timer=setTimeout(()=>toast.classList.remove("show"),1900);
+}
+function openDrawer(title, quote, detail, meta){
+  document.getElementById("drawerTitle").textContent=title;
+  document.getElementById("drawerBody").innerHTML=`
+    <section class="drawer-section"><h3>原文片段</h3><blockquote class="drawer-quote">${quote}</blockquote></section>
+    <section class="drawer-section"><h3>内容摘要</h3><p>${detail}</p></section>
+    <section class="drawer-section"><h3>材料信息</h3><div class="drawer-meta">
+      <div><span>来源平台</span><strong>${meta?.source||"小红书"}</strong></div>
+      <div><span>发布时间</span><strong>${meta?.date||"2026/11/25"}</strong></div>
+      <div><span>作者</span><strong>${meta?.author||"作者未知"}</strong></div>
+      <div><span>材料状态</span><strong>可阅读</strong></div>
+    </div></section>
+    <section class="drawer-section"><h3>关联操作</h3><button class="action-button" type="button" onclick="showToast('已定位到原始材料')">定位原始材料</button></section>`;
+  document.getElementById("detailDrawer").classList.add("open");
+  document.getElementById("drawerBackdrop").classList.add("open");
+}
+function closeDrawer(){
+  document.getElementById("detailDrawer").classList.remove("open");
+  document.getElementById("drawerBackdrop").classList.remove("open");
+}
+document.getElementById("drawerClose").addEventListener("click",closeDrawer);
+document.getElementById("drawerBackdrop").addEventListener("click",closeDrawer);
+
+function renderMaterials(){
+  const query=(document.getElementById("materialSearch").value||"").trim().toLowerCase();
+  let rows=materialData.filter(item=>{
+    const matchesFilter=currentMaterialFilter==="latest" ? true : item.filter===currentMaterialFilter;
+    const matchesQuery=!query || (item.title+item.author+item.excerpt).toLowerCase().includes(query);
+    return matchesFilter&&matchesQuery;
+  });
+  document.getElementById("sectionTitle").textContent="材料与讨论";
+  document.getElementById("sectionCount").textContent=selectedTopic==="全部方向"?"3,282 篇当前材料":"当前主题相关材料";
+  document.getElementById("materialTools").hidden=false;
+  document.getElementById("tabContent").innerHTML=rows.length?`
+    <div class="material-list">
+      ${rows.map((item,index)=>`
+        <article class="material-row">
+          <div class="cover ${item.cover}"><span class="cover-kicker">FIELD NOTE / ${String(index+1).padStart(2,"0")}</span><span class="cover-title">${item.title.slice(0,14)}</span><i class="cover-shape"></i></div>
+          <div class="material-main">
+            <h3 class="material-title">${item.title}</h3>
+            <div class="material-meta"><span>${item.source}</span><span>${item.author}</span><span>${item.date}</span><span class="tag">${item.type}</span></div>
+            <p class="material-excerpt">${item.excerpt}</p>
+            <div class="material-foot"><span>赞 ${item.likes??"—"}</span><span>藏 ${item.saves??"—"}</span><span>评 ${item.comments??"—"}</span><span>分享 ${item.shares??"—"}</span></div>
+          </div>
+          <div class="material-actions">
+            <button class="action-link" type="button" data-open-material="${index}">阅读原文与讨论 ↗</button>
+            <button class="action-button" type="button" data-save-material="${index}">人工保留备选</button>
+          </div>
+        </article>`).join("")}
+    </div>`:`<div class="empty-state">没有找到匹配的材料</div>`;
+  document.querySelectorAll("[data-open-material]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      const item=rows[Number(btn.dataset.openMaterial)];
+      openDrawer(item.title,item.quote,item.excerpt,item);
+    });
+  });
+  document.querySelectorAll("[data-save-material]").forEach(btn=>{
+    btn.addEventListener("click",()=>{
+      btn.classList.toggle("saved");
+      btn.textContent=btn.classList.contains("saved")?"已保留":"人工保留备选";
+      showToast(btn.classList.contains("saved")?"已保留这条材料":"已取消保留");
+    });
+  });
+}
+function renderStructure(){
+  document.getElementById("sectionTitle").textContent="主题供给分布";
+  document.getElementById("sectionCount").textContent="按当前主题查看子主题";
+  document.getElementById("materialTools").hidden=true;
+  const rows=[
+    ["ADHD孩子先运动再作业如何安排",1,1,"—"],
+    ["ADHD孩子睡眠优先如何协调作业量",1,1,"—"],
+    ["A娃如何用单一兴趣带动学科学习",1,1,"—"],
+    ["A娃家庭如何脱离学校评价标准",1,1,"—"],
+    ["ADHD孩子识字记字困难与家长陪学痛苦",1,1,"—"]
+  ];
+  document.getElementById("tabContent").innerHTML=`
+    <table class="panel-table"><thead><tr><th>子主题</th><th>内容供给</th><th>样本爆款率</th><th>创作者</th><th>操作</th></tr></thead>
+    <tbody>${rows.map(r=>`<tr><td class="table-topic">${r[0]}</td><td><span class="mini-bar"><i style="width:${r[1]*28}px"></i></span>${r[1]} 篇</td><td>${r[3]}</td><td>${r[2]}</td><td><button class="action-link" type="button" data-structure-topic="${r[0]}">查看材料 ↗</button></td></tr>`).join("")}</tbody></table>`;
+  document.querySelectorAll("[data-structure-topic]").forEach(b=>b.addEventListener("click",()=>selectTopic(b.dataset.structureTopic)));
+}
+function renderPatterns(){
+  document.getElementById("sectionTitle").textContent="内容格局";
+  document.getElementById("sectionCount").textContent="内容类型 · 表达方式 · 回答形式";
+  document.getElementById("materialTools").hidden=true;
+  const groups=[
+    ["内容类型",[["方法指南",32],["个人故事",26],["解释说明",18],["清单",12],["案例分析",9]]],
+    ["表达方式",[["亲身经历",41],["观点表达",27],["经验分享",19],["问题提问",13]]],
+    ["回答形式",[["具体步骤",35],["经验建议",28],["原因解释",21],["互动讨论",16]]]
+  ];
+  document.getElementById("tabContent").innerHTML=`<div class="pattern-grid">${groups.map(g=>`<section class="pattern-block"><h3>${g[0]}</h3>${g[1].map(v=>`<div class="pattern-item"><span>${v[0]}</span><strong>${v[1]}</strong></div>`).join("")}</section>`).join("")}</div>`;
+}
+function renderSources(){
+  document.getElementById("sectionTitle").textContent="来源分布";
+  document.getElementById("sectionCount").textContent="已观察创作者 · 按作品数排序";
+  document.getElementById("materialTools").hidden=true;
+  const names=[["ADHD有多难","家庭养育",28,"3.8%"],["真正高端的A娃养育","家庭训练",22,"3.1%"],["读写障碍慢慢变好后","学习场景",16,"2.4%"],["自律鸭鸭","日常管理",12,"1.8%"],["长皮虾","生活经验",9,"1.2%"]];
+  document.getElementById("tabContent").innerHTML=`<div class="source-list">${names.map(n=>`<div class="source-row"><div class="source-name">${n[0]}</div><div class="source-muted">${n[1]}</div><div class="source-count">${n[2]} 篇作品</div><div class="source-muted">${n[3]}</div></div>`).join("")}</div>`;
+}
+function renderCandidates(){
+  document.getElementById("sectionTitle").textContent="新方向";
+  document.getElementById("sectionCount").textContent="近期出现的候选方向";
+  document.getElementById("materialTools").hidden=true;
+  const names=[
+    ["ADHD与读写障碍的“多重天赋后遗症”解释","1 篇来源作品","待核对"],
+    ["ADHD与销售等即时反馈工作的适配","1 篇来源作品","待核对"],
+    ["ADHD代偿在生育后失效与成人就医标签困境","1 篇来源作品","待核对"],
+    ["ADHD儿童单独设校与普通课堂包容之争","1 篇来源作品","待核对"],
+    ["ADHD儿童发育期看书成瘾与信息索取","1 篇来源作品","待核对"]
+  ];
+  document.getElementById("tabContent").innerHTML=`<div class="candidate-list">${names.map(n=>`<div class="candidate-row"><div><strong>${n[0]}</strong><p>${n[1]}</p></div><span class="status-text">${n[2]}</span><button class="action-button" type="button" onclick="showToast('已打开主题详情')">查看方向</button></div>`).join("")}</div>`;
+}
+function renderOwn(){
+  document.getElementById("sectionTitle").textContent="我方对照与再做";
+  document.getElementById("sectionCount").textContent="我方发布历史与外部参考";
+  document.getElementById("materialTools").hidden=true;
+  document.getElementById("tabContent").innerHTML=`
+    <div style="padding:26px 0;border-top:1px solid var(--line);max-width:760px">
+      <div style="font-size:15px;font-weight:700;margin-bottom:8px">我方账号范围尚未关联</div>
+      <div style="font-size:12px;color:#78838a;line-height:1.8">关联已确认的我方账号后，可以对照已发布内容、外部参考和主题覆盖。</div>
+      <button class="action-button" style="margin-top:16px" type="button" onclick="showToast('此处连接我方账号设置')">设置我方矩阵</button>
+    </div>`;
+}
+function renderTab(){
+  if(currentTab==="materials")renderMaterials();
+  else if(currentTab==="structure")renderStructure();
+  else if(currentTab==="patterns")renderPatterns();
+  else if(currentTab==="sources")renderSources();
+  else if(currentTab==="candidates")renderCandidates();
+  else renderOwn();
+}
+document.querySelectorAll("[data-tab]").forEach(btn=>btn.addEventListener("click",()=>{
+  currentTab=btn.dataset.tab;
+  document.querySelectorAll("[data-tab]").forEach(b=>b.classList.toggle("active",b===btn));
+  renderTab();
+}));
+document.getElementById("materialSearch").addEventListener("input",renderMaterials);
+document.querySelectorAll("[data-material-filter]").forEach(btn=>btn.addEventListener("click",()=>{
+  currentMaterialFilter=btn.dataset.materialFilter;
+  document.querySelectorAll("[data-material-filter]").forEach(b=>b.classList.toggle("active",b===btn));
+  renderMaterials();
+}));
+function selectTopic(topic){
+  selectedTopic=topic;
+  document.getElementById("currentTitle").textContent=topic;
+  document.getElementById("currentMeta").textContent=topic==="全部方向"?"ADHD · 3,282 篇观察材料 · 更新于 11/26 17:44":"ADHD · 当前主题材料与表现";
+  document.querySelectorAll(".all-node,.tree-row,.tree-child").forEach(el=>el.classList.remove("active"));
+  const target=[...document.querySelectorAll("[data-topic]")].find(el=>el.dataset.topic===topic);
+  if(target){
+    const activeRow=target.closest(".tree-row")||target;
+    activeRow.classList.add("active");
+  }
+  renderTab();
+}
+document.querySelectorAll(".node-select,.tree-child,.all-node").forEach(btn=>btn.addEventListener("click",()=>selectTopic(btn.dataset.topic)));
+document.querySelectorAll(".tree-toggle").forEach(btn=>btn.addEventListener("click",()=>{
+  const group=btn.closest(".tree-group");
+  const children=group?.querySelector(".tree-children");
+  if(!children)return;
+  const collapsed=children.hidden;
+  children.hidden=!collapsed;
+  btn.textContent=collapsed?"⌄":"›";
+}));
+document.getElementById("treeSearch").addEventListener("input",e=>{
+  const q=e.target.value.trim().toLowerCase();
+  document.querySelectorAll(".tree-group").forEach(group=>{
+    group.hidden=!!q&&!group.dataset.search.toLowerCase().includes(q);
+    if(q){const children=group.querySelector(".tree-children");if(children)children.hidden=false;}
+  });
+});
+document.getElementById("clearTreeSearch").addEventListener("click",()=>{
+  document.getElementById("treeSearch").value="";
+  document.querySelectorAll(".tree-group").forEach(g=>g.hidden=false);
+});
+document.getElementById("unassignedButton").addEventListener("click",()=>{
+  selectTopic("尚未归类材料");
+  showToast("已定位尚未归类材料");
+});
+document.getElementById("domainButton").addEventListener("click",()=>showToast("领域选择：ADHD"));
+document.getElementById("matrixButton").addEventListener("click",()=>showToast("打开主题 × 旅程矩阵"));
+
+document.querySelectorAll("[data-page-view]").forEach(btn=>btn.addEventListener("click",()=>{
+  currentPageView=btn.dataset.pageView;
+  document.querySelectorAll("[data-page-view]").forEach(b=>b.classList.toggle("active",b===btn));
+  document.getElementById("overviewPanel").hidden=currentPageView!=="overview";
+  document.getElementById("journeyPanel").hidden=currentPageView!=="journey";
+}));
+document.querySelectorAll("[data-stage]").forEach(stage=>stage.addEventListener("click",()=>{
+  currentStage=stage.dataset.stage;
+  document.querySelectorAll("[data-stage]").forEach(s=>s.classList.toggle("active",s===stage));
+  renderScenes();
+}));
+document.querySelectorAll("[data-journey-metric]").forEach(btn=>btn.addEventListener("click",()=>{
+  currentJourneyMetric=btn.dataset.journeyMetric;
+  document.querySelectorAll("[data-journey-metric]").forEach(b=>b.classList.toggle("active",b===btn));
+  showToast(currentJourneyMetric==="main"?"已切换主阶段分布":"已切换阶段涉及率");
+}));
+document.querySelectorAll("[data-journey-display]").forEach(btn=>btn.addEventListener("click",()=>{
+  currentJourneyDisplay=btn.dataset.journeyDisplay;
+  document.querySelectorAll("[data-journey-display]").forEach(b=>b.classList.toggle("active",b===btn));
+  document.getElementById("stageTrack").style.opacity=currentJourneyDisplay==="map"?"1":".88";
+  showToast(currentJourneyDisplay==="map"?"地图视图":"列表视图");
+}));
+function renderScenes(){
+  const rows=scenesByStage[currentStage]||[];
+  document.getElementById("sceneHeading").textContent=currentStage+" · 具体场景";
+  document.getElementById("sceneGrid").innerHTML=rows.map((row,i)=>`
+    <article class="scene-card">
+      <h4 class="scene-title">${row[0]}</h4>
+      <div class="scene-meta">${row[1]}</div>
+      <blockquote class="scene-quote">${row[2]}</blockquote>
+      <div class="scene-foot"><span>${row[3]}</span><button class="action-link" type="button" data-scene="${i}">阅读来源与上下文 ↗</button></div>
+    </article>`).join("");
+  document.querySelectorAll("[data-scene]").forEach(btn=>btn.addEventListener("click",()=>{
+    const row=rows[Number(btn.dataset.scene)];
+    openDrawer(row[0],row[2],row[3],{source:"小红书",author:"来源作者"});
+  }));
+}
+document.querySelectorAll("[data-chart]").forEach(btn=>btn.addEventListener("click",()=>{
+  document.querySelectorAll("[data-chart]").forEach(b=>b.classList.toggle("active",b===btn));
+  if(btn.dataset.chart==="table"){
+    document.getElementById("chartBars").innerHTML=`<div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(6,1fr);gap:8px;align-items:center;font-size:10px;color:#5d6870">${[["0–20","1,320"],["21–99","801"],["100–499","651"],["500–999","168"],["1千–5千","209"],["≥5千","94"]].map(v=>`<div style="text-align:center"><strong style="display:block;color:#202629;margin-bottom:6px">${v[1]}</strong>${v[0]}</div>`).join("")}</div>`;
+  }else{
+    document.getElementById("chartBars").innerHTML=`
+      <button class="bar-item" type="button"><span class="bar-value">1,320</span><span class="bar" style="height:54px"></span><span class="bar-label">0–20</span></button>
+      <button class="bar-item" type="button"><span class="bar-value">801</span><span class="bar" style="height:34px"></span><span class="bar-label">21–99</span></button>
+      <button class="bar-item" type="button"><span class="bar-value">651</span><span class="bar high" style="height:28px"></span><span class="bar-label">100–499</span></button>
+      <button class="bar-item" type="button"><span class="bar-value">168</span><span class="bar high" style="height:8px"></span><span class="bar-label">500–999</span></button>
+      <button class="bar-item" type="button"><span class="bar-value">209</span><span class="bar high" style="height:10px"></span><span class="bar-label">1千–5千</span></button>
+      <button class="bar-item" type="button"><span class="bar-value">94</span><span class="bar high" style="height:5px"></span><span class="bar-label">≥5千</span></button>`;
+  }
+}));
+document.getElementById("platformFilter").addEventListener("change",e=>showToast("平台范围："+e.target.value));
+document.getElementById("timeFilter").addEventListener("change",e=>showToast("发布时间："+e.target.value));
+renderTab();
+renderScenes();
+</script>
+</body>
+</html>

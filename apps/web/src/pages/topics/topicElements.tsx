@@ -41,13 +41,16 @@ export const tab = (
     `lgi-tm-tab ${selected ? "is-active" : ""}`,
     `aria-pressed="${selected}"`,
   );
-export const badge = (text: unknown, signal = false) => (
-  <>
-    <span className={cls("lgi-tm-badge " + String(signal ? "is-signal" : ""))}>
-      {esc(text)}
-    </span>
-  </>
-);
+/** LIDS badge (Mog 2026-11-27): coloured text + a leading square, no fill, no frame. `true` keeps the old signal call sites. */
+export type BadgeTone = "category" | "signal" | "unknown" | "warning" | "success" | "danger" | "info";
+export const badge = (text: unknown, tone: boolean | BadgeTone = false) => {
+  const resolved: BadgeTone = tone === true ? "signal" : tone === false ? "category" : tone;
+  return (
+    <>
+      <span className={cls("lgi-tm-badge is-" + resolved)}>{esc(text)}</span>
+    </>
+  );
+};
 export const empty = (text: ReactNode, detail = "") => (
   <>
     <div className={cls("lgi-tm-empty")}>

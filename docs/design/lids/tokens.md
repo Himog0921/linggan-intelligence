@@ -153,7 +153,7 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-focus: #335e72;
 
   /* Semantic: five axes, each carries text / fill / soft.
-   * Fill values stay saturated for solid badges; text values are darkened
+   * Fill values stay saturated for the badge mark (the small square); text values are darkened
    * so they clear 4.5:1 on the white canvas. Never swap the two roles. */
   --lgi-success-dot: #0e9e6e;
   --lgi-success-soft: rgba(14, 158, 110, 0.10);
@@ -165,6 +165,14 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-info-soft: rgba(141, 154, 157, 0.14);
   --lgi-unknown-dot: #c3c8cb;
   --lgi-unknown-soft: #e7eaeb;
+
+  /* Badge (Mog 2026-11-27, replaces the solid-fill tag rule in primitives.md):
+   * coloured text + a leading square mark; no fill, no frame. Square = the role's *-dot (fill)
+   * colour, text = the role's text colour. Neutral categories use body for both. */
+  --lgi-badge-mark: 6px;
+  --lgi-badge-gap: 6px;
+  --lgi-badge-size: var(--lgi-type-label-size);
+  --lgi-badge-weight: var(--lgi-weight-medium);
 
   /* Borders */
 
@@ -218,6 +226,18 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   --lgi-action-motion-cycle: 800ms;
   --lgi-action-motion-step: 200ms;
   --lgi-action-ease: cubic-bezier(.2,.78,.2,1);
+
+  /* Scope bar (Mog 2026-11-27): several C17 SelectField triggers sharing one ink frame, e.g.
+   * 平台 / 时间 above a page. Each segment = muted field name + ink value + chevron; segments are
+   * divided by an ink rule inside the frame; the M2 lattice tail appears once, at the far end. */
+  --lgi-scope-height: var(--lgi-action-height);
+  --lgi-scope-frame: var(--lgi-action-border-width) solid var(--lgi-ink);
+  --lgi-scope-divider: var(--lgi-action-border-width) solid var(--lgi-ink);
+  --lgi-scope-pad: var(--lgi-space-3);
+  --lgi-scope-label: var(--lgi-muted);
+  --lgi-scope-value: var(--lgi-ink);
+  --lgi-scope-open: var(--lgi-focus-warm);
+  --lgi-scope-tail: var(--lgi-secondary-tail);
 
   /* Approved V3 reading material surfaces, scoped to the content workbench. */
   --lgi-reading-paper: #faf7ee;
@@ -444,6 +464,18 @@ L3 GEOMETRY   间距 / 字号 / 线宽 / 圆角 / 动效 五套阶梯
   /* —— 右侧检查器 —— */
   --lgi-cr-inspector-width: 620px;
   --lgi-cr-inspector-shadow: -10px 0 36px rgba(11, 15, 18, 0.16);
+
+  /* 主题图谱（重设计对齐稿 apps/web/design-reference/topic-map-redesign.html）：稿内有、LIDS 尚未登记的取值。Mog 2026-11-27 确认稿件。 */
+  --lgi-tm-tree-width: var(--lgi-shell-side);   /* 主题树占侧栏位，内容左缘与面包屑对齐 */
+  --lgi-tm-tree-indent: var(--lgi-space-4);     /* 每深一级右移一个展开钮宽 */
+  --lgi-tm-tree-count: 32px;                    /* 树内作品数列 */
+  --lgi-tm-peek-max: 360px;                     /* 截断主题名的全名浮签最大宽度 */
+  --lgi-tm-cover-w: 54px;                       /* 材料行 3:4 封面舞台 */
+  --lgi-tm-cover-h: 72px;
+  --lgi-tm-stat-col: 56px;                      /* 赞藏评分享各列 */
+  --lgi-tm-action-col: 196px;                   /* 材料行操作列 */
+  --lgi-tm-bars-height: 64px;                   /* 点赞分布柱区：读数「数值＋说明」压在柱底线上 */
+  --lgi-tm-bar-max: 32px;                       /* 单根柱最大宽度 */
 
   /* LIDS-UI-001 generated: start */
   --lgi-font-ui: "Linggan UI Digits","Linggan Albert","Linggan OPPO",Arial,Helvetica,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;
