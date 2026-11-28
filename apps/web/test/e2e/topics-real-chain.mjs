@@ -262,7 +262,7 @@ try {
       return { width, height };
     }));
     assert.ok(compactControlSizes.every(({ width, height }) => width >= 24 && height >= 24), "compact view controls must have 24px targets");
-    // Visual-fidelity guard against the merged V3 regression reported in #448.
+    // The approved topic-map-redesign.html includes the chart switch rail in this band.
     await page.setViewportSize({ width: 2048, height: 960 });
     await page.evaluate(() => document.fonts.ready);
     const visual = await page.getByLabel("基础概览指标").evaluate((region) => {
@@ -285,8 +285,10 @@ try {
       "secondary statistics must align on one row: " + JSON.stringify(visual));
     const bandHeight = await page.getByLabel("主题概览与样本表现")
       .evaluate((node) => node.getBoundingClientRect().height);
-    assert.ok(bandHeight < 165,
-      "the chart and metrics must fit the approved compact V3 band without a spare explanation row");
+    // The reference band is 166.5px at desktop size. Allow browser font rounding,
+    // while keeping the ceiling below the height of an additional text row.
+    assert.ok(bandHeight <= 170,
+      `the chart and metrics must fit the approved Demo band without a spare explanation row (got ${bandHeight}px)`);
     assert.equal(await page.getByLabel("主题处理与运营状态").count(), 0, "the Demo has no status band above notes");
     const materialTitle = page.getByRole("region", { name: "匹配材料" }).locator("h3 button").first();
     assert.equal(await materialTitle.evaluate(node => getComputedStyle(node).borderTopWidth), "0px");
