@@ -1,4 +1,5 @@
 import { useId, useLayoutEffect, useRef, useState, type CSSProperties, type KeyboardEvent } from 'react';
+import { IntelligenceIcon } from './IntelligenceIcon';
 import styles from './SelectField.module.css';
 
 export interface SelectOption<T extends string> { value: T; label: string; disabled?: boolean }
@@ -9,10 +10,11 @@ interface Props<T extends string> {
   onChange: (value: T) => void;
   disabled?: boolean;
   compact?: boolean;
+  iconChevron?: boolean;
 }
 
 /** Shared basic C17 candidate: selection only; the caller owns query timing and eligibility. No CMP certification is implied. */
-export function SelectField<T extends string>({ label, value, options, onChange, disabled, compact }: Props<T>) {
+export function SelectField<T extends string>({ label, value, options, onChange, disabled, compact, iconChevron }: Props<T>) {
   const id = useId();
   const [hasPopover] = useState(() => typeof HTMLElement.prototype.showPopover === 'function');
   const trigger = useRef<HTMLButtonElement>(null);
@@ -130,7 +132,10 @@ export function SelectField<T extends string>({ label, value, options, onChange,
     <button ref={trigger} type="button" className={styles.trigger} role="combobox" aria-label={label}
       aria-describedby={`${id}-value`} aria-expanded={open} aria-controls={id} aria-haspopup="listbox" aria-activedescendant={open ? `${id}-${active}` : undefined}
       disabled={disabled} onKeyDown={keys} onClick={() => { setActive(Math.max(0, selected)); setOpen(current => !current); }}>
-      <span id={`${id}-value`} title={options[selected]?.label}>{options[selected]?.label ?? value}</span><span className={styles.chevron} aria-hidden="true">⌄</span>
+      <span id={`${id}-value`} title={options[selected]?.label}>{options[selected]?.label ?? value}</span>
+      <span className={styles.chevron} aria-hidden="true">
+        {iconChevron ? <IntelligenceIcon name="chevron" size={14} expanded={open} /> : '⌄'}
+      </span>
     </button>
     {/* The menu sits inside the DOM of any label that wraps the select, and a label forwards a click on its content to
         its first control: choosing an option would click the trigger again and reopen the menu. A click in the menu is

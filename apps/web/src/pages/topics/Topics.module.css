@@ -223,6 +223,12 @@ body.topic-map-page {
   flex-wrap: wrap;
   gap: var(--lgi-space-6);
 }
+:global(#topic-map-root) .lgi-tm-tab-count {
+  margin-inline-start: var(--lgi-space-1);
+  font-size: var(--lgi-type-aux-size);
+  font-weight: var(--lgi-weight-regular);
+  color: var(--lgi-meta);
+}
 :global(#topic-map-root) .lgi-tm-main-tabs {
   margin-bottom: 0;
   border-bottom: 1px solid var(--lgi-hairline);
@@ -373,17 +379,6 @@ body.topic-map-page {
 }
 :global(#topic-map-root) .lgi-tm-tree .lgi-tm-num {
   font-size: var(--lgi-text-data);
-}
-:global(#topic-map-root) .lgi-tm-candidate-dot {
-  font-size: var(--lgi-text-label);
-  color: var(--lgi-muted);
-  background: var(--lgi-canvas-low);
-  border-radius: var(--lgi-radius-xs);
-  padding-inline: var(--lgi-space-1);
-  flex-shrink: 0;
-}
-:global(#topic-map-root) .lgi-tm-tree-row.is-active .lgi-tm-candidate-dot {
-  color: var(--lgi-signal-ink);
 }
 :global(#topic-map-root) .lgi-tm-object-head {
   display: flex;
@@ -3233,21 +3228,6 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-badge.is-danger::before, :global(dialog) .lgi-tm-badge.is-danger::before { background: var(--lgi-danger-dot); }
 :global(#topic-map-root) .lgi-tm-badge.is-info, :global(dialog) .lgi-tm-badge.is-info { color: var(--lgi-info); }
 :global(#topic-map-root) .lgi-tm-badge.is-info::before, :global(dialog) .lgi-tm-badge.is-info::before { background: var(--lgi-info-dot); }
-:global(#topic-map-root) .lgi-tm-candidate-dot {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--lgi-badge-gap);
-  padding: 0;
-  background: transparent;
-  color: var(--lgi-warning);
-  font-size: var(--lgi-type-aux-size);
-}
-:global(#topic-map-root) .lgi-tm-candidate-dot::before {
-  content: "";
-  width: var(--lgi-badge-mark);
-  height: var(--lgi-badge-mark);
-  background: var(--lgi-warning-dot);
-}
 
 /* ---- C16 FIND inside the page: neutralise the page-wide input frame ---- */
 :global(#topic-map-root) .lgi-tm-find input:not([type="checkbox"]) {
@@ -3344,7 +3324,7 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-tree-row {
   position: relative;
   display: grid;
-  grid-template-columns: var(--lgi-tm-tree-indent) minmax(0, 1fr) auto var(--lgi-tm-tree-count);
+  grid-template-columns: var(--lgi-tm-tree-indent) minmax(0, 1fr) var(--lgi-tm-tree-count);
   align-items: center;
   gap: 0 var(--lgi-space-1);
   min-height: var(--lgi-space-8);
@@ -3416,7 +3396,7 @@ body.topic-map-page {
 }
 :global(#topic-map-root) .lgi-tm-tree .lgi-tm-num,
 :global(#topic-map-root) .lgi-tm-tree-row > .lgi-tm-num {
-  grid-column: 4;
+  grid-column: 3;
   text-align: right;
   font: var(--lgi-weight-medium) var(--lgi-type-aux-size)/1 var(--lgi-font-data);
   color: var(--lgi-meta);
@@ -3426,7 +3406,7 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-tree-root {
   grid-template-columns: minmax(0, 1fr) var(--lgi-tm-tree-count);
   min-height: var(--lgi-action-height);
-  padding-left: var(--lgi-space-2);
+  padding-left: calc(var(--lgi-space-2) + var(--lgi-tm-tree-indent));
   margin-top: var(--lgi-space-1);
 }
 :global(#topic-map-root) .lgi-tm-tree-root .lgi-tm-tree-name { font-weight: var(--lgi-weight-semibold); color: var(--lgi-ink); }
@@ -3512,22 +3492,19 @@ body.topic-map-page {
 
 /* Page head: path above; title, actions, scope bar and view switch share one centre line. */
 :global(#topic-map-root) .lgi-tm-main > .lgi-tm-summary .lgi-tm-summary-heading {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  justify-content: space-between;
-  flex-wrap: nowrap;
-  gap: var(--lgi-space-6);
+  column-gap: var(--lgi-space-6);
+  row-gap: var(--lgi-space-1);
   padding: var(--lgi-space-5) 0;
   border-bottom: var(--lgi-action-rail-width) solid var(--lgi-ink);
 }
 :global(#topic-map-root) .lgi-tm-summary-identity {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: var(--lgi-space-1);
-  min-width: 0;
+  display: contents;
 }
 :global(#topic-map-root) .lgi-tm-path {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   gap: var(--lgi-space-2);
@@ -3561,7 +3538,7 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-summary-actions {
   display: flex;
   align-items: center;
-  gap: var(--lgi-space-5);
+  gap: var(--lgi-space-6);
   flex: none;
 }
 :global(#topic-map-root) .lgi-tm-summary-actions .lgi-tm-view-switch { border-bottom-color: transparent; }
@@ -3603,6 +3580,7 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-scope-segment button[role="combobox"] {
   height: 100%;
   min-height: 0;
+  gap: var(--lgi-space-2);
   border: 0;
   border-radius: 0;
   background: transparent;
@@ -3611,7 +3589,10 @@ body.topic-map-page {
   color: var(--lgi-scope-value);
   font: var(--lgi-type-control-weight) var(--lgi-type-control-size)/1 var(--lgi-font-ui);
 }
-:global(#topic-map-root) .lgi-tm-scope-segment button[role="combobox"] > span[aria-hidden="true"] { margin-right: 0; }
+:global(#topic-map-root) .lgi-tm-scope-segment button[role="combobox"] > span[aria-hidden="true"] {
+  display: inline-flex;
+  margin-right: 0;
+}
 :global(#topic-map-root) .lgi-tm-scope-segment button[role="combobox"]::before,
 :global(#topic-map-root) .lgi-tm-scope-segment button[role="combobox"]::after { display: none; }
 :global(#topic-map-root) .lgi-tm-scope-segment:hover { background: var(--lgi-canvas-low); }
@@ -3636,7 +3617,10 @@ body.topic-map-page {
 :global(#topic-map-root) .lgi-tm-overview-band[data-readouts="8"] {
   grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
 }
-:global(#topic-map-root) .lgi-tm-summary > [aria-label="主题处理与运营状态"]:empty { display: none; }
+:global(#topic-map-root) .lgi-tm-overview-band[data-readouts="4"] {
+  column-gap: var(--lgi-space-8);
+  grid-template-columns: minmax(0, calc((100% - 4 * var(--lgi-space-8)) * .625 + 3 * var(--lgi-space-8))) minmax(0, 1fr);
+}
 
 /* Work navigation: tabs left; FIND, material filter and the matrix link right. */
 :global(#topic-map-root) .lgi-tm-view-toolbar {
@@ -3647,7 +3631,7 @@ body.topic-map-page {
   align-items: stretch;
   justify-content: space-between;
   gap: var(--lgi-space-5);
-  margin: 0 0 var(--lgi-space-3);
+  margin: 0 0 var(--lgi-space-2);
   padding: 0;
   background: var(--lgi-canvas);
   border-top: var(--lgi-action-rail-width) solid var(--lgi-ink);
@@ -3829,6 +3813,33 @@ body.topic-map-page {
   justify-content: flex-end;
   gap: var(--lgi-space-4);
 }
+:global(#topic-map-root) .lgi-tm-evidence-save {
+  min-height: var(--lgi-space-8);
+  padding: 0 var(--lgi-space-3);
+  border: var(--lgi-action-border-width) solid var(--lgi-ink);
+  background: var(--lgi-canvas);
+  color: var(--lgi-ink);
+  font: var(--lgi-weight-semibold) var(--lgi-type-label-size)/1 var(--lgi-font-ui);
+  cursor: pointer;
+}
+:global(#topic-map-root) .lgi-tm-evidence-save:hover:not(:disabled) {
+  color: var(--lgi-on-dark);
+  background: var(--lgi-ink);
+}
+:global(#topic-map-root) .lgi-tm-evidence-save:disabled {
+  color: var(--lgi-muted);
+  border-color: var(--lgi-border);
+  cursor: default;
+}
+:global(#topic-map-root) .lgi-tm-evidence-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--lgi-space-3) 0;
+  border-top: var(--lgi-action-border-width) solid var(--lgi-ink);
+  font-size: var(--lgi-type-aux-size);
+  color: var(--lgi-meta);
+}
 
 /* Tables and lists inside the analysis tabs: ink header rule, zebra rows, no row lines. */
 :global(#topic-map-root) .lgi-tm-main table th {
@@ -3961,7 +3972,7 @@ body.topic-map-page {
 }
 @media (max-width: 1100px) {
   :global(#topic-map-root) .lgi-tm-main { padding: 0 var(--lgi-space-6) var(--lgi-space-10); }
-  :global(#topic-map-root) .lgi-tm-main > .lgi-tm-summary .lgi-tm-summary-heading { flex-wrap: wrap; }
+  :global(#topic-map-root) .lgi-tm-main > .lgi-tm-summary .lgi-tm-summary-heading { grid-template-columns: minmax(0, 1fr); }
   :global(#topic-map-root) .lgi-tm-summary-actions { width: 100%; justify-content: space-between; flex-wrap: wrap; }
   :global(#topic-map-root) .lgi-tm-evidence-head { display: none; }
   :global(#topic-map-root) .lgi-tm-material-first .lgi-tm-evidence-row,

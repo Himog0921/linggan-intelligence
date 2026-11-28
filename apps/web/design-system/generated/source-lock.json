@@ -1,5 +1,5 @@
 {
-  "fingerprint": "8d8a4d269a411f2a6207121135c1a339652505f7790322cdbcb0bc6037d562f7",
+  "fingerprint": "d183810630d8616115c12455adcd144ff1518a2868c0b268219330425217ddeb",
   "inputs": [
     {
       "path": "AGENTS.md",
@@ -471,11 +471,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/Topics.module.css",
-      "sha256": "2bd6add9a97b733f5d3a0d4a860956f3766c5420864d3e04ebc24709b63ed6fc"
+      "sha256": "c07bde7a090a118ba1335dc03c8654fa120c12d71df06b9f59ada85b8e0770b1"
     },
     {
       "path": "apps/web/src/pages/topics/TopicsPage.tsx",
-      "sha256": "7f8bd0eec6c926e2ec4e2ca84f37f8022b77f1b9933a01e6718e8ade83d312a0"
+      "sha256": "c0aa40aa7b1dd0e472fd3cf6be61a24fcaf51bb2a3cc759753a9530b895f8cc7"
     },
     {
       "path": "apps/web/src/pages/topics/Workspace.module.css",
@@ -487,11 +487,11 @@
     },
     {
       "path": "apps/web/src/pages/topics/engine.tsx",
-      "sha256": "f3b20ada88a55749234cf8f10e65e4420161a8b904cfc30613edd6c3c9673647"
+      "sha256": "91522c7ff3ad6ad44237196c667dabe553d82f5a5ee693b63def9fe2df411d90"
     },
     {
       "path": "apps/web/src/pages/topics/topicOverview.tsx",
-      "sha256": "a338060b6ca363e89a889f3e4f8ed1f973e341642fea010f9bbbee9f6756970f"
+      "sha256": "98c8792490e886ee288eb72f01384c65b3635640d5c4e362bf33a078da261b3b"
     },
     {
       "path": "apps/web/src/pages/workbench/ImagePages.module.css",
@@ -623,7 +623,7 @@
     },
     {
       "path": "apps/web/src/shared/SelectField.tsx",
-      "sha256": "d4ce102a04cad727e0639093789fef5186f9f50e4cb862e9cbd28e10824649e7"
+      "sha256": "50620e7bc15451abd2263753d1d3d6727b78955f1c61642ba0092ac23f45f8a5"
     },
     {
       "path": "apps/web/src/shared/Sidebar.tsx",
@@ -659,7 +659,7 @@
     },
     {
       "path": "docs/design/changes/lids-component-change.json",
-      "sha256": "6e2f61a835891ce17f9eaa76625b2aac07fb8525a8d9fda2be1f56c3ca873348"
+      "sha256": "e787630d1b96ad1c539718ef4503322f199a7dac581f3f78a1c9517bb6004981"
     },
     {
       "path": "docs/design/lids/catalog-source.json",

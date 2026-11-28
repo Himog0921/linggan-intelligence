@@ -8,6 +8,15 @@
 }
 .panel h2, .panel p { margin: 0; }
 .panel button { justify-self: start; }
+.contextTrigger {
+  padding: 0;
+  background: none;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.contextTrigger:hover { text-decoration: underline; }
 .panel details { padding-block: var(--lgi-space-2); border-top: 1px solid var(--lgi-border); }
 .panel summary { cursor: pointer; font-weight: 600; }
 .panel details p, .panel details ul { margin-block: var(--lgi-space-2); }

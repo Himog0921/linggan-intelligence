@@ -24,11 +24,11 @@ describe("material-first overview preserves statistical boundaries", () => {
     render(<OverviewReadouts statistics={stats} scope={topicSnapshot().scope} />);
     const region = screen.getByLabelText("基础概览指标");
     expect(within(region).getByRole("button", { name: "观察到的内容 9,000 篇，查看材料" })).toBeInTheDocument();
-    expect(region).toHaveTextContent("小红书 · 样本爆款率");
-    expect(region).toHaveTextContent("抖音 · 样本爆款率");
+    expect(region).toHaveTextContent("小红书 · 样本高表现率");
+    expect(region).toHaveTextContent("抖音 · 样本高表现率");
     expect(region).toHaveTextContent("中位数0");
     expect(region).toHaveTextContent("未设置");
-    expect(region).toHaveTextContent("点赞未知 8 篇");
+    expect(region).toHaveTextContent("未知 8 篇");
     expect(region).toHaveTextContent("点赞 ≥ 750");
     expect(region).toHaveTextContent("可读 2");
   });
@@ -38,7 +38,7 @@ describe("material-first overview preserves statistical boundaries", () => {
     const band = screen.getByLabelText("基础概览指标");
     expect(within(band).getByRole("button", { name: /观察到的内容 .*查看材料/ })).toBeInTheDocument();
     expect(band).toHaveTextContent("已观察创作者");
-    expect(band).toHaveTextContent("样本爆款率");
+    expect(band).toHaveTextContent("样本高表现率");
     expect(band).toHaveTextContent("点赞中位数");
     // The API is a current snapshot: no yesterday column at all, not even a placeholder.
     expect(band).not.toHaveTextContent("昨日");
@@ -46,12 +46,12 @@ describe("material-first overview preserves statistical boundaries", () => {
     expect(band).not.toHaveTextContent("+53");
     expect(within(band).queryByRole("button", { name: "查看或调整样本爆款规则" })).toBeNull();
   });
-  it("keeps the seven loaded-bin drill-down actions in the compact top bar, including unknown in table mode", async () => {
+  it("matches the six Demo bins with count and known-share rows and retains the loaded drill-down", async () => {
     const snapshot = topicSnapshot();
     render(<OverviewDistribution compact works={snapshot.works} platform={snapshot.statistics.platforms[0]}
       statistics={snapshot.statistics} scope={snapshot.scope} />);
     const chart = screen.getByLabelText("已观察内容点赞分布");
-    expect(within(chart).getAllByRole("button", { name: /赞，.*篇，查看作品/ })).toHaveLength(7);
+    expect(within(chart).getAllByRole("button", { name: /赞，.*篇，查看作品/ })).toHaveLength(6);
     const rules = within(chart).getByRole("button", { name: "查看或调整样本爆款规则" });
     expect(rules).toHaveAttribute("data-action", "rules");
     expect(within(chart).getByText("样本表现", { exact: true })).toBeInTheDocument();
@@ -60,9 +60,12 @@ describe("material-first overview preserves statistical boundaries", () => {
     expect(within(chart).queryByRole("table")).toBeNull();
     // This fixture has no guaranteed high bucket: empty/high unknown must not become orange.
     await userEvent.click(within(chart).getByRole("button", { name: "表格" }));
-    expect(within(chart).getByRole("table")).toBeInTheDocument();
-    expect(within(chart).getByRole("row", { name: /点赞未知/ })).toBeInTheDocument();
-    expect(within(chart).getByRole("button", { name: "分布图" })).toHaveAttribute("aria-pressed", "false");
+    const table = within(chart).getByRole("table", { name: /点赞未知 1 篇/ });
+    expect(within(table).getAllByRole("columnheader")).toHaveLength(7);
+    expect(within(table).getByRole("row", { name: /占比 100\.0%/ })).toBeInTheDocument();
+    expect(within(table).getByRole("button", { name: "0–20赞，1篇，查看作品" }))
+      .toHaveAttribute("data-id", snapshot.works[0]!.workRef);
+    expect(within(chart).getByRole("button", { name: "图表" })).toHaveAttribute("aria-pressed", "false");
   });
   it("uses the actual saved performance threshold to signal only wholly qualifying bins", () => {
     const snap = topicSnapshot();
@@ -75,7 +78,7 @@ describe("material-first overview preserves statistical boundaries", () => {
     render(<OverviewDistribution compact works={qualifyingWorks} platform={platform}
       statistics={snap.statistics} scope={snap.scope} />);
     const chart = screen.getByLabelText("已观察内容点赞分布");
-    expect(within(chart).getByRole("button", { name: "100–199赞，1篇，查看作品" })).toHaveAttribute("data-high", "true");
+    expect(within(chart).getByRole("button", { name: "100–499赞，1篇，查看作品" })).toHaveAttribute("data-high", "true");
     expect(within(chart).getByRole("button", { name: "500–999赞，1篇，查看作品" })).toHaveAttribute("data-high", "true");
     expect(within(chart).getByRole("button", { name: "0–20赞，1篇，查看作品" })).not.toHaveAttribute("data-high");
   });
