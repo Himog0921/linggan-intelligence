@@ -557,6 +557,9 @@ migrate() {
   apply_migration_once "0243_creation_evidence_templates" "$project_root/database/migrations/0243_creation_evidence_templates.sql"
   apply_migration_once "0244_creation_template_replication_skill" "$project_root/database/migrations/0244_creation_template_replication_skill.sql"
   apply_migration_once "0245_opportunity_card_queue_age" "$project_root/database/migrations/0245_opportunity_card_queue_age.sql"
+  apply_migration_once "0246_operating_directions" "$project_root/database/migrations/0246_operating_directions.sql"
+  apply_migration_once "0247_ai_returned_response" "$project_root/database/migrations/0247_ai_returned_response.sql"
+  apply_migration_once "0248_operating_direction_generation" "$project_root/database/migrations/0248_operating_direction_generation.sql"
 }
 
 case "$command_name" in

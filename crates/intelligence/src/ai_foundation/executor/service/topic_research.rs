@@ -17,9 +17,9 @@ use linggan_storage_postgres::Database;
 use serde_json::{Value, json};
 use uuid::Uuid;
 
-struct Prepared {
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(super) struct Publication {
     invocation: Uuid,
-    request: PiRequest,
     request_ref: Uuid,
     prompt_version_ref: Uuid,
     window: Uuid,
@@ -32,7 +32,7 @@ async fn prepare(
     db: &Database,
     item: &ClaimedItem,
     secrets: &dyn ModelSecretStore,
-) -> Result<Prepared, ExecutorError> {
+) -> Result<(PiRequest, Publication), ExecutorError> {
     let InputRef::TopicResearch {
         window_ref: request_ref,
         stage_number,
@@ -105,9 +105,8 @@ async fn prepare(
     .await?;
     sqlx::query("INSERT INTO linggan_topic_research_dispatch(item_ref,invocation_ref,context) VALUES($1,$2,$3)").bind(item.item_ref).bind(invocation).bind(&packet.context).execute(&mut *tx).await?;
     tx.commit().await?;
-    Ok(Prepared {
+    Ok((request, Publication {
         invocation,
-        request,
         request_ref,
         prompt_version_ref,
         window: request_ref,
@@ -115,7 +114,7 @@ async fn prepare(
         context: packet.context,
         comment_mode: crate::ai_foundation::topic_comment_source::is_comment(&data),
         single_pass: owner::single_pass(&data),
-    })
+    }))
 }
 pub(super) async fn execute(
     db: &Database,
@@ -123,7 +122,7 @@ pub(super) async fn execute(
     secrets: &dyn ModelSecretStore,
     adapter: &PiAdapter,
 ) -> Result<(), ExecutorError> {
-    let prepared = match prepare(db, item, secrets).await {
+    let (request, prepared) = match prepare(db, item, secrets).await {
         Ok(value) => value,
         Err(ExecutorError::Configuration(FoundationError::AdmissionDenied(reasons))) => {
             let reason = reasons
@@ -153,19 +152,24 @@ pub(super) async fn execute(
         }
         Err(error) => return super::super::preparation::handle(db, item, error).await,
     };
-    let response = super::super::dispatch::call(db, item, adapter, &prepared.request).await;
+    let response = super::super::dispatch::call(db, item, adapter, &request).await;
+    if let Some(reply) = &response {
+        super::returned::capture(db, item, prepared.invocation, &prepared, reply).await?;
+        return super::returned::publication_result(settle(db, item, &prepared, Some(reply), false).await);
+    }
     receipt::finalize(db, item, prepared.invocation, response.as_ref(), || {
-        settle(db, item, &prepared, response.as_ref())
+        settle(db, item, &prepared, response.as_ref(), false)
     })
     .await
 }
-async fn settle(
+pub(super) async fn settle(
     db: &Database,
     item: &ClaimedItem,
-    prepared: &Prepared,
+    prepared: &Publication,
     response: Option<&PiResponse>,
+    terminal_unknown: bool,
 ) -> Result<(), ExecutorError> {
-    let (mut tx, cancelled) = receipt::lock_in(db, item, prepared.invocation, response).await?;
+    let (mut tx, cancelled) = super::returned::lock_publication(db, item, prepared.invocation, response, terminal_unknown).await?;
     let sources = owner::frozen_in(&mut tx, prepared.window).await;
     if let Err(crate::ai_foundation::store::FoundationError::Database(_)) = &sources {
         return Err(sources.err().unwrap().into());
@@ -260,6 +264,11 @@ async fn settle(
     result["promptVersion"] = json!(prepared.prompt_version_ref);
     sqlx::query("INSERT INTO linggan_topic_research_stage_result(item_ref,invocation_ref,output,failure_code) VALUES($1,$2,$3,$4)")
         .bind(item.item_ref).bind(prepared.invocation).bind(if success {parsed.as_ref()}else{None}).bind(failure).execute(&mut *tx).await?;
+    if terminal_unknown {
+        super::returned::reconcile_in(&mut tx, prepared.invocation, response.ok_or(ExecutorError::Invalid)?, success, cancelled, failure).await?;
+        tx.commit().await?;
+        return Ok(());
+    }
     receipt::observe_in(&mut tx, prepared.invocation, response).await?;
     finish_invocation_in(
         &mut tx,

@@ -635,14 +635,14 @@ export function createTopicOverview(context: TopicOverviewContext) {
                   {parents.slice(0, -1).map((t) => (
                     <Fragment key={t.topicRef}>
                       <span aria-hidden={"true"}>{"/"}</span>
-                      {btn(esc(t.displayName), "topic", t.topicRef, "lgi-tm-path-link", { title: t.displayName })}
+                      {btn(esc(t.displayName), "topic", t.topicRef, "lgi-tm-path-link", { title: t.definitionText || t.displayName })}
                     </Fragment>
                   ))}
                   <span aria-hidden={"true"}>{"/"}</span>
                   <span>{selected.parentTopicRef ? "子主题" : "主题"}</span>
                 </nav>
               ) : null}
-              <h2 className={cls("lgi-tm-page-title")} title={selected?.displayName || "全部方向"}>
+              <h2 className={cls("lgi-tm-page-title")} title={selected?.definitionText || selected?.displayName || "全部方向"}>
                 {selected ? esc(selected.displayName) : "全部方向"}
               </h2>
             </div>
@@ -778,7 +778,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 t.topicRef,
                 "lgi-tm-tree-name",
                 {
-                  title: t.displayName,
+                  title: t.definitionText || t.displayName,
                   "aria-current":
                     context.state.topicRef === t.topicRef ? "page" : undefined,
                   "data-tree-item": "",
@@ -1616,7 +1616,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
         [
           [0, 20, "≤20赞"],
           [21, 99, "21–99赞"],
-          [100, 499, "100–499赞"],
+          [100, 199, "100–199赞"], [200, 499, "200–499赞"],
           [500, 999, "500–999赞"],
           [1000, Infinity, "≥1,000赞"],
           [null, null, "指标缺失"],

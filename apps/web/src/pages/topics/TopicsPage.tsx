@@ -1,3 +1,4 @@
+import { OperatingDirections } from "./OperatingDirections";
 import { useNavigate } from "react-router";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -48,8 +49,10 @@ const TopicContents = memo(function TopicContents({
   notice: string;
   error: string | null;
 }) {
+  const domain=engine.getState().domainRef;
   return (
     <div className={c("lgi-tm-content")}>
+      {domain && <OperatingDirections key={domain} domain={domain}/>}
       <Fragment key={mainVersion}>
         {error ? (
           <p role="alert">领域读取未成功：{error}</p>

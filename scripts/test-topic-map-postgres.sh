@@ -55,6 +55,7 @@ cargo_proof -p linggan-intelligence --lib topic_map_research::saved_source_postg
 cargo_proof -p linggan-intelligence --lib topic_map_research::parent_chain_postgres:: --locked -- --ignored --test-threads=1 || proof_exit=$?
 cargo_proof -p linggan-intelligence --lib topic_map_core::acceptance::tests:: --locked -- --ignored --test-threads=1 || proof_exit=$?
 cargo_proof -p linggan-intelligence --lib topic_map::operations::tests:: --locked -- --ignored --test-threads=1 || proof_exit=$?
+cargo_proof -p linggan-intelligence --lib topic_map::directions::tests:: --locked -- --ignored --test-threads=1 || proof_exit=$?
 cargo_proof -p linggan-intelligence --lib ai_foundation::topic_comment_source::tests:: --locked -- --ignored --test-threads=1 || proof_exit=$?
 cargo_proof -p linggan-intelligence --lib ai_foundation::content_understanding::topic_tests:: --locked -- --ignored --test-threads=1 || proof_exit=$?
 cargo test -p linggan-evidence --test topic_map_comment_budget_postgres --test material_projection_postgres --locked --no-fail-fast -- --ignored --test-threads=1 || proof_exit=$?

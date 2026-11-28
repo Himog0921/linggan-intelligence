@@ -45,7 +45,7 @@ pub(super) async fn qualify(
         "SELECT DISTINCT w.input_refs FROM linggan_topic_research_window w
          JOIN linggan_topic_research_run r USING(run_ref)
          JOIN linggan_topic_research_stage s USING(window_ref)
-         JOIN linggan_ai_batch_item_control c USING(item_ref)
+         JOIN linggan_ai_research_item_outcome c USING(item_ref)
          WHERE r.domain_ref=$1 AND w.work_ref=ANY($2) AND c.failure_code='ai_dispatch_unknown'",
     )
     .bind(domain)

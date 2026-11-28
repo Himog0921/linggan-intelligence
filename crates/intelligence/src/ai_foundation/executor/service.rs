@@ -22,7 +22,9 @@ mod creator_account_research;
 mod creator_research;
 mod opportunity_sync;
 mod ops_title_label;
+mod operating_direction;
 mod research_call;
+mod returned;
 mod topic_research;
 mod work_comparison;
 #[derive(Debug, Serialize)]
@@ -106,9 +108,8 @@ async fn work_loop(
 ) -> Result<(), ExecutorError> {
     let mut tasks = JoinSet::new();
     let mut corpus_jobs = JoinSet::new();
-    let corpus_db = db.clone();
-    let corpus_drain = drain.clone();
-    corpus_jobs.spawn(async move { scan_corpus_automation(&corpus_db, &corpus_drain).await });
+    corpus_jobs.spawn(scan_corpus_automation(db.clone(), drain.clone(), false));
+    corpus_jobs.spawn(scan_corpus_automation(db.clone(), drain.clone(), true));
     let mut opportunity_jobs = JoinSet::new();
     let mut selection_jobs = JoinSet::new();
     let mut lens_jobs = JoinSet::new();
@@ -205,8 +206,8 @@ async fn work_loop(
 }
 
 /// Source reads may take longer than the dispatch poll. Keep the reconciliation
-/// cursors together, without holding up claims, comment schedules or settlements.
-async fn scan_corpus_automation(db: &Database, drain: &ModelWorkerDrain) {
+/// cursors independently, so an expensive topic scan cannot delay the next L1 tick.
+async fn scan_corpus_automation(db: Database, drain: ModelWorkerDrain, topics: bool) {
     let mut stopping = drain.subscribe();
     let mut tick = tokio::time::interval(Duration::from_secs(5));
     tick.set_missed_tick_behavior(MissedTickBehavior::Delay);
@@ -218,11 +219,11 @@ async fn scan_corpus_automation(db: &Database, drain: &ModelWorkerDrain) {
             _ = stopping.changed() => break,
             _ = tick.tick() => {}
         }
-        if let Err(error) = crate::ai_foundation::topic_research_automation::tick(db, &mut topic_cursor).await {
-            eprintln!("topic automation scan deferred: {error}");
-        }
-        if !drain.is_requested()
-            && let Err(error) = crate::ai_foundation::content_understanding::automation_tick(db, &mut understanding_cursor).await
+        if topics {
+            if let Err(error) = crate::ai_foundation::topic_research_automation::tick(&db, &mut topic_cursor).await {
+                eprintln!("topic automation scan deferred: {error}");
+            }
+        } else if let Err(error) = crate::ai_foundation::content_understanding::automation_tick(&db, &mut understanding_cursor).await
         {
             eprintln!("content understanding automation scan deferred: {error}");
         }
@@ -240,11 +241,17 @@ async fn fill_slots(
     opportunity_sync: &Option<Arc<opportunity_sync::OpportunitySync>>,
     lens_enabled: bool,
 ) -> Result<(), ExecutorError> {
-    if Instant::now() >= *recovery {
+    let recovering = Instant::now() >= *recovery;
+    if recovering {
         queue::recover_expired(db, fence).await?;
         *recovery = Instant::now() + Duration::from_secs(5);
     }
     while tasks.len() < concurrency as usize && !drain.is_requested() {
+        if recovering && let Some((claimed, receipt)) = returned::claim(db, fence).await? {
+            let db = db.clone();
+            tasks.spawn(async move { returned::publish(&db, &claimed, receipt).await });
+            continue;
+        }
         let claimed = match queue::claim_with_lens(db, fence, lens_enabled).await {
             Err(ExecutorError::FenceLost) if drain.is_requested() => {
                 fence.begin(db, false).await?.commit().await?;
@@ -284,6 +291,7 @@ async fn fill_slots(
                 TaskKey::WorkComparison => {
                     work_comparison::execute(&db, &item, secrets.as_ref(), &adapter).await
                 }
+                TaskKey::DirectionListDraft | TaskKey::DirectionProposal => operating_direction::execute(&db, &item, secrets.as_ref(), &adapter).await,
                 TaskKey::OpsTitleLabel => ops_title_label::execute(&db, &item, secrets.as_ref(), &adapter).await,
                 TaskKey::CommentProblemConsolidation => {
                     comment_problem_consolidation::execute(&db, &item, secrets.as_ref(), &adapter).await

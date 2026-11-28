@@ -370,6 +370,10 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     include_str!("../../../../database/migrations/0244_creation_template_replication_skill.sql"),
     include_str!("../../../../database/migrations/0245_opportunity_card_queue_age.sql"),
     "\n",
+    include_str!("../../../../database/migrations/0246_operating_directions.sql"),
+    include_str!("../../../../database/migrations/0247_ai_returned_response.sql"),
+    include_str!("../../../../database/migrations/0248_operating_direction_generation.sql"),
+    "\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES\n",
     "('0001_scope_001_capture_evidence', 'a0deb8d5bf6cbd3bc0b8343691167fe02170abe7469f7ba270017dada442cd98'),\n",
     "('0002_local_001_discovery', '26ae29e0e00bddd2804aebc5576e8868936af746858e61cc24769579333ecdbe'),\n",
@@ -554,4 +558,7 @@ pub(super) const FULL_MIGRATIONS: &str = concat!(
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0243_creation_evidence_templates','1d18700a4b92d6705502ffd966d285ea2f7e8f7c8786b6b7adbd03848ec76a01');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0244_creation_template_replication_skill','9923732559810cc69b5f90b284effdd38e01ed947d65e4d676aead30175cf8a8');\n",
     "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0245_opportunity_card_queue_age','29364d973eb22526f1aac90aa7506f2cb222edf0e533218645908ed1fe949f55');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0246_operating_directions','bdf8c9ad188d85b98c3a29caef5c279d47eb93bcc425cc9ccf1667d9f6ce288a');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0247_ai_returned_response','eee4881afd4db5cbea151f15a5a472101dbaa59e09ac96a2145eadca77237b0c');\n",
+    "INSERT INTO linggan_local_schema_migration (migration_id, migration_sha256) VALUES ('0248_operating_direction_generation','0117a9e7bdbe030249bc0890087f03da723ae5e9c1ddd631ed8b31db625d77a6');\n",
 );

@@ -139,7 +139,7 @@ async fn claim_in(
         return Ok(None);
     }
     const CLAIM_BASE: &str = concat!(
-        "SELECT item.item_ref,item.batch_ref,item.position,item.input_ref,b.task_key,b.task_config_ref,b.kind,c.lease_generation FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item item USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_control bc USING(batch_ref) JOIN linggan_ai_task t ON t.task_key=b.task_key JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=b.task_config_ref WHERE c.state='pending' AND c.next_attempt_at<=clock_timestamp() AND bc.state='open' AND NOT bc.cancel_requested AND t.lifecycle='active' AND t.task_key IN ('content_understanding','content_understanding_deep','model_probe','writing_legacy','creation_title','ocr_recognition','work_comparison','creator_research','comment_understanding','comment_problem_consolidation','ops_title_label','creator_account_research','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review') AND (b.task_key<>'ops_title_label' OR $3) AND cfg.execution_contract=t.handler_contract AND c.attempt_count<$1 AND item.position<(bc.last_round_no+1)*$2 AND NOT EXISTS(SELECT 1 FROM linggan_ai_control switch WHERE switch.scope_key IN ('global','executor','task:'||b.task_key) AND NOT switch.enabled) AND (b.task_key<>'ocr_recognition' OR NOT EXISTS(SELECT 1 FROM linggan_ai_batch_item previous JOIN linggan_ai_batch_item_control previous_control USING(item_ref) WHERE previous.batch_ref=b.batch_ref AND previous.position<item.position AND (previous_control.state NOT IN('succeeded','failed','skipped','cancelled') OR previous_control.failure_code='ai_dispatch_unknown'))) AND NOT EXISTS(SELECT 1 FROM linggan_topic_research_stage current_stage JOIN linggan_topic_research_stage prior ON prior.window_ref=current_stage.window_ref AND prior.stage_number<current_stage.stage_number JOIN linggan_ai_batch_item_control pc ON pc.item_ref=prior.item_ref WHERE current_stage.item_ref=item.item_ref AND pc.state NOT IN('succeeded','failed','skipped','cancelled'))",
+        "SELECT item.item_ref,item.batch_ref,item.position,item.input_ref,b.task_key,b.task_config_ref,b.kind,c.lease_generation FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item item USING(item_ref) JOIN linggan_ai_batch b USING(batch_ref) JOIN linggan_ai_batch_control bc USING(batch_ref) JOIN linggan_ai_task t ON t.task_key=b.task_key JOIN linggan_ai_task_config cfg ON cfg.task_config_ref=b.task_config_ref WHERE c.state='pending' AND c.next_attempt_at<=clock_timestamp() AND bc.state='open' AND NOT bc.cancel_requested AND t.lifecycle='active' AND t.task_key IN ('content_understanding','content_understanding_deep','model_probe','writing_legacy','creation_title','ocr_recognition','work_comparison','creator_research','comment_understanding','comment_problem_consolidation','direction_list_draft','direction_proposal','ops_title_label','creator_account_research','topic_research','topic_research_extract_review','topic_research_resolve','topic_research_resolve_review') AND (b.task_key NOT IN ('direction_list_draft','direction_proposal') OR item.input_ref->>'kind'='operating_direction') AND (b.task_key<>'ops_title_label' OR $3) AND cfg.execution_contract=t.handler_contract AND c.attempt_count<$1 AND item.position<(bc.last_round_no+1)*$2 AND NOT EXISTS(SELECT 1 FROM linggan_ai_control switch WHERE switch.scope_key IN ('global','executor','task:'||b.task_key) AND NOT switch.enabled) AND (b.task_key<>'ocr_recognition' OR NOT EXISTS(SELECT 1 FROM linggan_ai_batch_item previous JOIN linggan_ai_batch_item_control previous_control USING(item_ref) WHERE previous.batch_ref=b.batch_ref AND previous.position<item.position AND (previous_control.state NOT IN('succeeded','failed','skipped','cancelled') OR previous_control.failure_code='ai_dispatch_unknown'))) AND NOT EXISTS(SELECT 1 FROM linggan_topic_research_stage current_stage JOIN linggan_topic_research_stage prior ON prior.window_ref=current_stage.window_ref AND prior.stage_number<current_stage.stage_number JOIN linggan_ai_batch_item_control pc ON pc.item_ref=prior.item_ref WHERE current_stage.item_ref=item.item_ref AND pc.state NOT IN('succeeded','failed','skipped','cancelled'))",
         " AND NOT EXISTS(SELECT 1 FROM linggan_model_config mc
           JOIN linggan_model_entry me ON me.model_ref=mc.model_ref
           JOIN linggan_model_connection_version mv ON mv.version_ref=me.connection_version_ref
@@ -171,16 +171,32 @@ async fn claim_in(
     };
     let row = query.fetch_optional(&mut *tx).await?;
     let Some(row) = row else { return Ok(None) };
-    let lease_token = Uuid::new_v4();
-    let generation = row
-        .get::<i64, _>("lease_generation")
-        .checked_add(1)
-        .ok_or(ExecutorError::Invalid)?;
+    lease_row(tx, owner, row, None).await.map(Some)
+}
+
+pub(super) async fn lease_row(
+    mut tx: sqlx::Transaction<'_, sqlx::Postgres>,
+    owner: ExecutorFence,
+    row: sqlx::postgres::PgRow,
+    existing_token: Option<Uuid>,
+) -> Result<ClaimedItem, ExecutorError> {
+    let current_generation = row.get::<i64, _>("lease_generation");
+    // A saved reply belongs to its original attempt. Only its executor owner changes.
+    let (lease_token, generation) = match existing_token {
+        Some(token) => (token, current_generation),
+        None => (Uuid::new_v4(), current_generation.checked_add(1).ok_or(ExecutorError::Invalid)?),
+    };
     let item_ref: Uuid = row.get("item_ref");
     sqlx::query("UPDATE linggan_ai_batch_item_control SET state='running',lease_generation=$2,lease_token=$3,lease_expires_at=clock_timestamp()+make_interval(secs=>$4),lease_instance_ref=$5,lease_instance_generation=$6,wait_reason=NULL,started_at=COALESCE(started_at,scope_001_now()) WHERE item_ref=$1")
         .bind(item_ref).bind(generation).bind(lease_token).bind(LEASE_SECONDS as f64).bind(owner.instance_ref()).bind(owner.generation()).execute(&mut *tx).await?;
-    let item = ClaimedItem {
-        item_ref,
+    let item = claimed_row(&row, owner, generation, lease_token)?;
+    tx.commit().await?;
+    Ok(item)
+}
+
+pub(super) fn claimed_row(row: &sqlx::postgres::PgRow, owner: ExecutorFence, generation: i64, lease_token: Uuid) -> Result<ClaimedItem, ExecutorError> {
+    Ok(ClaimedItem {
+        item_ref: row.get("item_ref"),
         batch_ref: row.get("batch_ref"),
         position: row.get::<i32, _>("position") as u32,
         task_key: serde_json::from_value(json!(row.get::<String, _>("task_key")))
@@ -191,9 +207,7 @@ async fn claim_in(
         lease_generation: generation,
         lease_token,
         owner,
-    };
-    tx.commit().await?;
-    Ok(Some(item))
+    })
 }
 async fn selected_item_allowed_in(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
@@ -221,11 +235,14 @@ async fn selected_item_allowed_in(
 /// Attempted leases settle as unknown; recovery never blindly sends another provider request.
 pub async fn recover_expired(db: &Database, owner: ExecutorFence) -> Result<u64, ExecutorError> {
     let mut tx = owner.begin_mode(db, false, true).await?;
-    let rows=sqlx::query("WITH locked_batches AS MATERIALIZED (SELECT b.batch_ref FROM linggan_ai_batch_control b WHERE b.state='open' AND EXISTS(SELECT 1 FROM linggan_ai_batch_item item JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE item.batch_ref=b.batch_ref AND c.state='running' AND (c.lease_expires_at<=clock_timestamp() OR NOT linggan_ai_executor_is_owner(c.lease_instance_ref,c.lease_instance_generation,false))) ORDER BY b.batch_ref FOR UPDATE OF b SKIP LOCKED LIMIT 100) SELECT c.item_ref,c.attempt_count,c.invocation_ref,item.batch_ref,b.cancel_requested FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item item USING(item_ref) JOIN locked_batches locked USING(batch_ref) JOIN linggan_ai_batch_control b USING(batch_ref) WHERE c.state='running' AND (c.lease_expires_at<=clock_timestamp() OR NOT linggan_ai_executor_is_owner(c.lease_instance_ref,c.lease_instance_generation,false)) ORDER BY c.lease_expires_at,c.item_ref FOR UPDATE OF c SKIP LOCKED LIMIT 100").fetch_all(&mut *tx).await?;
+    let rows=sqlx::query("WITH locked_batches AS MATERIALIZED (SELECT b.batch_ref FROM linggan_ai_batch_control b WHERE b.state='open' AND EXISTS(SELECT 1 FROM linggan_ai_batch_item item JOIN linggan_ai_batch_item_control c USING(item_ref) WHERE item.batch_ref=b.batch_ref AND c.state='running' AND NOT EXISTS(SELECT 1 FROM linggan_ai_returned_response saved WHERE saved.invocation_ref=c.invocation_ref) AND (c.lease_expires_at<=clock_timestamp() OR NOT linggan_ai_executor_is_owner(c.lease_instance_ref,c.lease_instance_generation,false))) ORDER BY b.batch_ref FOR UPDATE OF b SKIP LOCKED LIMIT 100) SELECT c.item_ref,c.attempt_count,c.invocation_ref,item.batch_ref,b.cancel_requested FROM linggan_ai_batch_item_control c JOIN linggan_ai_batch_item item USING(item_ref) JOIN locked_batches locked USING(batch_ref) JOIN linggan_ai_batch_control b USING(batch_ref) WHERE c.state='running' AND NOT EXISTS(SELECT 1 FROM linggan_ai_returned_response saved WHERE saved.invocation_ref=c.invocation_ref) AND (c.lease_expires_at<=clock_timestamp() OR NOT linggan_ai_executor_is_owner(c.lease_instance_ref,c.lease_instance_generation,false)) ORDER BY c.lease_expires_at,c.item_ref FOR UPDATE OF c SKIP LOCKED LIMIT 100").fetch_all(&mut *tx).await?;
     let mut batches = BTreeSet::new();
     for row in &rows {
         let attempted = row.get::<i32, _>("attempt_count") > 0;
         if attempted {
+            let returned: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM linggan_ai_returned_response WHERE invocation_ref=$1)")
+                .bind(row.get::<Option<Uuid>, _>("invocation_ref")).fetch_one(&mut *tx).await?;
+            if returned { continue; }
             crate::model_invocation::finish_invocation_in(
                 &mut tx,
                 row.get("invocation_ref"),

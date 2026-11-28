@@ -1,4 +1,5 @@
 //! Topic Map HTTP composition. Canonical reads and durable commands remain in intelligence.
+mod directions;
 use super::LocalWebState;
 use axum::{
     Extension, Json, Router,
@@ -11,6 +12,7 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
+use directions::{preview_directions, read_directions, save_directions};
 use linggan_intelligence::topic_map::read_model::TopicMapReadModel;
 use linggan_intelligence::topic_map::{TopicMapCommand, TopicMapQuery};
 use linggan_intelligence::topic_map_research::ResearchError;
@@ -49,6 +51,18 @@ pub(super) fn routes(
         });
     }
     Router::new()
+        .route(
+            "/api/local/topic-map/directions/runs",
+            get(directions::list_runs).post(directions::generate),
+        )
+        .route(
+            "/api/local/topic-map/directions/preview",
+            post(preview_directions),
+        )
+        .route(
+            "/api/local/topic-map/directions",
+            get(read_directions).post(save_directions),
+        )
         .route(
             "/api/local/topic-map/alternatives/handoff",
             post(handoff_angle),

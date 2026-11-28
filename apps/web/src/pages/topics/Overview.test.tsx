@@ -9,12 +9,12 @@ import { topicSnapshot, topicStats, topicWork } from "./topicTestFixture";
 afterEach(cleanup);
 describe("material-first overview preserves statistical boundaries", () => {
   it("partitions every returned like boundary while retaining unknown separately and respecting the actual threshold", () => {
-    const likes = [0, 20, 21, 99, 100, 499, 500, 999, 1000, 4999, 5000, null];
+    const likes = [0, 20, 21, 99, 100, 199, 200, 499, 500, 999, 1000, 4999, 5000, null];
     const works = likes.map((likes, i) => ({ ...topicWork(i), likes }));
     const result = materialLikeBins(works, 750);
-    expect(result.bins.map((b) => b.refs.length)).toEqual([2, 2, 2, 2, 2, 1]);
-    expect(result.unknown).toEqual([works[11]!.workRef]);
-    expect(result.bins.map((b) => b.high)).toEqual([false, false, false, false, true, true]);
+    expect(result.bins.map((b) => b.refs.length)).toEqual([2, 2, 2, 2, 2, 2, 1]);
+    expect(result.unknown).toEqual([works[13]!.workRef]);
+    expect(result.bins.map((b) => b.high)).toEqual([false, false, false, false, false, true, true]);
     expect(materialLikeBins(works, null).bins.every((b) => !b.high)).toBe(true);
     expect(works.map((w) => w.likes)).toEqual(likes);
   });
@@ -46,12 +46,12 @@ describe("material-first overview preserves statistical boundaries", () => {
     expect(band).not.toHaveTextContent("+53");
     expect(within(band).queryByRole("button", { name: "查看或调整样本爆款规则" })).toBeNull();
   });
-  it("keeps the six loaded-bin drill-down actions in the compact top bar, including unknown in table mode", async () => {
+  it("keeps the seven loaded-bin drill-down actions in the compact top bar, including unknown in table mode", async () => {
     const snapshot = topicSnapshot();
     render(<OverviewDistribution compact works={snapshot.works} platform={snapshot.statistics.platforms[0]}
       statistics={snapshot.statistics} scope={snapshot.scope} />);
     const chart = screen.getByLabelText("已观察内容点赞分布");
-    expect(within(chart).getAllByRole("button", { name: /赞，.*篇，查看作品/ })).toHaveLength(6);
+    expect(within(chart).getAllByRole("button", { name: /赞，.*篇，查看作品/ })).toHaveLength(7);
     const rules = within(chart).getByRole("button", { name: "查看或调整样本爆款规则" });
     expect(rules).toHaveAttribute("data-action", "rules");
     expect(within(chart).getByText("样本表现", { exact: true })).toBeInTheDocument();
@@ -75,7 +75,7 @@ describe("material-first overview preserves statistical boundaries", () => {
     render(<OverviewDistribution compact works={qualifyingWorks} platform={platform}
       statistics={snap.statistics} scope={snap.scope} />);
     const chart = screen.getByLabelText("已观察内容点赞分布");
-    expect(within(chart).getByRole("button", { name: "100–499赞，1篇，查看作品" })).toHaveAttribute("data-high", "true");
+    expect(within(chart).getByRole("button", { name: "100–199赞，1篇，查看作品" })).toHaveAttribute("data-high", "true");
     expect(within(chart).getByRole("button", { name: "500–999赞，1篇，查看作品" })).toHaveAttribute("data-high", "true");
     expect(within(chart).getByRole("button", { name: "0–20赞，1篇，查看作品" })).not.toHaveAttribute("data-high");
   });

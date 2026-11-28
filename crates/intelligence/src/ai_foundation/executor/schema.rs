@@ -41,6 +41,8 @@ const MIGRATIONS: &[(&str, &str)] = &[
     migration!("0226_ai_connection_billing_pause"),
     migration!("0239_comment_research_automation"),
     migration!("0241_comment_selection_submission"),
+    migration!("0247_ai_returned_response"),
+    migration!("0248_operating_direction_generation"),
 ];
 
 pub(super) async fn require_ready(db: &Database) -> Result<(), ExecutorError> {

@@ -477,3 +477,38 @@ async fn service_heartbeat_wait_cannot_suspend_the_claim_transaction_that_releas
         .unwrap();
     assert_eq!(calls, 0);
 }
+
+#[tokio::test]
+#[ignore = "disposable PostgreSQL proof only"]
+async fn l1_and_topic_scans_make_independent_progress() {
+    let db = fixture::db("independent_corpus_scans").await;
+    let mut locks = db.pool().begin().await.unwrap();
+    // Observe both real scans while their respective candidate queries are deliberately held.
+    sqlx::query("LOCK TABLE linggan_topic_research_result, linggan_content_understanding_automation IN ACCESS EXCLUSIVE MODE")
+        .execute(&mut *locks).await.unwrap();
+    let drain = ModelWorkerDrain::new();
+    let worker = tokio::spawn(service::run(
+        db.clone(), "independent-corpus-scans", 4, Arc::new(SyntheticModelSecrets),
+        adapter(), drain.clone(),
+    ));
+    let observed = tokio::time::timeout(Duration::from_secs(15), async {
+        loop {
+            sqlx::query("SELECT pg_stat_clear_snapshot()").execute(&mut *locks).await.unwrap();
+            let count: i64 = sqlx::query_scalar("SELECT count(DISTINCT a.pid) FROM pg_locks l JOIN pg_stat_activity a USING(pid)
+                WHERE NOT l.granted AND l.locktype='relation' AND
+                ((l.relation='linggan_topic_research_result'::regclass AND a.query LIKE '%w.input_hash,w.input_refs%')
+                 OR (l.relation='linggan_content_understanding_automation'::regclass AND a.query LIKE '%SELECT DISTINCT a.domain_ref,u.content_public_ref%'))")
+                .fetch_one(&mut *locks).await.unwrap();
+            if count == 2 { break; }
+            tokio::time::sleep(Duration::from_millis(40)).await;
+        }
+    }).await;
+    if observed.is_err() {
+        let blocked: Vec<String> = sqlx::query_scalar("SELECT left(a.query,1000) FROM pg_stat_activity a WHERE a.datname=current_database() AND a.wait_event_type='Lock'")
+            .fetch_all(&mut *locks).await.unwrap();
+        panic!("both candidate scans must reach PostgreSQL independently; waiting {blocked:?}, worker finished {}", worker.is_finished());
+    }
+    locks.rollback().await.unwrap();
+    drain.request();
+    worker.await.unwrap().unwrap();
+}

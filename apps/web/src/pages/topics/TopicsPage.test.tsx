@@ -131,7 +131,7 @@ describe("Topic React interaction and lifetime", () => {
           ? full.pending
           : Promise.resolve(
               jsonResponse(
-                path.includes("/summary?") ? summary : defaultRead(path),
+                path.includes("/directions?") ? {revision:0,publishedRevision:null,totalWorks:2,topics:[],authors:[],draft:{directions:[],benchmarkAuthors:[]},published:null} : path.includes("/directions/runs?") ? {runs:[]} : path.includes("/summary?") ? summary : defaultRead(path),
               ),
             ),
       ),
@@ -141,12 +141,15 @@ describe("Topic React interaction and lifetime", () => {
       await screen.findByText(/正在载入其余材料与讨论/),
     ).toBeInTheDocument();
     expect(screen.getByLabelText("基础概览指标")).toHaveTextContent("2");
+    await userEvent.click(screen.getByRole("button",{name:"查看运营方向"}));
+    await screen.findByText(/方向清单待确认/);
     full.resolve(jsonResponse(topicSnapshot()));
     await waitFor(() =>
       expect(
         screen.queryByText(/正在载入其余材料与讨论/),
       ).not.toBeInTheDocument(),
     );
+    expect(screen.getByRole("region",{name:"运营方向"})).toBeInTheDocument();
     const input = screen.getByRole("searchbox", { name: "查找材料与方向" });
     await userEvent.type(input, "材料 1");
     expect(input).toHaveValue("材料 1");
@@ -358,6 +361,7 @@ describe("Topic React interaction and lifetime", () => {
     const row = snapshot.topics[0];
     if (!row) throw new Error("No synthetic topic");
     row.displayName = malicious;
+    row.definitionText = malicious;
     vi.stubGlobal(
       "fetch",
       vi.fn(async (path: string) =>
@@ -601,10 +605,10 @@ it.each(['angle', 'product_research'])('hands off saved %s only when it is a con
   await userEvent.click(await screen.findByRole('button', { name: '取回保存的原版本' }));
   await screen.findByRole('button', { name: '复核来源并导出Markdown' });
   if (kind === 'product_research') {
-    expect(screen.queryByRole('button', { name: '加入选题池' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '打开创作正文' })).not.toBeInTheDocument();
     expect(posts).toHaveLength(0);
   } else {
-    await userEvent.click(screen.getByRole('button', { name: '加入选题池' }));
+    await userEvent.click(screen.getByRole('button', { name: '打开创作正文' }));
     await waitFor(() => expect(screen.getByLabelText('测试当前路径')).toHaveTextContent(`/ops/creation?domain=${topicDomain}&work=${workId}&view=body`));
     expect(posts).toEqual([expect.objectContaining({ domainRef: topicDomain, alternativeRef, commandRef: expect.any(String) })]);
   }

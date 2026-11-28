@@ -32,14 +32,14 @@ pub async fn read_history(db: &Database, query: &HistoryQuery) -> Result<Value, 
         'invocationRef',i.invocation_ref,'taskKey',i.task_key,'taskConfigRef',i.task_config_ref,'modelConfigRef',i.config_ref,
         'batchRef',i.batch_ref,'roundNo',i.round_no,'operation',i.operation,'state',i.state,
         'connectionVersionRef',i.connection_version_ref,'modelId',m.model_id,'connectionName',v.name,
-        'usageState',i.usage_state,'dispatchState',i.dispatch_state,'budgetDay',i.budget_day,
-        'inputTokens',i.input_tokens::text,'outputTokens',i.output_tokens::text,
-        'measuredTokens',i.measured_tokens::text,'cachedInputTokens',i.cached_input_tokens::text,
-        'cacheWriteTokens',i.cached_write_tokens::text,'reasoningTokens',i.reasoning_tokens::text,
-        'quotaHeldTokens',i.charged_tokens::text,'legacyChargedTokens',i.legacy_charged_tokens::text,
+        'usageState',usage.usage_state,'dispatchState',i.dispatch_state,'budgetDay',i.budget_day,
+        'inputTokens',usage.input_tokens::text,'outputTokens',usage.output_tokens::text,
+        'measuredTokens',usage.measured_tokens::text,'cachedInputTokens',usage.cached_input_tokens::text,
+        'cacheWriteTokens',usage.cached_write_tokens::text,'reasoningTokens',usage.reasoning_tokens::text,
+        'quotaHeldTokens',usage.charged_tokens::text,'legacyChargedTokens',i.legacy_charged_tokens::text,
         'quotePicoUsd',i.cost_pico_usd::text,'failureCode',i.failure_code,
         'createdAt',i.created_at,'finishedAt',i.finished_at)
-        FROM linggan_model_invocation i JOIN linggan_model_connection_version v ON v.version_ref=i.connection_version_ref
+        FROM linggan_model_invocation i JOIN linggan_ai_budget_usage usage USING(invocation_ref) JOIN linggan_model_connection_version v ON v.version_ref=i.connection_version_ref
         LEFT JOIN linggan_model_entry m ON m.model_ref=i.model_ref
         WHERE ($1::uuid IS NULL OR (i.created_at,i.invocation_ref)<(SELECT created_at,invocation_ref FROM linggan_model_invocation WHERE invocation_ref=$1))
           AND ($2::text IS NULL OR i.task_key=$2)

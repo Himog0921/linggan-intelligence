@@ -18,7 +18,7 @@ pub async fn read_topic_map(
     Ok(snapshot)
 }
 
-pub(super) async fn read_topic_map_in(
+pub(crate) async fn read_topic_map_in(
     tx: &mut Transaction<'_, Postgres>,
     q: &TopicMapQuery,
     page_database: Option<&Database>,

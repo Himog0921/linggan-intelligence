@@ -96,6 +96,12 @@ pub(super) async fn prepare_with_images_in(
         Some(input.response_schema),
     );
     request.images = images;
+    if let Some(definitions) = input.payload.pointer("/packet/input/definitions").and_then(Value::as_array) {
+        let estimate = crate::ai_foundation::transport::estimate_input_tokens(&request.system, &request.prompt);
+        if estimate > model.limits.input_tokens {
+            eprintln!("topic research input exceeds model limit: window={} catalog_topics={} estimated_tokens={} configured_limit={}",input.reference,definitions.len(),estimate,model.limits.input_tokens);
+        }
+    }
     request.wire_bytes()?;
     let reservation = model
         .limits

@@ -140,6 +140,8 @@ paths.web_real_chain = [
   'apps/web/src/pages/corpus/creators/CreatorWorkResearch.tsx',
   'apps/web/src/pages/corpus/creators/CreatorAccountResearch.tsx',
   'apps/web/src/pages/topics/TopicResearchFlow.tsx',
+  'apps/web/src/pages/topics/OperatingDirections.tsx',
+  'apps/web/src/pages/topics/DirectionGeneration.tsx',
   'apps/web/src/pages/topics/TopicAutomation.tsx',
   'apps/web/src/pages/collection/collectionCommand.ts',
   'apps/web/src/pages/collection/CollectionFrame.tsx',

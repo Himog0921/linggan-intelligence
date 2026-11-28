@@ -4,7 +4,7 @@ import { ActionButton } from '../../shared/ActionButton';
 import { readCommentAssignments, retryCommentAssignment, type CommentAssignment, type CommentAssignmentScope } from './commentAssignmentsApi';
 import { c } from './styles';
 type Props = CommentAssignmentScope & { compact?: boolean; revision?: number };
-const stateLabels = { not_analyzed: '尚未分析', pending: '挂靠中', failed: '挂靠失败', unavailable: '归属待更新' };
+const stateLabels = { partial:'部分接纳', rejected:'判断未入图', not_analyzed: '尚未分析', pending: '挂靠中', failed: '挂靠失败', unavailable: '归属待更新' };
 export function CommentAssignments(props: Props) {
   return <AssignmentList key={`${props.domain}:${props.work}:${props.request ?? ''}`} {...props} />;
 }
@@ -32,10 +32,12 @@ function AssignmentList({ domain, work, request, compact = false, revision = 0 }
     <div className={c('lgi-tm-section-head')}><h3>评论主题挂靠</h3><ActionButton variant="quiet" onClick={() => setRetry(value => value + 1)}>刷新挂靠</ActionButton></div>
     {error ? <p role="alert">挂靠结果读取失败</p> : items === null ? <p role="status">正在读取挂靠结果…</p> : !items.length ? <p>尚无评论语义结果</p> : items.map(item =>
       <article key={item.requestRef} className={c('lgi-tm-comment')}>
+        {item.assignmentState==='partial' && <p>部分接纳</p>}
         {!item.sourceAvailable ? <span>来源不可读</span> : !item.signals.length ? <span>{item.assignmentState === 'complete' ? '未提取语义信号' : stateLabels[item.assignmentState]}</span> : item.signals.map(signal => <div key={signal.ordinal}>
           {compact ? <strong>信号 {signal.ordinal + 1}</strong> : <><h4>{signal.proposition}</h4><blockquote>{signal.evidence.text}</blockquote></>}
           <div className={c('lgi-tm-row')}>
             <span>{signal.assignmentState !== 'complete' ? stateLabels[signal.assignmentState] : signal.assignment?.status === 'matched' ? '已匹配' : signal.assignment ? '未匹配' : '未形成挂靠结果'}</span>
+            {signal.rejectionReason && <span>{signal.rejectionReason==='comment_topic_creation_forbidden'?'评论仅可匹配已有主题':signal.rejectionReason}</span>}
             {signal.assignmentState === 'complete' && signal.assignment?.status === 'matched' ? signal.assignment.matches.map(match => <a key={match.definitionRef} href={`/topics?${new URLSearchParams({ tm: '1', domainRef: domain, topicRef: match.topicRef })}`}>{match.label}</a>) : null}
           </div>
         </div>)}

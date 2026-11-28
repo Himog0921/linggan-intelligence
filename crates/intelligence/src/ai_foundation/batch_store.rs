@@ -70,6 +70,7 @@ pub enum InputRef {
     CreatorWorkResearch {
         request_ref: Uuid,
     },
+    OperatingDirection { run_ref: Uuid },
     OpsTitleLabel { run_ref: Uuid, shard_index: u32 },
     CommentResearchUnit {
         unit_ref: Uuid,
@@ -130,6 +131,7 @@ impl InputRef {
                 task == TaskKey::CreatorAccountResearch && !trial
             }
             Self::CreatorWorkResearch { .. } => task == TaskKey::CreatorResearch && !trial,
+            Self::OperatingDirection { .. } => matches!(task, TaskKey::DirectionListDraft | TaskKey::DirectionProposal) && !trial,
             Self::OpsTitleLabel { .. } => task == TaskKey::OpsTitleLabel && !trial,
             Self::CommentResearchUnit { .. } => task == TaskKey::CommentUnderstanding && !trial,
             Self::CommentProblemConsolidation { .. } => {
@@ -147,7 +149,7 @@ impl InputRef {
                 task == TaskKey::ContentUnderstandingDeep && !trial
             }
             Self::Note { .. } => task == TaskKey::NoteInterpretation,
-            Self::DirectionSample { .. } => matches!(
+            Self::DirectionSample { .. } => trial && matches!(
                 task,
                 TaskKey::DirectionListDraft | TaskKey::DirectionProposal
             ),
@@ -340,6 +342,7 @@ pub async fn create_batch(
     {
         return Err(FoundationError::Invalid);
     }
+    if request.items.iter().any(|i| matches!(i.input, InputRef::OperatingDirection {..})) {return Err(FoundationError::Invalid);}
     let hash = input_hash(request.task_key, &request.items, false)?;
     let payload = json!({"task":request.task_key,"expectedTaskRevision":request.expected_task_revision,"config":request.task_config_ref,"kind":request.kind,"inputsHash":hash});
     let mut command = Command::begin(db, request.command_ref, "batch", &payload).await?;

@@ -33,6 +33,7 @@ pub fn text(request: &Value, role: &str) -> String {
 pub struct Endpoint {
     pub url: String,
     pub requests: Arc<Mutex<Vec<Value>>>,
+    pub hold_response: Arc<AtomicBool>,
     pub payment_required: Arc<AtomicBool>,
     pub include_image_readings: Arc<AtomicBool>,
     stop: watch::Sender<bool>,
@@ -44,6 +45,8 @@ impl Endpoint {
         let url = format!("http://{}/v1", listener.local_addr().unwrap());
         let requests = Arc::new(Mutex::new(Vec::new()));
         let recorded = requests.clone();
+        let hold_response = Arc::new(AtomicBool::new(false));
+        let hold = hold_response.clone();
         let payment_required = Arc::new(AtomicBool::new(false));
         let reject = payment_required.clone();
         let include_image_readings = Arc::new(AtomicBool::new(false));
@@ -58,6 +61,7 @@ impl Endpoint {
                         let (mut socket, _) = socket.unwrap();
                         let recorded = recorded.clone();
                         let reject = reject.clone();
+                        let hold = hold.clone();
                         let image_mode = image_mode.clone();
                         clients.spawn(async move {
                             // Reuse the bounded reader, synthetic-credential check and SSE
@@ -133,6 +137,7 @@ impl Endpoint {
                                 text.push('}');
                             }
                             recorded.lock().unwrap().push(request);
+                            while hold.load(Ordering::SeqCst) { tokio::time::sleep(std::time::Duration::from_millis(20)).await; }
                             writing_wire::respond(&mut socket, &text).await;
                         });
                     }
@@ -145,6 +150,7 @@ impl Endpoint {
         Self {
             url,
             requests,
+            hold_response,
             payment_required,
             include_image_readings,
             stop,

@@ -157,7 +157,7 @@ if [[ "${1:-}" == "--note-analysis" || "${1:-}" == "--ai-foundation" || "${1:-}"
   fi
   if [[ "${1:-}" == "--ai-readonly" ]]; then
     export CREATOR_PROOF_NODE="$(command -v node)"
-    cargo_proof -p linggan-intelligence --test topic_map_postgres --locked -- --ignored --nocapture
+    AI_FOUNDATION_PROOF_NODE="$(command -v node)" cargo_proof -p linggan-intelligence --test topic_map_postgres --locked -- --ignored --nocapture
     cargo_proof -p linggan-intelligence --test creator_discovery_input_postgres --locked -- --ignored --nocapture
     cargo_proof -p linggan-intelligence --lib topic_map_research::saved_source_postgres:: --locked -- --ignored --nocapture
     echo "Canonical creator input and frozen Topic Map source/read qualification proofs passed"

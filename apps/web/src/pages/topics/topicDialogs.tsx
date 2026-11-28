@@ -1844,7 +1844,7 @@ export function createTopicDialogs(context: TopicDialogsContext) {
             <h3>{esc(a.title)}</h3>
             <p>{esc(a.methodVersion)}</p>
           </div>
-          {a.kind === "angle" ? btn("加入选题池", "handoff-alternative", a.alternativeRef) : null}
+          {a.kind === "angle" ? btn("打开创作正文", "handoff-alternative", a.alternativeRef) : null}
           {btn(
             "复核来源并导出Markdown",
             "export-alternative",

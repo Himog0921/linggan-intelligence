@@ -1,10 +1,10 @@
 import { requestJson } from '../../shared/api';
 import * as d from '../../shared/decode';
-export type AssignmentState = 'not_analyzed' | 'pending' | 'complete' | 'failed' | 'unavailable';
+export type AssignmentState = 'not_analyzed' | 'pending' | 'complete' | 'partial' | 'rejected' | 'failed' | 'unavailable';
 export type CommentAssignmentScope = { domain: string; work: string; request?: string };
 function state(row: d.Json): AssignmentState {
   const value = d.str(row, 'assignmentState');
-  if (value === 'not_analyzed' || value === 'pending' || value === 'complete' || value === 'failed' || value === 'unavailable') return value;
+  if (value === 'not_analyzed' || value === 'pending' || value === 'complete' || value === 'partial' || value === 'rejected' || value === 'failed' || value === 'unavailable') return value;
   throw new d.ShapeError('assignmentState');
 }
 function assignment(row: d.Json) {
@@ -22,7 +22,7 @@ export function parseCommentAssignments(value: unknown, scope: CommentAssignment
       return { requestRef, workRef, windowRef: d.optStr(row, 'windowRef'), sourceRef: d.str(row, 'sourceRef'), commentExternalId: d.str(row, 'commentExternalId'), sourceAvailable, retryable: d.optBool(row, 'retryable') ?? false, assignmentState: state(row),
         signals: sourceAvailable ? d.list(row, 'signals', signal => {
           const evidence = d.obj(signal, 'evidence'), linked = d.optObj(signal, 'assignment');
-          return { ordinal: d.num(signal, 'signalOrdinal'), kind: d.str(signal, 'kind'), proposition: d.str(signal, 'proposition'), assignmentState: state(signal),
+          return { ordinal: d.num(signal, 'signalOrdinal'), kind: d.str(signal, 'kind'), proposition: d.str(signal, 'proposition'), assignmentState: state(signal), rejectionReason:d.optStr(signal,'rejectionReason'),
             evidence: { sourceRef: d.str(evidence, 'sourceRef'), start: d.num(evidence, 'start'), end: d.num(evidence, 'end'), text: d.str(evidence, 'text') },
             assignment: linked ? assignment(linked) : null };
         }) : [],

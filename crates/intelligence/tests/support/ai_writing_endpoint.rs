@@ -53,7 +53,12 @@ impl Endpoint {
                             let understanding=comment_input.as_ref().filter(|v|v["contract"]=="comment-understanding.v1");
                             let consolidation=comment_input.as_ref().filter(|v|v["contract"]=="comment-problem-consolidation.v1");
                             let lens=comment_input.as_ref().and_then(|v|v["titles"].as_array());
-                            let mut output=if let Some(titles)=lens {
+                            let directions=comment_input.as_ref().filter(|v|matches!(v["task"].as_str(),Some("direction_list_draft"|"direction_proposal")));
+                            let mut output=if let Some(p)=directions {
+                                let topics=p["topics"].as_object().unwrap();
+                                let works:std::collections::BTreeSet<_>=topics.values().flat_map(|t|t["workRefs"].as_array().unwrap().iter().map(|w|w.as_str().unwrap())).collect();
+                                json!({"candidates":[{"existingDirectionRef":p["existing"].as_object().unwrap().keys().next(),"label":"家庭支持","definition":"合成经营方向","topicRefs":topics.keys().collect::<Vec<_>>(),"evidenceWorkRefs":works}]})
+                            } else if let Some(titles)=lens {
                                 let labels:Vec<_>=titles.iter().filter(|r|r["title"]!="缺失行").map(|r|{
                                     let key=if r["title"]=="合成乙" {"other"} else {"unclear"};
                                     json!({"titleKey":r["titleKey"],"moment":key,"situation":key,"offer":key,"audience":key,"confidence":"high"})
@@ -97,6 +102,14 @@ impl Endpoint {
                                 }
                                 if variant=="invalid_output" && packet["contract"]=="topic-map.single-pass.v1" {
                                     output["decisions"][0]["newTopicId"]=json!("missing");
+                                }
+                                if variant=="partial_assignment" && packet["contract"]=="topic-map.single-pass.v1" {
+                                    let mut other=output["projection"]["d"][0].clone();
+                                    other["l"]=json!("另一条独立讨论"); other["s"]=json!("合成第二讨论");
+                                    output["projection"]["d"].as_array_mut().unwrap().push(other);
+                                    let mut bad=output["decisions"][0].clone();
+                                    bad["discussionIndex"]=json!(1);bad["newTopicId"]=json!("missing");
+                                    output["decisions"].as_array_mut().unwrap().push(bad);
                                 }
                                 if variant=="invalid_ancestor" && packet["contract"]=="topic-map.single-pass.v1" {
                                     let topic=|id:&str,label:&str,definition:&str,inclusion:&str,parent:Value|json!({"newTopicId":id,"label":label,"definition":definition,"inclusionCriteria":[inclusion],"exclusionCriteria":["新增来源材料"],"domainFit":"in_scope","domainReason":"合成领域材料","abstractionReason":"合成保留规则","parent":parent});

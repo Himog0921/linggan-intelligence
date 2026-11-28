@@ -435,7 +435,7 @@ try {
       await action("saved");
       await action("saved-materials", saved.body.subjectRef);
       const handoffResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/local/topic-map/alternatives/handoff");
-      await page.getByRole("button", { name: "加入选题池", exact: true }).click();
+      await page.getByRole("button", { name: "打开创作正文", exact: true }).click();
       const handed = await handoffResponse;
       assert.equal(handed.status(), 200);
       const target = await handed.json();
@@ -487,7 +487,7 @@ try {
       await action("saved");
       await action("saved-materials", saved.body.subjectRef);
       const repeatedResponse = page.waitForResponse(r => r.request().method() === "POST" && new URL(r.url()).pathname === "/api/local/topic-map/alternatives/handoff");
-      await page.getByRole("button", { name: "加入选题池", exact: true }).click();
+      await page.getByRole("button", { name: "打开创作正文", exact: true }).click();
       const repeated = await repeatedResponse;
       assert.equal(repeated.status(), 200);
       assert.deepEqual(await repeated.json(), target, "a second UI handoff reuses the same creation target");

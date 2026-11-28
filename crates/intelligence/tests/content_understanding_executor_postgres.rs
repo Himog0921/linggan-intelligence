@@ -9,6 +9,8 @@ mod l1_setup;
 mod setup;
 #[path = "support/content_understanding_endpoint.rs"]
 mod wire;
+#[path = "support/late_ai_receipt.rs"]
+mod late;
 
 use base64::Engine as _;
 use linggan_intelligence::{
@@ -66,6 +68,16 @@ fn full_schema_fixtures_record_the_actual_deep_v2_migration_digest() {
 #[tokio::test]
 #[ignore = "owned PostgreSQL + AI_FOUNDATION_PROOF_NODE + owned LINGGAN_LOCAL_MEDIA_ROOT; no real models"]
 async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
+    l1_round_trip(false).await;
+}
+
+#[tokio::test]
+#[ignore = "owned PostgreSQL and held loopback provider"]
+async fn returned_l1_response_after_unknown_is_visible_and_reused() {
+    l1_round_trip(true).await;
+}
+
+async fn l1_round_trip(late: bool) {
     // The fixture reads LOCAL_001_PROOF_DATABASE_URL itself. Never discover or print a DSN.
     let db = fixture::proof_database(&format!("content_l1_{}", Uuid::new_v4().simple())).await;
     let media_root = PathBuf::from(
@@ -350,6 +362,10 @@ async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
         Err(FoundationError::NotFound)
     ));
 
+    if late {
+        late::short_attempt_lease(&db).await;
+        endpoint.hold_response.store(true, std::sync::atomic::Ordering::SeqCst);
+    }
     let drain = linggan_intelligence::model_worker_drain::ModelWorkerDrain::new();
     let worker = tokio::spawn(linggan_intelligence::ai_foundation::executor::service::run(
         db.clone(),
@@ -359,6 +375,11 @@ async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
         adapter.clone(),
         drain.clone(),
     ));
+    if late {
+        late::wait_unknown(&db).await;
+        endpoint.hold_response.store(false, std::sync::atomic::Ordering::SeqCst);
+        late::wait_reconciled(&db).await;
+    }
     let saved = tokio::time::timeout(Duration::from_secs(60), async {
         loop {
             let current = owner::latest(&db, dossier::DOMAIN, work, None)
@@ -389,6 +410,15 @@ async fn l1_round_trip_reuses_current_core_and_preserves_retired_task_config() {
     assert_eq!(card["schemaVersion"], "content-card.v0.2");
     assert_eq!(card["workRef"], json!(work));
     assert_eq!(card["analysisRef"], json!(receipt.request_ref));
+    if late {
+        let current = owner::preview(&db,dossier::DOMAIN,work).await.unwrap();
+        let reused = owner::start(&db,&start_from(&current,work)).await.unwrap();
+        assert!(reused.reused);
+        assert_eq!(reused.request_ref,receipt.request_ref);
+        assert_eq!(endpoint.requests.lock().unwrap().len(),2,"only the probe and original L1 model call");
+        endpoint.finish().await;
+        return;
+    }
     assert_eq!(card["deep"], Value::Null);
     assert_eq!(
         card["core"]["mainTopicUnitId"], "u2",

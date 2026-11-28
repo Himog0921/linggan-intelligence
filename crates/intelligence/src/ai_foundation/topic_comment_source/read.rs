@@ -51,6 +51,8 @@ pub async fn read(db: &Database, query: &Query) -> Result<Value, FoundationError
                     .as_ref()
                     .and_then(|v| v["units"].as_array())
                     .and_then(|units| units.iter().find(|u| u["unitId"] == *id));
+                let rejection=core.as_ref().and_then(|v|v["rejectedUnits"].as_array())
+                    .and_then(|units|units.iter().find(|u|u["unitId"]==*id)).and_then(|u|u["reason"].as_str());
                 let valid = accepted.is_some_and(|u| assignment_current(u, &versions, &catalog));
                 let assignment=accepted.filter(|_|valid).map(|u|json!({"status":u["status"],"matches":u["assignments"],"reason":u["reason"]}));
                 if let Some(topic) = query.topic_ref {
@@ -63,7 +65,7 @@ pub async fn read(db: &Database, query: &Query) -> Result<Value, FoundationError
                     }
                 }
                 signals.push(json!({"signalOrdinal":fragment.structure["signalOrdinal"],"kind":fragment.structure["signal"]["kind"],"proposition":fragment.structure["signal"]["proposition"],"problemFrame":fragment.structure["signal"]["problemFrame"],"eligibilityState":fragment.structure["signal"]["eligibilityState"],"eligibilityReason":fragment.structure["signal"]["eligibilityReason"],
-                    "evidence":{"sourceRef":fragment.source_ref,"start":fragment.start,"end":fragment.end,"text":fragment.text},"assignment":assignment,"assignmentState":if accepted.is_some()&&!valid{"unavailable"}else{state.as_str()}}));
+                    "evidence":{"sourceRef":fragment.source_ref,"start":fragment.start,"end":fragment.end,"text":fragment.text},"assignment":assignment,"rejectionReason":rejection,"assignmentState":if rejection.is_some(){"rejected"}else if valid{"complete"}else if accepted.is_some() || state=="partial"{"unavailable"}else{state.as_str()}}));
             }
         }
         if query.topic_ref.is_some() && signals.is_empty() {

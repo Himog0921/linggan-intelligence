@@ -1,6 +1,7 @@
 //! Canonical Topic Map projection and explicit, versioned human decisions.
 #[path = "topic_map/core_read.rs"]
 mod core_read;
+pub mod directions;
 mod operations;
 #[path = "topic_map/read.rs"]
 mod read;
@@ -9,6 +10,7 @@ mod saved;
 #[path = "topic_map/store.rs"]
 mod store;
 pub use read::read_topic_map;
+pub(crate) use read::read_topic_map_in;
 pub(crate) use saved::read_saved_alternative_in;
 pub mod read_model;
 pub use saved::{
