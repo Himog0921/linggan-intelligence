@@ -90,14 +90,17 @@ export function publicationOrder(w: T.Work) {
   const stamp = /^\d{13}$/.test(value) ? Number(value) : Date.parse(value);
   return Number.isFinite(stamp) ? stamp : 0;
 }
-export function publishedTime(w: T.Work) {
+export function publishedTime(w: T.Work, showPrecision = true) {
   if (w.publishedAtSourceText && !/^\d{13}$/.test(w.publishedAtSourceText))
     return w.publishedAtSourceText;
   if (!w.publishedAt && !w.publishedAtSourceText) return "发布时间未知";
   const raw = String(w.publishedAtSourceText || w.publishedAt),
     date = new Date(/^\d{13}$/.test(raw) ? Number(raw) : raw);
   if (Number.isNaN(date.getTime())) return raw;
-  return `${date.toLocaleDateString("zh-CN")} · ${w.publishedAtPrecision === "exact" ? "发布时间" : "时间精度见来源"}`;
+  const day = date.toLocaleDateString("zh-CN");
+  return showPrecision
+    ? `${day} · ${w.publishedAtPrecision === "exact" ? "发布时间" : "时间精度见来源"}`
+    : day;
 }
 export function legacyConcept(t: T.Topic | undefined | null) {
   return (

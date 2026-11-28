@@ -287,18 +287,18 @@ try {
       .evaluate((node) => node.getBoundingClientRect().height);
     assert.ok(bandHeight < 165,
       "the chart and metrics must fit the approved compact V3 band without a spare explanation row");
-    const statusBounds = await page.getByLabel("主题处理与运营状态")
-      .evaluate((node) => ({ top: node.getBoundingClientRect().top, width: node.getBoundingClientRect().width }));
-    const bandBounds = await page.getByLabel("主题概览与样本表现")
-      .evaluate((node) => ({ bottom: node.getBoundingClientRect().bottom, width: node.getBoundingClientRect().width }));
-    assert.ok(statusBounds.top >= bandBounds.bottom, "processing and operations belong below the compact metrics/chart band");
-    assert.ok(Math.abs(statusBounds.width - bandBounds.width) <= 2, "status spans both metrics and chart columns");
+    assert.equal(await page.getByLabel("主题处理与运营状态").count(), 0, "the Demo has no status band above notes");
+    const materialTitle = page.getByRole("region", { name: "匹配材料" }).locator("h3 button").first();
+    assert.equal(await materialTitle.evaluate(node => getComputedStyle(node).borderTopWidth), "0px");
     await page.setViewportSize({ width: 1440, height: 900 });
     await ruleLink.click();
     await page.locator("dialog[open]").waitFor();
     await page.keyboard.press("Escape");
     await chart.getByRole("button", { name: "表格", exact: true }).click();
-    const drill = chart.getByRole("table").getByRole("button", { name: "查看", exact: true }).filter({ visible: true });
+    const table = chart.getByRole("table");
+    assert.equal(await table.getByRole("columnheader").count(), 7, "every bin is visible across the table");
+    assert.equal(await table.getByRole("rowheader", { name: "占比" }).count(), 1);
+    const drill = table.getByRole("button", { name: /赞，.*篇，查看作品/ }).filter({ visible: true });
     const enabled = await drill.evaluateAll((buttons) => buttons.findIndex((button) => !button.disabled));
     assert.ok(enabled >= 0);
     const refs = (await drill.nth(enabled).getAttribute("data-id")).split(",");
@@ -308,7 +308,7 @@ try {
     assert.deepEqual(new Set(openedRefs), new Set(refs));
     await page.keyboard.press("Escape");
     await page.screenshot({ path: path.join(dir, "topic-overview-b-table.png"), fullPage: true });
-    await chart.getByRole("button", { name: "分布图", exact: true }).click();
+    await chart.getByRole("button", { name: "图表", exact: true }).click();
     await page.screenshot({ path: path.join(dir, "topic-overview-b-chart.png"), fullPage: true });
   });
   await step(

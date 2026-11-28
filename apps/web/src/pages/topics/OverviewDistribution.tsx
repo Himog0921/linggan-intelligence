@@ -1,6 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { badge, btn } from "./topicElements";
-import { number, platformName } from "./topicModel";
+import { number, pct, platformName } from "./topicModel";
 import type { PlatformStatistics, Snapshot, Statistics, Work } from "./types";
 import s from "./Overview.module.css";
 import { materialLikeBins } from "./materialLikeBins";
@@ -14,10 +14,11 @@ export function OverviewDistribution({ works, platform, statistics, scope, compa
   headControls?: ReactNode;
 }) {
   const [table, setTable] = useState(false);
-  const { bins, unknown } = materialLikeBins(works, platform?.highPerformanceThreshold ?? null);
+  const { bins, unknown } = materialLikeBins(works, platform?.highPerformanceThreshold ?? null, compact);
   const max = Math.max(1, ...bins.map((b) => b.refs.length));
   const subset = (label: string, refs: string[]) => btn(label, "subset", refs.join(","), "lgi-tm-quiet", { disabled: !refs.length });
   if (compact) {
+    const knownCount = bins.reduce((sum, bin) => sum + bin.refs.length, 0);
     return (
       <aside className={s.compactPanel} aria-label="已观察内容点赞分布">
         <div className={s.compactHead}>
@@ -25,7 +26,7 @@ export function OverviewDistribution({ works, platform, statistics, scope, compa
             <button type="button" data-action="rules" className={s.compactRuleTitle}
               aria-label="查看或调整样本爆款规则"
               title="点击查看或调整样本爆款规则">样本表现</button>
-            <span>/ {platform ? platformName(platform.platform) : "暂无平台样本"}</span>
+            <span>{platform ? platformName(platform.platform) + " · 点赞分布" : "点赞分布"}</span>
           </div>
           <div className={s.compactSettings}>
           {platform?.highPerformanceThreshold != null ? (
@@ -36,27 +37,36 @@ export function OverviewDistribution({ works, platform, statistics, scope, compa
           ) : null}
           {headControls}
           <div className={s.compactSwitcher} role="group" aria-label="材料表现视图">
-            <button type="button" aria-pressed={!table} onClick={() => setTable(false)}>分布图</button>
+            <button type="button" aria-pressed={!table} onClick={() => setTable(false)}>图表</button>
             <button type="button" aria-pressed={table} onClick={() => setTable(true)}>表格</button>
           </div></div>
         </div>
-        {table ? (
-          <div className={s.compactTableWrap}>
-            <table className={s.compactTable}>
-              <caption className={s.visuallyHidden}>当前返回材料的点赞区间（不代表服务端完整统计）</caption>
-              <thead><tr><th scope="col">点赞区间</th><th scope="col">作品</th><th scope="col">材料</th></tr></thead>
-              <tbody>
-                {bins.map((bin) => (
-                  <tr key={bin.label}>
-                    <th scope="row">{bin.label}</th><td>{number(bin.refs.length)}</td>
-                    <td>{subset("查看", bin.refs)}</td>
-                  </tr>
-                ))}
-                <tr><th scope="row">点赞未知</th><td>{number(unknown.length)}</td><td>{subset("查看", unknown)}</td></tr>
-              </tbody>
-            </table>
+        {!knownCount ? (
+          <div className={s.compactEmpty}>
+            <strong>当前范围没有可绘制的分布</strong>
+            {scope.topicRef ? <p>切回「全部方向」查看领域整体的样本表现。</p> : null}
           </div>
+        ) : table ? (
+          <table className={s.compactTable}>
+            <caption className={s.visuallyHidden}>当前返回材料的点赞区间与可判定占比。点赞未知 {number(unknown.length)} 篇。</caption>
+            <thead><tr><th scope="col">点赞区间</th>{bins.map(bin => <th scope="col" key={bin.label}>{bin.label}</th>)}</tr></thead>
+            <tbody>
+              <tr><th scope="row">作品数</th>{bins.map(bin => (
+                <td key={bin.label} data-high={bin.high || undefined}>
+                  <button type="button" className={s.compactCount} disabled={!bin.refs.length}
+                    data-action="subset" data-id={bin.refs.join(",")}
+                    aria-label={bin.label + "赞，" + number(bin.refs.length) + "篇，查看作品"}>
+                    {number(bin.refs.length)}
+                  </button>
+                </td>
+              ))}</tr>
+              <tr><th scope="row">占比</th>{bins.map(bin => (
+                <td key={bin.label} data-high={bin.high || undefined}>{pct(bin.refs.length, knownCount)}</td>
+              ))}</tr>
+            </tbody>
+          </table>
         ) : (
+          <>
           <div className={s.compactPlot} role="group" aria-label="可交互的六个点赞区间">
             {bins.map((bin) => (
               <button
@@ -79,10 +89,13 @@ export function OverviewDistribution({ works, platform, statistics, scope, compa
                     />
                   </span>
                 </span>
-                <small className={s.compactBinName}>{bin.label}</small>
               </button>
             ))}
           </div>
+          <div className={s.compactLabels} aria-hidden="true">
+            {bins.map(bin => <span key={bin.label}>{bin.label}</span>)}
+          </div>
+          </>
         )}
         <p className={s.visuallyHidden}>
           图表仅统计当前载入的 {number(works.length)} 篇材料，点赞已知 {number(works.length - unknown.length)} 篇，

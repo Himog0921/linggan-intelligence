@@ -5,10 +5,13 @@ const ranges = [
   [0, 20, "0–20"], [21, 99, "21–99"], [100, 199, "100–199"], [200, 499, "200–499"],
   [500, 999, "500–999"], [1000, 4999, "1千–<5千"], [5000, Infinity, "≥5千"],
 ] as const;
+const overviewRanges = [
+  ranges[0], ranges[1], [100, 499, "100–499"], ranges[4], [1000, 4999, "1千–5千"], ranges[6],
+] as const;
 
 /** Presentation bins describe returned material, never the server's full statistical denominator. */
-export function materialLikeBins(works: readonly Work[], threshold: number | null) {
-  const bins = ranges.map(([min, max, label]) => ({
+export function materialLikeBins(works: readonly Work[], threshold: number | null, compact = false) {
+  const bins = (compact ? overviewRanges : ranges).map(([min, max, label]) => ({
     min, max, label, refs: [] as string[],
     high: threshold !== null && min >= threshold,
   }));

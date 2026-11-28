@@ -43,16 +43,19 @@ const TopicContents = memo(function TopicContents({
   mainVersion,
   notice,
   error,
+  directionTrigger,
 }: {
   engine: ReturnType<typeof createTopicEngine>;
   mainVersion: number;
   notice: string;
   error: string | null;
+  directionTrigger: HTMLElement | null;
 }) {
   const domain=engine.getState().domainRef;
   return (
     <div className={c("lgi-tm-content")}>
-      {domain && <OperatingDirections key={domain} domain={domain}/>}
+      {domain && directionTrigger &&
+        <OperatingDirections key={domain} domain={domain} triggerContainer={directionTrigger}/>}
       <Fragment key={mainVersion}>
         {error ? (
           <p role="alert">领域读取未成功：{error}</p>
@@ -153,6 +156,7 @@ export function TopicsPage() {
   const [engine] = useState(() => createTopicEngine(path => { void navigate(path); }));
   const version = useSyncExternalStore(engine.subscribe, engine.getVersion);
   const root = useRef<HTMLDivElement>(null);
+  const [directionTrigger, setDirectionTrigger] = useState<HTMLDivElement | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   const peek = useTreeNavigation(root, version);
   const state = engine.getState();
@@ -258,6 +262,7 @@ export function TopicsPage() {
         ),
         meta: (
           <div id="topic-map-context-actions" className="v7-context-actions" aria-label="图谱操作" onClick={engine.onClick}>
+            <div ref={setDirectionTrigger} hidden={!state.domainRef} />
             {engine.getContextActions()}
           </div>
         ),
@@ -278,6 +283,7 @@ export function TopicsPage() {
             mainVersion={engine.getMainVersion()}
             notice={engine.getNotice()}
             error={shell.isError ? shell.error.message : null}
+            directionTrigger={directionTrigger}
           />
           {peek ? (
             <div

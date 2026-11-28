@@ -1,7 +1,6 @@
-import { TopicProgress } from './TopicProgress';
-import { OperationsCoverage, OperationsWorkBadge } from './OperationsCoverage';
+import { OperationsWorkBadge } from './OperationsCoverage';
 import { IntelligenceIcon } from '../../shared/IntelligenceIcon';
-import { Fragment, type ButtonHTMLAttributes, type JSX, type ReactNode } from "react";
+import { Fragment, type ButtonHTMLAttributes, type ReactNode } from "react";
 import { TopicPatterns } from "./TopicPatterns";
 import { OverviewReadouts } from "./OverviewReadouts";
 import { OverviewDistribution } from "./OverviewDistribution";
@@ -54,7 +53,7 @@ export interface TopicOverviewContext {
   readonly selectedWorks: () => T.Work[];
   readonly topic: (ref: string | null | undefined) => T.Topic | undefined;
   readonly snapshot: T.Snapshot | null;
-  readonly discussionsView: (ns: T.Work[]) => JSX.Element;
+  readonly domainScope: T.Snapshot["scope"] | undefined;
   readonly loading: boolean;
   readonly readError: string;
   readonly requireSnapshot: () => T.Snapshot;
@@ -242,8 +241,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
             const cover = coverUrl(w);
             const high = isHighWork(w);
             return (
-              <>
-                <article className={cls("lgi-tm-evidence-row")}>
+                <article className={cls("lgi-tm-evidence-row")} key={w.workRef}>
                   <button
                     type={"button"}
                     className={cls("lgi-tm-evidence-cover")}
@@ -261,18 +259,16 @@ export function createTopicOverview(context: TopicOverviewContext) {
                       </>
                     ) : (
                       <>
-                        <span>{"封面尚未采集"}</span>
+                        <span>{"封面"}<br />{"未载入"}</span>
                       </>
                     )}
                   </button>
                   <div className={cls("lgi-tm-evidence-copy")}>
                     <h3 title={esc(title(w))}>
-                      {btn(
-                        esc(title(w)),
-                        "reader",
-                        w.workRef,
-                        "lgi-tm-title-link",
-                      )}
+                      <button type="button" className={cls("lgi-tm-title-link")}
+                        data-action="reader" data-id={w.workRef}>
+                        {esc(title(w))}
+                      </button>
                     </h3>
                     <div className={cls("lgi-tm-material-meta")}>
                       <span
@@ -283,7 +279,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                         {" · "}
                         <span className={cls("lgi-tm-material-author")}>{esc(w.creatorDisplayName || "作者未知")}</span>
                         {" · "}
-                        <span className={cls("lgi-tm-material-date")}>{esc(publishedTime(w))}</span>
+                        <span className={cls("lgi-tm-material-date")}>{esc(publishedTime(w, false))}</span>
                       </span>
                       {w.own
                         ? badge(
@@ -292,7 +288,9 @@ export function createTopicOverview(context: TopicOverviewContext) {
                           )
                         : ""}
                       <OperationsWorkBadge coverage={context.snapshot?.scope.operations} workRef={w.workRef} />
-                      {list(w.topicRefs).length ? badge("已有方向依据", "category") : badge("待归方向", "unknown")}
+                      {list(w.topicRefs).length
+                        ? badge(context.topic(w.topicRefs[0])?.displayName || "已归类", "category")
+                        : badge("尚未归类", "unknown")}
                       {high ? badge("高表现", "signal") : ""}
                     </div>
                     <p className={cls("lgi-tm-excerpt")}>
@@ -303,7 +301,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
                           fragmentText(w.evidenceFragment) ||
                           (authorUnavailable(w)
                             ? "作者原文当前不可用，可核对其他合格来源。"
-                            : "当前没有可展示的正文片段。"),
+                            : ""),
                       )}
                     </p>
                     {materialSourceNote(w)}
@@ -319,18 +317,13 @@ export function createTopicOverview(context: TopicOverviewContext) {
                       w.workRef,
                       "lgi-tm-text-action",
                     )}
-                    {btn(
-                      "保留备选",
-                      "manual-save",
-                      w.workRef,
-                      "lgi-tm-small",
-                      w.readable
-                        ? ""
-                        : 'disabled title="当前作者来源不足，已有评论仍可阅读"',
-                    )}
+                    <button type="button" className={cls("lgi-tm-evidence-save")}
+                      data-action="manual-save" data-id={w.workRef} disabled={!w.readable}
+                      title={w.readable ? undefined : "当前作者来源不足，已有评论仍可阅读"}>
+                      保留备选
+                    </button>
                   </div>
                 </article>
-              </>
             );
           })}
         </div>
@@ -340,6 +333,9 @@ export function createTopicOverview(context: TopicOverviewContext) {
   function materialWorkspace() {
     const ns = workspaceWorks(),
       limit = 12,
+      filtered = Boolean(context.state.query) || context.state.materialMode !== "latest",
+      loaded = list(context.snapshot?.works).length,
+      total = context.snapshot?.scope.totalWorkCount,
       names = list(context.snapshot?.topics).filter(
         (t) =>
           t.lifecycleState !== "superseded" &&
@@ -387,51 +383,25 @@ export function createTopicOverview(context: TopicOverviewContext) {
           ) : (
             ""
           )}
-          {context.state.materialMode !== "latest" ? (
-            <>
-              <p className={cls("lgi-tm-note")}>
-                {
-                  "高表现与常规作品按已保存的平台样本规则筛选，未知指标不计为0；不等于低粉高赞或我方手动爆款。"
-                }
-              </p>
-            </>
-          ) : (
-            ""
-          )}
           {ns.length ? (
             <>
               {materialRows(ns.slice(0, limit))}
-              <div className={cls("lgi-tm-section-head")}>
-                <span className={cls("lgi-tm-note")}>
-                  {[
-                    "展示 ",
-                    Math.min(limit, ns.length),
-                    " / ",
-                    ns.length,
-                    " 篇",
-                  ].join("")}
+              <div className={cls("lgi-tm-evidence-footer")}>
+                <span>{filtered ? "当前匹配" : "当前范围"} {number(filtered ? ns.length : total)} 篇
+                  {known(total) && loaded < total ? ` · 已载入 ${number(loaded)} 篇` : ""}
+                  {ns.length > limit ? ` · 已显示 ${limit} 篇` : ""}
                 </span>
-                {btn(
+                {ns.length > limit ? btn(
                   "查看全部匹配材料",
                   "subset",
                   ns.map((w) => w.workRef).join(","),
                   "lgi-tm-quiet",
-                )}
+                ) : null}
+                <span>「—」表示未获取，不等于 0</span>
               </div>
             </>
           ) : (
             emptyWorkspace()
-          )}
-          {context.state.view === "overview" ? (
-            <>
-              <details className={cls("lgi-tm-core-details")}>
-                <summary>{"已有讨论与场景"}</summary>
-                {context.discussionsView(ns)}
-                {sceneList(ns)}
-              </details>
-            </>
-          ) : (
-            ""
           )}
         </section>
       </>
@@ -543,8 +513,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
     if (context.state.platform && !ids.includes(context.state.platform))
       ids.push(context.state.platform);
     const segments: { key: ScopeKey; name: string; label: string; options: (readonly [string, string])[] }[] = [];
-    if (ids.length >= 2 || context.state.platform)
-      segments.push({ key: "platform", name: "平台", label: "统计平台", options: [["", "全部平台"], ...ids.map((id) => [id, platformName(id)] as const)] });
+    segments.push({ key: "platform", name: "平台", label: "统计平台", options: [["", "全部平台"], ...ids.map((id) => [id, platformName(id)] as const)] });
     const journey = context.state.view === "journey";
     segments.push({
       key: "windowDays",
@@ -558,17 +527,12 @@ export function createTopicOverview(context: TopicOverviewContext) {
     }
     return (
       <div className={cls("lgi-tm-scope-bar")} role={"group"} aria-label={"统计范围"}>
-        {ids.length === 1 && !context.state.platform ? (
-          <span className={cls("lgi-tm-scope-segment is-static")}>
-            <span>{"平台"}</span>
-            <b>{esc(platformName(ids[0]))}</b>
-          </span>
-        ) : null}
         {segments.map((segment) => (
           <label className={cls("lgi-tm-scope-segment")} key={segment.key}>
             <span>{segment.name}</span>
             <SelectField
               compact
+              iconChevron
               label={segment.label}
               value={String(context.state[segment.key] ?? "")}
               options={segment.options.map(([value, label]) => ({ value, label }))}
@@ -612,6 +576,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
   }
   function summary() {
     const activeSnapshot = context.requireSnapshot();
+    const works = context.selectedWorks();
     const selected = context.topic(context.state.topicRef),
       parents = [],
       visited = new Set();
@@ -647,12 +612,6 @@ export function createTopicOverview(context: TopicOverviewContext) {
               </h2>
             </div>
             <div className={cls("lgi-tm-summary-actions")}>
-              {selected ? (
-                <>
-                  {btn("定义与依据", "definition", selected.topicRef, "lgi-tm-text-action")}
-                  {btn("判断这个方向", "judge", selected.topicRef, "lgi-tm-small")}
-                </>
-              ) : null}
               {scopeBar()}
               <ViewSwitch
                 className={cls("lgi-tm-view-switch")}
@@ -674,37 +633,18 @@ export function createTopicOverview(context: TopicOverviewContext) {
             <OverviewReadouts
               statistics={selected?.statistics || activeSnapshot.statistics}
               scope={activeSnapshot.scope}
+              domainScope={context.domainScope}
+              works={works}
             />
             <OverviewDistribution
               compact
-              works={context.selectedWorks().filter((w) => w.platform === plotPlatform(selected?.statistics || activeSnapshot.statistics))}
+              works={works.filter((w) => w.platform === plotPlatform(selected?.statistics || activeSnapshot.statistics))}
               platform={platformStats(selected?.statistics || activeSnapshot.statistics).find((p) => p.platform === plotPlatform(selected?.statistics || activeSnapshot.statistics))}
               statistics={selected?.statistics || activeSnapshot.statistics}
               scope={activeSnapshot.scope}
               headControls={observedPlatforms(selected?.statistics || activeSnapshot.statistics).length > 1 ? plotSelect(selected?.statistics || activeSnapshot.statistics) : null}
             />
           </div>
-          <div aria-label="主题处理与运营状态">
-            <TopicProgress progress={activeSnapshot.scope.progress} />
-            <OperationsCoverage coverage={(selected?.statistics || activeSnapshot.statistics).operations} />
-          </div>
-          {known(context.snapshot?.scope?.totalWorkCount) &&
-          activeSnapshot.scope.totalWorkCount >
-            list(activeSnapshot.works).length ? (
-            <>
-              <p className={cls("lgi-tm-note lgi-tm-partial")}>
-                {[
-                  "当前载入 ",
-                  number(list(activeSnapshot.works).length),
-                  " / ",
-                  number(activeSnapshot.scope.totalWorkCount),
-                  " 篇；上方统计为服务端完整范围。",
-                ].join("")}
-              </p>
-            </>
-          ) : (
-            ""
-          )}
         </section>
       </>
     );
@@ -743,6 +683,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
         number(t.statistics?.workCount) + " 篇作品",
         children.length ? children.length + " 个子主题" : "",
         parent ? "属于「" + parent.displayName + "」" : "",
+        t.lifecycleState === "candidate" ? "候选方向" : "",
       ].filter(Boolean).join(" · ");
       return (
         <>
@@ -778,18 +719,14 @@ export function createTopicOverview(context: TopicOverviewContext) {
                 t.topicRef,
                 "lgi-tm-tree-name",
                 {
-                  title: t.definitionText || t.displayName,
+                  title: t.displayName,
                   "aria-current":
                     context.state.topicRef === t.topicRef ? "page" : undefined,
+                  "aria-description": t.lifecycleState === "candidate" ? "候选方向" : undefined,
                   "data-tree-item": "",
                   "data-peek": peek,
                   "data-parent-ref": t.parentTopicRef || "",
                 } as ButtonAttrs,
-              )}
-              {t.lifecycleState === "candidate" ? (
-                <span className={cls("lgi-tm-candidate-dot")} title={"候选方向"}>{"候选"}</span>
-              ) : (
-                ""
               )}
               <span
                 className={cls("lgi-tm-num")}
@@ -832,6 +769,9 @@ export function createTopicOverview(context: TopicOverviewContext) {
     roots.forEach((t) => optionBranch(t));
     const current = roots.filter((t) => !legacyConcept(t));
     const visible = current.filter((t) => !q || subtreeHit(t));
+    const parentRefs = new Set(topics.map((t) => t.parentTopicRef));
+    const groups = visible.filter((t) => parentRefs.has(t.topicRef));
+    const singles = visible.filter((t) => !parentRefs.has(t.topicRef));
     const legacy = roots.filter(legacyConcept).filter((t) => !q || subtreeHit(t));
     const hasParents = topics.some((t) => topics.some((c) => c.parentTopicRef === t.topicRef));
     return (
@@ -861,7 +801,7 @@ export function createTopicOverview(context: TopicOverviewContext) {
               "data-tree-item": "",
             } as ButtonAttrs)}
             <span className={cls("lgi-tm-num")}>
-              {number(context.snapshot?.scope?.totalWorkCount)}
+              {number(context.domainScope?.totalWorkCount)}
             </span>
           </div>
           <div className={cls("lgi-tm-tree-row lgi-tm-tree-unassigned")} style={inlineStyle("--lvl:2")}>
@@ -871,10 +811,10 @@ export function createTopicOverview(context: TopicOverviewContext) {
               "data-tree-item": "",
             } as ButtonAttrs)}
             <span className={cls("lgi-tm-num")}>
-              {number(context.snapshot?.scope?.unclassifiedWorkCount)}
+              {number(context.domainScope?.unclassifiedWorkCount)}
             </span>
           </div>
-          {visible.length ? (
+          {groups.length ? (
             <>
               <div className={cls("lgi-tm-tree-label")}>
                 <span>{"主题目录"}</span>
@@ -883,11 +823,17 @@ export function createTopicOverview(context: TopicOverviewContext) {
                   : <span></span>}
                 <span>{"作品"}</span>
               </div>
-              <ul>{visible.map((t) => branch(t, 1))}</ul>
+              <ul>{groups.map((t) => branch(t, 1))}</ul>
             </>
           ) : (
             ""
           )}
+          {singles.length ? (
+            <>
+              <div className={cls("lgi-tm-tree-label")}>独立主题</div>
+              <ul>{singles.map((t) => branch(t, 1))}</ul>
+            </>
+          ) : null}
           {legacy.length ? (
             <>
               <details
@@ -1135,13 +1081,17 @@ export function createTopicOverview(context: TopicOverviewContext) {
     );
   }
   function overview() {
+    const candidateCount = list(context.snapshot?.topics).filter(t => t.lifecycleState === "candidate").length;
     return (
       <>
         <div className={cls("lgi-tm-view-toolbar")}>
           <nav className={cls("lgi-tm-work-tabs")} aria-label={"概览工作视角"}>
-            {context.views.map(([id, name]) =>
-              tab(name, "tab", id, context.state.tab === id),
-            )}
+            {context.views.map(([id, name]) => id === "candidates" && candidateCount > 0
+              ? <Fragment key={id}>{btn(
+                  <>{name}<small className={cls("lgi-tm-tab-count")} aria-hidden="true">{number(candidateCount)}</small></>,
+                  "tab", id, "lgi-tm-tab", { "aria-pressed": context.state.tab === id },
+                )}</Fragment>
+              : <Fragment key={id}>{tab(name, "tab", id, context.state.tab === id)}</Fragment>)}
           </nav>
           <div className={cls("lgi-tm-work-side")}>
             {context.state.tab === "content" ? (

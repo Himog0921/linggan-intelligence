@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { requestJson } from '../../shared/api';
 import {
   bool,
@@ -98,7 +99,7 @@ function parse(value: unknown) {
     };
   });
 }
-export function OperatingDirections({ domain }: { domain: string }) {
+export function OperatingDirections({ domain, triggerContainer }: { domain: string; triggerContainer?: HTMLElement | null }) {
   const [editMappings, setEditMappings] = useState(false);
   const [editAuthors, setEditAuthors] = useState(false);
   const [authorQuery, setAuthorQuery] = useState('');
@@ -272,12 +273,14 @@ export function OperatingDirections({ domain }: { domain: string }) {
     setDraft({ ...draft, directions });
     setMessage('已将候选主题归入草案，可预览受影响作品。');
   }
-  if (!open)
-    return (
-      <button type="button" onClick={() => setOpen(true)}>
+  if (!open) {
+    const trigger = (
+      <button type="button" className={triggerContainer ? styles.contextTrigger : undefined} onClick={() => setOpen(true)}>
         查看运营方向
       </button>
     );
+    return triggerContainer ? createPortal(trigger, triggerContainer) : trigger;
+  }
   return (
     <section aria-label="运营方向" className={styles.panel}>
       <h2>运营方向</h2>

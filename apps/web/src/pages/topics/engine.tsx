@@ -224,6 +224,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
   let progressError = "",
     progressLoading = false,
     progressEpoch = 0;
+  let domainScope: { query: string; value: T.Snapshot["scope"] } | undefined;
   let snapshot: T.Snapshot | null = null,
     progress: TopicProgress | null = null,
     loading = false,
@@ -348,8 +349,8 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     get snapshot() {
       return snapshot;
     },
-    get discussionsView() {
-      return topicDialogs.discussionsView;
+    get domainScope() {
+      return domainScope?.query === query({ topicRef: "" }) ? domainScope.value : undefined;
     },
     get loading() {
       return loading;
@@ -527,6 +528,19 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     materialsLoading = false;
     materialsError = "";
     readError = "";
+    const scopeQuery = query({ topicRef: "" });
+    if (state.topicRef && (requireCurrent || domainScope?.query !== scopeQuery)) {
+      domainScope = undefined;
+      void request(`/api/local/topic-map/summary${requireCurrent ? "/current" : ""}?${scopeQuery}`, decodeSnapshot)
+        .then(({ scope }) => {
+          if (epoch !== fetchEpoch) return;
+          domainScope = { query: scopeQuery, value: scope };
+          render();
+        })
+        .catch(() => {
+          // A failed domain count remains unknown; the selected topic still loads.
+        });
+    }
     render();
     try {
       const result = await request(
@@ -552,6 +566,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
         return await load();
       }
       if (state.topicRef && !topic(state.topicRef)) state.topicRef = "";
+      if (!result.scope.topicRef) domainScope = { query: query({ topicRef: "" }), value: result.scope };
       persist(true);
       loading = false;
       materialsLoading = true;
@@ -571,6 +586,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
         throw new Error("材料读取合同不完整");
       // Replace the whole version if authority changed between the two reads.
       snapshot = materials;
+      if (!materials.scope.topicRef) domainScope = { query: query({ topicRef: "" }), value: materials.scope };
       materialsLoading = false;
     } catch (caughtError) {
       const error = caught(caughtError);
@@ -627,6 +643,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
           if (state.domainRef !== domain || disposed) return;
           if (owner?.type === "save" && payload.action === "saveAlternative")
             owner.savedAlternativeRef = result.subjectRef || undefined;
+          if (payload.action === "bindTopic") domainScope = undefined;
           await load();
           if (dialogState === owner && owner)
             dialogFeedback(`已保存 · 回执 ${result.receiptRef}`);
@@ -817,9 +834,9 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
           topicOverview.journey()
         )}
         <footer className={cls("lgi-tm-footer")}>
-          <span>{esc(snapshot.methodVersion || "方法尚未读取")}</span>
           <details>
             <summary>{"数据范围与来源边界"}</summary>
+            <p>{esc(snapshot.methodVersion || "方法尚未读取")}</p>
             {topicOverview.coverage()}
           </details>
         </footer>
@@ -2010,7 +2027,23 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
       return;
     }
     if (action === "unassigned") {
-      openDialog("materials", { unassigned: true });
+      if (!state.topicRef) {
+        openDialog("materials", { unassigned: true });
+        return;
+      }
+      const epoch = fetchEpoch;
+      try {
+        const domainSnapshot = await request(
+          `/api/local/topic-map/overview?${query({ topicRef: "" })}`, decodeSnapshot,
+        );
+        if (epoch === fetchEpoch)
+          openDialog("materials", { unassigned: true, snapshot: domainSnapshot });
+      } catch (error) {
+        if (epoch === fetchEpoch) {
+          notice = `未归类材料读取失败：${caught(error).message}`;
+          renderNotice();
+        }
+      }
       return;
     }
     if (action === "materials-more") {
@@ -2187,6 +2220,7 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
           decodeStructure,
           async (result) => {
             active.structureApplied = true;
+            domainScope = undefined;
             await load();
             if (dialogState === active)
               dialogFeedback(
@@ -2546,6 +2580,12 @@ export function createTopicEngine(navigate: (path: string) => void = path => win
     getContextActions: () => (
       <>
         {mutationRetry()}
+        {state.topicRef && snapshot ? (
+          <>
+            {btn("定义与依据", "definition", state.topicRef, "lgi-tm-quiet")}
+            {btn("判断这个方向", "judge", state.topicRef, "lgi-tm-quiet")}
+          </>
+        ) : null}
         {btn(
           "我的备选",
           "saved",

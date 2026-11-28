@@ -1,6 +1,6 @@
 import { Fragment, type ReactNode } from "react";
-import { number, pct, platformName, readoutNumber } from "./topicModel";
-import type { Snapshot, Statistics } from "./types";
+import { known, number, pct, platformName, readoutNumber } from "./topicModel";
+import type { Snapshot, Statistics, Work } from "./types";
 import s from "./Overview.module.css";
 
 /**
@@ -37,10 +37,14 @@ function Readout({
 export function OverviewReadouts({
   statistics: stats,
   scope,
+  domainScope,
+  works = [],
   controls,
 }: {
   statistics: Statistics;
   scope: Snapshot["scope"];
+  domainScope?: Snapshot["scope"];
+  works?: readonly Work[];
   controls?: ReactNode;
 }) {
   const platforms = stats.platforms.filter((p) => p.workCount !== 0);
@@ -50,28 +54,44 @@ export function OverviewReadouts({
       <div className={s.metrics}>
         <Readout label="观察到的内容" drill
           value={readoutNumber(stats.workCount)} valueText={number(stats.workCount)} unit="篇"
-          detail={<><span>可读 <b>{number(scope.readableWorkCount)}</b></span></>}
+          detail={scope.topicRef ? (
+            <span>占全部方向 <b>{pct(stats.workCount, domainScope?.totalWorkCount ?? null)}</b></span>
+          ) : (
+            <span>可读 <b>{number(scope.readableWorkCount)}</b> · 未归类 <b>{number(scope.unclassifiedWorkCount)}</b>
+              <button className={s.detailAction} type="button" data-action="unassigned">查看</button>
+            </span>
+          )}
         />
         <Readout label="已观察创作者"
           value={readoutNumber(stats.authorCount)} unit="位"
           detail={<span>身份未知 <b>{number(stats.unknownAuthorCount)}</b> 篇</span>}
         />
-        {platforms.map((p) => (
+        {platforms.map((p) => {
+          const unknown = works.filter(w => w.platform === p.platform && !known(w.likes));
+          const unknownLabel = <>未知 <b>{readoutNumber(p.unknownLikeCount)}</b> 篇</>;
+          return (
           <Fragment key={p.platform}>
             <Readout
-              label={(multiple ? platformName(p.platform) + " · " : "") + "样本爆款率"}
+              label={(multiple ? platformName(p.platform) + " · " : "") + "样本高表现率"}
               value={p.highPerformanceThreshold == null ? "未设置" : pct(p.highPerformanceCount, p.knownLikeCount)}
-              detail={<><span>达标 <b>{p.highPerformanceThreshold == null ? "—" : readoutNumber(p.highPerformanceCount)}</b></span><span>可判定 <b>{readoutNumber(p.knownLikeCount)}</b></span>
+              detail={<><span>达标 <b>{p.highPerformanceThreshold == null ? "—" : readoutNumber(p.highPerformanceCount)}</b> / 可判定 <b>{readoutNumber(p.knownLikeCount)}</b></span>
                 <span className={s.visuallyHidden}>{p.highPerformanceThreshold == null ? "样本爆款规则未设置" : "样本爆款：点赞 ≥ " + number(p.highPerformanceThreshold)}</span>
               </>}
             />
             <Readout
               label={(multiple ? platformName(p.platform) + " · " : "") + "点赞中位数"}
               value={readoutNumber(p.medianLikes)}
-              detail={<><span>P90 <b>{readoutNumber(p.p90Likes)}</b></span><span>点赞未知 <b>{readoutNumber(p.unknownLikeCount)}</b> 篇</span></>}
+              detail={<span>P90 <b>{readoutNumber(p.p90Likes)}</b> · {unknown.length ? (
+                <button type="button" className={s.detailLink}
+                  data-action="subset" data-id={unknown.map(w => w.workRef).join(",")}
+                  aria-label={`查看已载入的点赞未知材料，${number(unknown.length)} 篇`}>
+                  {unknownLabel}
+                </button>
+              ) : unknownLabel}</span>}
             />
           </Fragment>
-        ))}
+          );
+        })}
       </div>
       {platforms.length === 0 ? (
         <div className={s.noPlatform}>当前范围暂无可判定的平台表现，已有材料仍可阅读。</div>

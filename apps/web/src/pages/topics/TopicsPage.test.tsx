@@ -80,6 +80,10 @@ describe("Topic React interaction and lifetime", () => {
     const band = screen.getByLabelText("主题概览与样本表现");
     expect(within(band).getByLabelText("基础概览指标")).toBeInTheDocument();
     expect(within(band).getByLabelText("已观察内容点赞分布")).toBeInTheDocument();
+    expect(screen.queryByLabelText("主题处理与运营状态")).not.toBeInTheDocument();
+    expect(screen.queryByText("材料准备", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("内容理解", { exact: true })).not.toBeInTheDocument();
+    expect(screen.queryByText("主题归属", { exact: true })).not.toBeInTheDocument();
     const region = document.querySelector("#topic-map-root");
     expect(region?.querySelector(".lgi-tm-material-insights")).toBeNull();
     await userEvent.click(within(views).getByRole("button", { name: "用户生命旅程" }));
@@ -91,6 +95,25 @@ describe("Topic React interaction and lifetime", () => {
     expect(screen.getByRole("searchbox", { name: "查找材料与方向" })).toBeInTheDocument();
     await userEvent.click(within(journeyViews).getByRole("button", { name: "主题概览" }));
     await waitFor(() => expect(document.querySelector("#topic-map-root")).toHaveAttribute("data-view", "overview"));
+  });
+  it("reads the domain-wide tree counts on a selected-topic link", async () => {
+    window.history.replaceState(null, "", `/topics?tm=1&domainRef=${topicDomain}&topicRef=${topicRef}`);
+    const domainSnapshot = topicSnapshot();
+    domainSnapshot.scope.totalWorkCount = 80;
+    domainSnapshot.scope.unclassifiedWorkCount = 45;
+    const selectedSnapshot = topicSnapshot();
+    selectedSnapshot.scope.topicRef = topicRef;
+    vi.stubGlobal("fetch", vi.fn(async (path: string) => jsonResponse(
+      /\/(summary|overview)\?/.test(path)
+        ? (path.includes("topicRef=") ? selectedSnapshot : domainSnapshot)
+        : defaultRead(path),
+    )));
+    page();
+    await screen.findByRole("heading", { name: "合成主题" });
+    const tree = within(screen.getByLabelText("稳定主题结构"));
+    expect(await tree.findByText("80")).toBeInTheDocument();
+    expect(tree.getByText("45")).toBeInTheDocument();
+    expect(screen.getByLabelText("基础概览指标")).toHaveTextContent("占全部方向 2.5%");
   });
   it("keeps keyboard focus on a topic when its children collapse and expand", async () => {
     const snapshot = topicSnapshot();
